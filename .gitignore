@@ -1,0 +1,78 @@
+# ============================================================================
+# srcradar .gitignore
+#
+# 这个仓只跟踪 srcradar 自己写的编排层代码,不跟踪 upstream fork。
+# 上游依赖(ENScan_GO / httpx / dnsx)在 ./init.sh 时拉取,不进 git。
+# 详见 README §Quick start。
+# ============================================================================
+
+# ---- 1. Upstream fork 目录(关键!方案 C:不进 git) ----
+# 这三个目录是上游项目的 fork,有完整 .git 历史;srcradar 主仓只引用它们。
+# - ENScan_GO:        github.com/wgpsec/ENScan_GO
+# - pdtm/httpx:       github.com/projectdiscovery/httpx  (带本仓 patch)
+# - pdtm/dnsx:        github.com/projectdiscovery/dnsx   (带本仓 patch)
+ENScan_GO/
+pdtm/httpx/
+pdtm/dnsx/
+
+# ---- 2. 运行时产物 ----
+# SQLite 数据库(运行后生成,内部含业务数据,不应入库)
+db/*.sqlite3
+db/*.sqlite3-journal
+db/*.sqlite3-wal
+db/*.sqlite3-shm
+db/recon.sqlite3*
+
+# DNSlog / cookie / token 等凭据与运行时缓存
+cookie.log
+.env
+.env.*
+*.local.yaml
+*.local.yml
+
+# 扫描输出 / 日志 / snapshot
+scan_results/
+scan_outputs/
+logs/
+*.log
+daily/reports/
+daily/snapshots/2*.json
+daily/.lock
+db_align/logs/
+db_align/.claude/
+
+# Go 构建产物
+**/*.test
+**/*.out
+bin/
+*.exe
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# 编辑器/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 临时 / 备份
+*.bak
+*.orig
+*.rej
+*.tmp
+.tmp/
+
+# Hermes 本地(skill/plans/agent 配置)
+.hermes/
+
+# ---- 3. 上游依赖管理 ----
+# init.sh 拉取后的 vendor 目录(若用户选择 vendor 模式)
+.vendor/

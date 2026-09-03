@@ -1,0 +1,76 @@
+srcradar
+Copyright 2026 srcradar contributors
+
+This product includes software developed by third parties:
+
+================================================================================
+ProjectDiscovery toolchain (https://github.com/projectdiscovery)
+================================================================================
+This product includes software developed by ProjectDiscovery, Inc.
+(https://projectdiscovery.io). All ProjectDiscovery tools used by srcradar are
+licensed under the MIT License (© 2021-2025 ProjectDiscovery, Inc.):
+
+  - pdtm        (https://github.com/projectdiscovery/pdtm)       — MIT
+  - dnsx        (https://github.com/projectdiscovery/dnsx)       — MIT
+  - httpx       (https://github.com/projectdiscovery/httpx)      — MIT
+  - subfinder   (https://github.com/projectdiscovery/subfinder)  — MIT
+  - alterx      (https://github.com/projectdiscovery/alterx)     — MIT
+  - naabu       (https://github.com/projectdiscovery/naabu)      — MIT
+  - cdncheck    (https://github.com/projectdiscovery/cdncheck)   — MIT
+                (consumed indirectly via srcradar's pdtm/cdnmatch wrapper;
+                 no source modifications are made)
+
+================================================================================
+ENScan_GO (https://github.com/mssky9527/ENScan_GO)
+================================================================================
+This product includes ENScan_GO, originally developed by keac @ wgpsec
+(https://github.com/wgpsec/ENScan_GO, archived; current fork:
+https://github.com/mssky9527/ENScan_GO). ENScan_GO is licensed under the
+Apache License, Version 2.0 (© 2023-2026 keac @ wgpsec).
+
+srcradar pins to upstream tag ENScan_GO_TAG=v1.4.0 (see install.sh).
+
+================================================================================
+ffuf / gau
+================================================================================
+This product references the following MIT-licensed utilities (consumed as
+external binaries, no source modifications):
+
+  - ffuf        (https://github.com/ffuf/ffuf)        — MIT
+                Copyright (c) 2021 Joona Hoikkala
+  - gau         (https://github.com/lc/gau)            — MIT
+                Copyright (c) 2025 Corben Leo
+  - URLFinder   (https://github.com/pingc0y/URLFinder) — MIT
+                Copyright (c) 2022 pingc0y
+
+================================================================================
+modernc.org/sqlite
+================================================================================
+This product includes the modernc.org/sqlite Go module (pure-Go SQLite
+implementation used by db_align). Licensed under the BSD-3-Clause License
+(© The modernc.org/sqlite authors). See https://pkg.go.dev/mod/modernc.org/sqlite
+for the full license text.
+
+================================================================================
+Third-party service: ymicp / ICP_Query
+================================================================================
+The ymicp/ directory of srcradar contains ONLY a Python HTTP client
+(icp_mapp_query.py) that talks to a third-party service. The service itself is
+NOT redistributed, NOT endorsed, and NOT affiliated with srcradar. See
+ymicp/README.md §"第三方依赖声明" for details.
+
+The original ICP_Query project (https://github.com/HG-ha/ICP_Query) has not
+declared a license; srcradar recommends users self-host or replace with a
+public ICP query API before any production use.
+
+================================================================================
+Trademarks
+================================================================================
+"ProjectDiscovery" is a trademark of ProjectDiscovery, Inc.
+"ENScan_GO", "ffuf", "gau", "URLFinder" are the names of their respective
+upstream projects and are used here solely as factual references.
+This NOTICE does not grant any right to use any contributor's trademarks.
+
+================================================================================
+Full upstream list with roles: see README.md §"三点五、上游致谢与 License".
+================================================================================
