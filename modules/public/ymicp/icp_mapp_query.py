@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "db/recon.sqlite3"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "main" / "db" / "recon.sqlite3"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS businesses (

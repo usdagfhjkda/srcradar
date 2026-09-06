@@ -16,8 +16,8 @@
 
 set -euo pipefail
 
-RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DB="${RECON_DB:-$RECON_ROOT/db/recon.sqlite3}"
+RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DB="${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}"
 
 NAME=""
 ENABLE_FLAG=""   # "", "enable", "disable"

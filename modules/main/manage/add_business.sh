@@ -36,8 +36,8 @@
 
 set -euo pipefail
 
-RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DB="${RECON_DB:-$RECON_ROOT/db/recon.sqlite3}"
+RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DB="${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}"
 
 NAME=""
 SEED=""
@@ -146,13 +146,13 @@ if [ -n "$INPUT_DIR" ]; then
     [ -d "$INPUT_DIR" ]   || { echo "[-i] input dir not found: $INPUT_DIR" >&2; exit 1; }
     [ -f "$INPUT_DIR/target.txt" ] || { echo "[-i] $INPUT_DIR 缺少 target.txt" >&2; exit 1; }
     echo "[add_biz] step 4: scope_import"
-    "$RECON_ROOT/pdtm/scope_import.sh" -b "$NAME" -i "$INPUT_DIR" -d "$DB"
+    "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$INPUT_DIR" -d "$DB"
 fi
 
 cat <<EOF
 
 [add_biz] done.
   next:
-    cd $RECON_ROOT/db_align && ./bin/db_align -n '$NAME' -all
+    cd $RECON_ROOT/public/db_align && ./bin/db_align -n '$NAME' -all
     (拉控股树 + ICP / 公众号 / 小程序; 可能耗时较长, 注意 AQC 风控)
 EOF

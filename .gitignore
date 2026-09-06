@@ -1,27 +1,31 @@
 # ============================================================================
 # srcradar .gitignore
 #
-# 这个仓只跟踪 srcradar 自己写的编排层代码,不跟踪 upstream fork。
-# 上游依赖(ENScan_GO / httpx / dnsx)在 ./init.sh 时拉取,不进 git。
-# 详见 README §Quick start。
+# 重构后布局:
+#   - 入口脚本在根 (init.sh / install.sh / install-internal.sh / check.sh)
+#   - 代码全部入 modules/{main, public, private}/
+#   - main 模块必装: pdtm/daily/manage/db
+#   - public 模块选装: db_align/ymicp
+#   - private 模块: 现阶段占位 (.gitkeep),未来装内部模块
+#
+# 上游 fork (projectdiscovery/cdncheck, wgpsec/ENScan_GO) 由对应模块的
+# install.sh 拉取,不入 git。
 # ============================================================================
 
-# ---- 1. Upstream fork 目录(关键!方案 C:不进 git) ----
-# 这三个目录是上游项目的 fork,有完整 .git 历史;srcradar 主仓只引用它们。
-# - ENScan_GO:        github.com/wgpsec/ENScan_GO
-# - pdtm/httpx:       github.com/projectdiscovery/httpx  (带本仓 patch)
-# - pdtm/dnsx:        github.com/projectdiscovery/dnsx   (带本仓 patch)
-ENScan_GO/
-pdtm/httpx/
-pdtm/dnsx/
+# ---- 1. 上游 fork(vendor)目录:不进 git ----
+# db_align 的 vendor: ENScan_GO
+modules/public/db_align/ENScan_GO/
+
+# pdtm 的 vendor: cdncheck(本仓 in-tree,go.mod replace 指向 ../cdncheck)
+modules/main/pdtm/cdncheck/
 
 # ---- 2. 运行时产物 ----
 # SQLite 数据库(运行后生成,内部含业务数据,不应入库)
-db/*.sqlite3
-db/*.sqlite3-journal
-db/*.sqlite3-wal
-db/*.sqlite3-shm
-db/recon.sqlite3*
+modules/main/db/*.sqlite3
+modules/main/db/*.sqlite3-journal
+modules/main/db/*.sqlite3-wal
+modules/main/db/*.sqlite3-shm
+modules/main/db/recon.sqlite3*
 
 # DNSlog / cookie / token 等凭据与运行时缓存
 cookie.log
@@ -35,16 +39,19 @@ scan_results/
 scan_outputs/
 logs/
 *.log
-daily/reports/
-daily/snapshots/2*.json
-daily/.lock
-db_align/logs/
-db_align/.claude/
+modules/main/daily/reports/
+modules/main/daily/snapshots/2*.json
+modules/main/daily/.lock
+modules/main/daily/logs/
+modules/public/db_align/logs/
+modules/public/db_align/.claude/
 
 # Go 构建产物
 **/*.test
 **/*.out
-bin/
+modules/main/pdtm/bin/
+modules/public/db_align/bin/
+modules/public/db_align/ENScan_GO/ENScan
 *.exe
 
 # Python 缓存
@@ -55,7 +62,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
-# 编辑器/IDE
+# 编辑器 / IDE
 .vscode/
 .idea/
 *.swp
@@ -73,6 +80,9 @@ __pycache__/
 # Hermes 本地(skill/plans/agent 配置)
 .hermes/
 
-# ---- 3. 上游依赖管理 ----
-# init.sh 拉取后的 vendor 目录(若用户选择 vendor 模式)
+# ---- 3. 私有模块目录(未来内部使用,现阶段只留 .gitkeep) ----
+modules/private/*
+!modules/private/.gitkeep
+
+# ---- 4. 上游依赖管理 ----
 .vendor/

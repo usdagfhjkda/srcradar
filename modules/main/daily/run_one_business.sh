@@ -109,12 +109,12 @@ if [ $# -lt 1 ]; then
 fi
 
 BIZ="$1"
-RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DAILY="$RECON_ROOT/daily"
-PDTM="$RECON_ROOT/pdtm"
-DBALIGN="$RECON_ROOT/db_align"
-YMICP="$RECON_ROOT/ymicp"
-DB="$RECON_ROOT/db/recon.sqlite3"
+RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DAILY="$RECON_ROOT/main/daily"
+PDTM="$RECON_ROOT/main/pdtm"
+DBALIGN="$RECON_ROOT/public/db_align"
+YMICP="$RECON_ROOT/public/ymicp"
+DB="$RECON_ROOT/main/db/recon.sqlite3"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] [run_one] $*" >&2; }

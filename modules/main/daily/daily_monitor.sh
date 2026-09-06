@@ -30,9 +30,9 @@
 set -u
 set -o pipefail
 
-RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DAILY="$RECON_ROOT/daily"
-DB="$RECON_ROOT/db/recon.sqlite3"
+RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DAILY="$RECON_ROOT/main/daily"
+DB="$RECON_ROOT/main/db/recon.sqlite3"
 
 RUN_ID="${RUN_ID:-$(date '+%Y%m%d-%H%M%S')}"
 LOG_FILE="$DAILY/logs/${RUN_ID}.log"
