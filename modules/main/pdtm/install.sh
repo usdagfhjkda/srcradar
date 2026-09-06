@@ -31,7 +31,7 @@ warn() { printf '[pdtm][warn] %s\n' "$*" >&2; }
 err()  { printf '[pdtm][err]  %s\n' "$*" >&2; }
 
 usage() {
-    sed -n '2,15p' "$0"
+    sed -n '2,15p' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
 # ---- 检查 go 在 PATH(并尝试常见漏报路径) ----

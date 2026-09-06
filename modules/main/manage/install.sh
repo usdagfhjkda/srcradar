@@ -24,7 +24,7 @@ warn() { printf "[manage][warn] %s\n" "$*" >&2; }
 err()  { printf "[manage][err]  %s\n" "$*" >&2; }
 
 usage() {
-    sed -n "2,13p" "$0"
+    sed -n "2,13p" "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
 # ---- 检查 ----

@@ -25,7 +25,7 @@ warn() { printf "[daily][warn] %s\n" "$*" >&2; }
 err()  { printf "[daily][err]  %s\n" "$*" >&2; }
 
 usage() {
-    sed -n "2,15p" "$0"
+    sed -n "2,15p" "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
 # ---- 依赖检查 ----

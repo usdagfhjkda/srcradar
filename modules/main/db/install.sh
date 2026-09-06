@@ -30,7 +30,7 @@ warn() { printf "[db][warn] %s\n" "$*" >&2; }
 err()  { printf "[db][err]  %s\n" "$*" >&2; }
 
 usage() {
-    sed -n "2,17p" "$0"
+    sed -n "2,17p" "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
 check_deps() {

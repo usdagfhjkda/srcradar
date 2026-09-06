@@ -37,7 +37,7 @@ warn() { printf "[db_align][warn] %s\n" "$*" >&2; }
 err()  { printf "[db_align][err]  %s\n" "$*" >&2; }
 
 usage() {
-    sed -n "2,18p" "$0"
+    sed -n "2,18p" "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
 check_deps() {
