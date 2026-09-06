@@ -2,7 +2,7 @@
 # srcradar .gitignore
 #
 # 重构后布局:
-#   - 入口脚本在根 (init.sh / install.sh / install-internal.sh / check.sh)
+#   - 入口脚本在根 (init.sh / install.sh / check.sh)
 #   - 代码全部入 modules/{main, public, private}/
 #   - main 模块必装: pdtm/daily/manage/db
 #   - public 模块选装: db_align/ymicp
@@ -86,3 +86,8 @@ modules/private/*
 
 # ---- 4. 上游依赖管理 ----
 .vendor/
+
+# ---- 5. 内部使用脚本(不进 OSS) ----
+# install-internal.sh 是内部部署用脚本,public 版本用 install.sh 即可。
+# 保留本地副本(用于内部机器部署),但不入仓。
+install-internal.sh
