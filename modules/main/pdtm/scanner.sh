@@ -19,6 +19,10 @@
 # pdtm 工具路径硬编码(由 pdtm 自管;Ubuntu .bashrc 头部 case $- 早 return,
 #  source ~/.bashrc 进不去后面的 export,直接硬编码最可靠)
 export PATH="$PATH:$HOME/.pdtm/go/bin"
+source "$(cd "$(dirname "$0")" && pwd)/../lib/load_config.sh"
+load_config_set "$(cd "$(dirname "$0")" && pwd)/../../../config/pdtm.conf" "$(cd "$(dirname "$0")" && pwd)/../lib"
+
+
 
 set -e
 

@@ -91,3 +91,7 @@ modules/private/*
 # install-internal.sh 是内部部署用脚本,public 版本用 install.sh 即可。
 # 保留本地副本(用于内部机器部署),但不入仓。
 install-internal.sh
+
+# ---- 6. config 目录(本地工作树配置,不入 OSS)----
+config/*
+!config/.gitkeep
