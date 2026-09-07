@@ -17,14 +17,19 @@
 #
 set -euo pipefail
 
+# ---- 加载 config/pdtm.conf(优先级: env > config > 脚本默认值) ----
+SCRIPT_DIR_CW="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR_CW/../lib/load_config.sh"
+load_config_set "$SCRIPT_DIR_CW/../../../config/pdtm.conf" "$SCRIPT_DIR_CW/../lib"
+
 # ---- 配置 ----
 INPUT="${1:-/dev/stdin}"
 WILDCARD_OUT="wildcard.txt"
 NORMAL_OUT="no_wildcard.txt"
 # 解析器来源与 ./resolvers 文件保持一致(见 README §八-11)
-RESOLVERS_FILE="${RESOLVERS_FILE:-resolvers}"
-RESOLVERS="$(tr '\n' ',' < "$RESOLVERS_FILE" | sed 's/,$//')"
-[ -z "$RESOLVERS" ] && { echo "[-] 错误: $RESOLVERS_FILE 文件为空或不可读" >&2; exit 1; }
+resolvers_file="${resolvers_file:-resolvers}"
+RESOLVERS="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
+[ -z "$RESOLVERS" ] && { echo "[-] 错误: $resolvers_file 文件为空或不可读" >&2; exit 1; }
 PROBES=3
 
 # ---- 依赖检查 ----

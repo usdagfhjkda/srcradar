@@ -20,11 +20,11 @@ load_config_set "$(cd "$(dirname "$0")" && pwd)/../../../config/pdtm.conf" "$(cd
 set -euo pipefail
 
 # ===== 配置 =====
-# 单一事实源:`./resolvers` 文件。subfinder 走 RESOLVERS_FILE,其它走 RESOLVERS_CSV。
+# 单一事实源:`./resolvers` 文件。subfinder 走 resolvers_file,其它走 RESOLVERS_CSV。
 # 见 README §八-11 跨工具陷阱矩阵 (cdncheck=-file 坑,subfinder=-csv 坑)。
-RESOLVERS_FILE="${RESOLVERS_FILE:-resolvers}"
-RESOLVERS_CSV="$(tr '\n' ',' < "$RESOLVERS_FILE" | sed 's/,$//')"
-[ -z "$RESOLVERS_CSV" ] && { echo "[-] 错误: $RESOLVERS_FILE 文件为空或不可读" >&2; exit 1; }
+resolvers_file="${resolvers_file:-resolvers}"
+RESOLVERS_CSV="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
+[ -z "$RESOLVERS_CSV" ] && { echo "[-] 错误: $resolvers_file 文件为空或不可读" >&2; exit 1; }
 TARGET="target.txt"
 EXCLUDE="exclude.txt"
 ALIVE="alive.txt"
@@ -149,7 +149,7 @@ trap '[ -n "$ALTERX_TMPDIR" ] && rm -rf "$ALTERX_TMPDIR"; rm -f "$SUBS_TMP" "$SU
 
 while IFS= read -r base; do
     [ -z "$base" ] && continue
-    subfinder -d "$base" -silent -r "$RESOLVERS_FILE" 2>/dev/null >> "$SUBS_TMP" || true
+    subfinder -d "$base" -silent -r "$resolvers_file" 2>/dev/null >> "$SUBS_TMP" || true
 done <<< "$BASES"
 
 # 已知子域(原 target 行, 跳过含 * 的模式行 —— 它们是 glob pattern, 不是真实 host)
@@ -345,7 +345,7 @@ if [ -s wildcard.txt ]; then
     echo "[*] wildcard -> subfinder (按 base 去重) ..."
     WILDCARD_BASES=$(python3 target_glob.py all-bases --input wildcard.txt || true)
     if [ -n "$WILDCARD_BASES" ]; then
-        echo "$WILDCARD_BASES" | subfinder -silent -r "$RESOLVERS_FILE" | \
+        echo "$WILDCARD_BASES" | subfinder -silent -r "$resolvers_file" | \
             grep -E -f targets.regex | \
             grep -v -E -f excludes.regex \
             >> "$DNSX_OUT" || true

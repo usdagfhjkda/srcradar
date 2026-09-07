@@ -34,7 +34,7 @@ set -e
 #   形式也安全,CSV 排首位)。
 #
 # subfinder 走 file 形式,只在本仓库 scan.sh / pipeline.sh 调用,
-# 这两个脚本里有独立的 RESOLVERS_FILE / RESOLVERS_CSV 派生。
+# 这两个脚本里有独立的 resolvers_file / RESOLVERS_CSV 派生。
 #
 # 陷阱:
 #   - cdncheck 的 -r 把文件名当主机名 → 0 输出。本脚本不再调 cdncheck 二进制
@@ -42,10 +42,10 @@ set -e
 #   - subfinder 反向:接受 file 但 CSV 静默失 0 命中。
 #   - resolvers 文件按延迟高低排序(快 -> 慢),见仓库 pdtm/resolvers 文件本身。
 # ==============================================================================
-RESOLVERS_FILE="${RESOLVERS_FILE:-resolvers}"
+resolvers_file="${resolvers_file:-resolvers}"
 # 从文件派生出 CSV(改 resolvers 文件,这里的 CSV 自动跟随)
-RESOLVERS="$(tr '\n' ',' < "$RESOLVERS_FILE" | sed 's/,$//')"
-[ -z "$RESOLVERS" ] && { echo "[-] 错误: $RESOLVERS_FILE 文件为空或读不出" >&2; exit 1; }
+RESOLVERS="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
+[ -z "$RESOLVERS" ] && { echo "[-] 错误: $resolvers_file 文件为空或读不出" >&2; exit 1; }
 
 OUTPUT_DIR="./scan_results"
 DNSX_INPUT_RAW="./dnsx_output.txt"
