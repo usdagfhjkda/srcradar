@@ -98,6 +98,12 @@ def parse_args() -> argparse.Namespace:
                    help="每个 ymicp 请求之间的间隔秒数（默认 30.0）")
     p.add_argument("--json", action="store_true",
                    help="额外打印最后一页原始 JSON（中文）到 stderr")
+    p.add_argument("--endpoint", choices=("mapp", "web"), default="mapp",
+                   help="ymicp 接口: mapp=小程序/公众号备案 (写 mapp_records), "
+                        "web=网站备案 (不写库, 用 --out-domains 输出域名)")
+    p.add_argument("--out-domains", metavar="FILE",
+                   help="仅 --endpoint web: 把每条记录的 domain 字段去重后写 FILE "
+                        "(一行一个, 末尾换行); 不写 SQLite")
     return p.parse_args()
 
 
@@ -105,6 +111,16 @@ def fetch_mapp(base: str, name: str, page_num: int, page_size: int,
                auth: tuple, timeout: int = 30) -> Dict[str, Any]:
     """调 ymicp /query/mapp，返回原始 JSON。"""
     url = f"{base.rstrip('/')}/query/mapp"
+    params = {"search": name, "pageNum": page_num, "pageSize": page_size}
+    r = requests.get(url, params=params, auth=auth, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def fetch_web(base: str, name: str, page_num: int, page_size: int,
+              auth: tuple, timeout: int = 30) -> Dict[str, Any]:
+    """调 ymicp /query/web (网站备案), 返回原始 JSON."""
+    url = f"{base.rstrip('/')}/query/web"
     params = {"search": name, "pageNum": page_num, "pageSize": page_size}
     r = requests.get(url, params=params, auth=auth, timeout=timeout)
     r.raise_for_status()
@@ -457,9 +473,14 @@ def main() -> int:
 
             while True:
                 try:
-                    payload = fetch_mapp(
-                        args.base, name, page_num, args.page_size, auth
-                    )
+                    if args.endpoint == "web":
+                        payload = fetch_web(
+                            args.base, name, page_num, args.page_size, auth
+                        )
+                    else:
+                        payload = fetch_mapp(
+                            args.base, name, page_num, args.page_size, auth
+                        )
                 except requests.HTTPError as error:
                     print(f"HTTP 错误：{error}", file=sys.stderr)
                     query_complete = False
@@ -534,6 +555,25 @@ def main() -> int:
     finally:
         if conn is not None:
             conn.close()
+
+    # --endpoint web + --out-domains: 抽所有 record.domain 去重写文件 (不写 SQLite)
+    if args.endpoint == "web" and args.out_domains:
+        seen = set()
+        ordered = []
+        for records in [all_records]:  # 复用 main loop 里的累计变量
+            for rec in records:
+                d = (rec.get("domain") or "").strip().lower().rstrip(".")
+                if not d or "." not in d or any(c.isspace() for c in d):
+                    continue
+                if d not in seen:
+                    seen.add(d)
+                    ordered.append(d)
+        if ordered:
+            from pathlib import Path
+            Path(args.out_domains).write_text("\n".join(ordered) + "\n", encoding="utf-8")
+            print(f"[--out-domains] wrote {len(ordered)} unique domains to {args.out_domains}")
+        else:
+            print(f"[--out-domains] 0 valid domains to write")
 
     return 1 if had_error else 0
 

@@ -6,6 +6,10 @@
 #   ./manage/add_business.sh -n <业务名>
 #                            [--enabled 0|1] [--web 0|1] [--tcp 0|1] [--icp 0|1]
 #                            [-s <seed.tsv>] [-i <input_dir>] [-d <db>]
+#                            [--auto] [--ymicp-base URL] [--ymicp-user U]
+#                            [--ymicp-pass P] [--ymicp-pages N]
+#
+# --auto 与 -i 互斥 (auto 内部生成 target.txt 并自动入 scopes)
 #
 # 默认 config: enabled=1, web=1, tcp=0, icp=1
 #
@@ -36,6 +40,11 @@
 
 set -euo pipefail
 
+# pdtm 工具路径硬编码 (与 scan.sh 一致: Ubuntu .bashrc 头部 case $- 早 return,
+#  source ~/.bashrc 进不去后面的 export, 直接硬编码最可靠).
+# --auto 走 scope_import → check_wildcard.sh 需要 dnsx, 故设 PATH.
+export PATH="$PATH:$HOME/.pdtm/go/bin"
+
 RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DB="${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}"
 
@@ -46,6 +55,14 @@ ENABLED=1
 WEB=1
 TCP=0
 ICP=1
+
+# --auto: ymicp 前置 (搜业务名 → 写 mapp_records → 拉 domain 写 target.txt → 入库)
+AUTO=0
+AUTO_INPUT_DIR=""
+YMICP_BASE="http://127.0.0.1:16181"
+YMICP_USER="${YMICP_USER:-admin}"
+YMICP_PASS="${YMICP_PASS:-}"
+YMICP_PAGES=1
 
 usage() {
     sed -n '2,16p' "$0"
@@ -65,6 +82,11 @@ while [ $# -gt 0 ]; do
         -s|--seed)    SEED="$2"; shift 2 ;;
         -i|--input)   INPUT_DIR="$2"; shift 2 ;;
         -d|--db)      DB="$2"; shift 2 ;;
+        --auto)       AUTO=1; shift ;;
+        --ymicp-base) YMICP_BASE="$2"; shift 2 ;;
+        --ymicp-user) YMICP_USER="$2"; shift 2 ;;
+        --ymicp-pass) YMICP_PASS="$2"; shift 2 ;;
+        --ymicp-pages) YMICP_PAGES="$2"; shift 2 ;;
         --enabled)    check_01 "$1" "$2"; ENABLED="$2"; shift 2 ;;
         --web)        check_01 "$1" "$2"; WEB="$2";     shift 2 ;;
         --tcp)        check_01 "$1" "$2"; TCP="$2";     shift 2 ;;
@@ -76,6 +98,9 @@ done
 
 [ -n "$NAME" ] || { echo "[-n <业务名>] is required" >&2; usage 1; }
 [ -f "$DB" ]  || { echo "[-d] db not found: $DB" >&2; exit 1; }
+if [ "$AUTO" = "1" ] && [ -n "$INPUT_DIR" ]; then
+    echo "[--auto] 与 [-i/--input] 互斥, 只能用一个" >&2; exit 1
+fi
 
 # ---- step 1+2: business row + config bootstrap ----
 read -r BID CUR_ENABLED CUR_WEB CUR_TCP CUR_ICP < <(python3 - "$DB" "$NAME" "$ENABLED" "$WEB" "$TCP" "$ICP" <<'PY'
@@ -141,12 +166,58 @@ print(f"[seed] inserted={ok} skip={skip} fail={fail}")
 PY
 fi
 
+# ---- step 3.5: --auto 前置 (ymicp /query/web → target.txt → 入库) ----
+if [ "$AUTO" = "1" ]; then
+    YMICP_SCRIPT="$RECON_ROOT/public/ymicp/icp_mapp_query.py"
+    [ -f "$YMICP_SCRIPT" ] || { echo "[--auto] 缺少 icp_mapp_query.py: $YMICP_SCRIPT" >&2; exit 1; }
+
+    AUTO_INPUT_DIR="$(mktemp -d)"
+    AUTO_TARGET="$AUTO_INPUT_DIR/target.txt"
+    trap 'rm -rf "$AUTO_INPUT_DIR"' EXIT
+
+    echo "[add_biz] step 3.5: ymicp /query/web 搜 '$NAME' (base=$YMICP_BASE, pages=$YMICP_PAGES)"
+
+    # icp_mapp_query.py --endpoint web --out-domains <file>:
+    #   - 调 /query/web (网站备案, 不是小程序 /query/mapp)
+    #   - 抽每条记录的 domain 字段去重, 写 <file>
+    #   - 不写 mapp_records (web 备案与 mapp_records 表语义不符)
+    YMICP_ARGS=(--endpoint web --out-domains "$AUTO_TARGET"
+                --base "$YMICP_BASE" --user "$YMICP_USER"
+                --pages "$YMICP_PAGES"
+                --db "$DB")
+    [ -n "$YMICP_PASS" ] && YMICP_ARGS+=(--pass "$YMICP_PASS")
+
+    if ! printf '%s\n' "$NAME" | python3 "$YMICP_SCRIPT" "${YMICP_ARGS[@]}"; then
+        rc=$?
+        echo "[--auto] icp_mapp_query.py --endpoint web 失败 (exit=$rc)" >&2
+        echo "[--auto] 临时目录已保留: $AUTO_INPUT_DIR" >&2
+        trap - EXIT
+        exit $rc
+    fi
+
+    if [ ! -s "$AUTO_TARGET" ]; then
+        echo "[--auto] target.txt 为空 (ymicp /query/web 返回 0 个 domain); step 4 拒绝入 scopes"
+        echo "[--auto] 临时目录已保留: $AUTO_INPUT_DIR (供排查)"
+        trap - EXIT  # 保留临时目录, 让用户能 cat
+    else
+        n=$(wc -l < "$AUTO_TARGET")
+        echo "[--auto] target.txt: $n 个域名"
+    fi
+fi
+
 # ---- step 4: scope import (optional) ----
-if [ -n "$INPUT_DIR" ]; then
-    [ -d "$INPUT_DIR" ]   || { echo "[-i] input dir not found: $INPUT_DIR" >&2; exit 1; }
-    [ -f "$INPUT_DIR/target.txt" ] || { echo "[-i] $INPUT_DIR 缺少 target.txt" >&2; exit 1; }
-    echo "[add_biz] step 4: scope_import"
-    "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$INPUT_DIR" -d "$DB"
+# 入口: -i 直传 或 --auto 内部生成的 AUTO_INPUT_DIR
+EFFECTIVE_INPUT_DIR=""
+if [ "$AUTO" = "1" ]; then
+    EFFECTIVE_INPUT_DIR="$AUTO_INPUT_DIR"
+elif [ -n "$INPUT_DIR" ]; then
+    EFFECTIVE_INPUT_DIR="$INPUT_DIR"
+fi
+if [ -n "$EFFECTIVE_INPUT_DIR" ]; then
+    [ -d "$EFFECTIVE_INPUT_DIR" ]   || { echo "[-i] input dir not found: $EFFECTIVE_INPUT_DIR" >&2; exit 1; }
+    [ -f "$EFFECTIVE_INPUT_DIR/target.txt" ] || { echo "[-i] $EFFECTIVE_INPUT_DIR 缺少 target.txt" >&2; exit 1; }
+    echo "[add_biz] step 4: scope_import (source: $([ "$AUTO" = "1" ] && echo --auto || echo -i))"
+    "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$EFFECTIVE_INPUT_DIR" -d "$DB"
 fi
 
 cat <<EOF
