@@ -233,6 +233,18 @@ cleanup_input() {
 
     if [ "$INPUT_GENERATED" = 1 ]; then
         echo "[+] 清理临时输入: $TARGET_FILE, $EXCLUDE_FILE"
+        # v0.1.0: also rm INPUT_PATH/target.txt + exclude.txt when INPUT_PATH
+        # is an external dir. Mirrors scope_import.sh behaviour. Failed
+        # runs already rm these by virtue of unconditional trap.
+        if [ -n "$INPUT_PATH" ] && [ -d "$INPUT_PATH" ]; then
+            if [ "$INPUT_PATH/target.txt" -ef "$TARGET_FILE" ]; then
+                : # same inode — already removed above
+            else
+                [ -f "$INPUT_PATH/target.txt" ] &&                     rm -f "$INPUT_PATH/target.txt" &&                     echo "[+] 清理外部目录的 target.txt: $INPUT_PATH/target.txt"
+                [ -f "$INPUT_PATH/exclude.txt" ] &&                     rm -f "$INPUT_PATH/exclude.txt" &&                     echo "[+] 清理外部目录的 exclude.txt: $INPUT_PATH/exclude.txt"
+                rmdir "$INPUT_PATH" 2>/dev/null &&                     echo "[+] 清理空目录: $INPUT_PATH"
+            fi
+        fi
     fi
 }
 trap cleanup_input EXIT

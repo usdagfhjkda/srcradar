@@ -6,6 +6,7 @@
 #   ./manage/add_business.sh -n <业务名>
 #                            [--enabled 0|1] [--web 0|1] [--tcp 0|1] [--icp 0|1]
 #                            [-s <seed.tsv>] [-i <input_dir>] [-d <db>]
+#                            [--keep-input]                   # v0.1.0+: 保留 -i 目录原文件
 #                            [--auto] [--ymicp-base URL] [--ymicp-user U]
 #                            [--ymicp-pass P] [--ymicp-pages N]
 #
@@ -59,6 +60,7 @@ ICP=1
 # --auto: ymicp 前置 (搜业务名 → 写 mapp_records → 拉 domain 写 target.txt → 入库)
 AUTO=0
 AUTO_INPUT_DIR=""
+KEEP_INPUT=0
 YMICP_BASE="http://127.0.0.1:16181"
 YMICP_USER="${YMICP_USER:-admin}"
 YMICP_PASS="${YMICP_PASS:-}"
@@ -83,6 +85,7 @@ while [ $# -gt 0 ]; do
         -i|--input)   INPUT_DIR="$2"; shift 2 ;;
         -d|--db)      DB="$2"; shift 2 ;;
         --auto)       AUTO=1; shift ;;
+        --keep-input)  KEEP_INPUT=1; shift ;;
         --ymicp-base) YMICP_BASE="$2"; shift 2 ;;
         --ymicp-user) YMICP_USER="$2"; shift 2 ;;
         --ymicp-pass) YMICP_PASS="$2"; shift 2 ;;
@@ -100,6 +103,12 @@ done
 [ -f "$DB" ]  || { echo "[-d] db not found: $DB" >&2; exit 1; }
 if [ "$AUTO" = "1" ] && [ -n "$INPUT_DIR" ]; then
     echo "[--auto] 与 [-i/--input] 互斥, 只能用一个" >&2; exit 1
+fi
+if [ "$KEEP_INPUT" = "1" ] && [ "$AUTO" = "1" ]; then
+    echo "[--keep-input] 与 [--auto] 互斥: --auto 走 mktemp 临时目录,本就用完即删,无 keep 必要" >&2; exit 1
+fi
+if [ "$KEEP_INPUT" = "1" ] && [ -z "$INPUT_DIR" ]; then
+    echo "[--keep-input] 仅在 [-i/--input] 下生效; 未指定 -i 时忽略" >&2
 fi
 
 # ---- step 1+2: business row + config bootstrap ----
@@ -217,7 +226,11 @@ if [ -n "$EFFECTIVE_INPUT_DIR" ]; then
     [ -d "$EFFECTIVE_INPUT_DIR" ]   || { echo "[-i] input dir not found: $EFFECTIVE_INPUT_DIR" >&2; exit 1; }
     [ -f "$EFFECTIVE_INPUT_DIR/target.txt" ] || { echo "[-i] $EFFECTIVE_INPUT_DIR 缺少 target.txt" >&2; exit 1; }
     echo "[add_biz] step 4: scope_import (source: $([ "$AUTO" = "1" ] && echo --auto || echo -i))"
-    "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$EFFECTIVE_INPUT_DIR" -d "$DB"
+    if [ "$KEEP_INPUT" = "1" ]; then
+        "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$EFFECTIVE_INPUT_DIR" -d "$DB" --keep-files
+    else
+        "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$EFFECTIVE_INPUT_DIR" -d "$DB"
+    fi
 fi
 
 cat <<EOF

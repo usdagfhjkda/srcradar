@@ -122,6 +122,25 @@ cleanup() {
     if [ "$INPUT_GENERATED" = "1" ]; then
         rm -f target.txt exclude.txt "$WILDCARD_OUT" "$NO_WILDCARD_OUT"
         echo "[+] 已清理本地 target.txt / exclude.txt / wildcard.txt / no_wildcard.txt (--keep-files 可保留)"
+        # v0.1.0: also rm INPUT_PATH/target.txt + exclude.txt if INPUT_PATH is
+        # an external dir (not cwd inode). Failure path above does NOT do
+        # this — see README §八-14. Pass --keep-files to retain both.
+        if [ -n "$INPUT_PATH" ] && [ -d "$INPUT_PATH" ]; then
+            if [ "$INPUT_PATH/target.txt" -ef "target.txt" ]; then
+                : # same inode — already removed by the rm above
+            else
+                if [ -f "$INPUT_PATH/target.txt" ]; then
+                    rm -f "$INPUT_PATH/target.txt"
+                    echo "[+] 已清理外部目录的 target.txt: $INPUT_PATH/target.txt"
+                fi
+                if [ -f "$INPUT_PATH/exclude.txt" ]; then
+                    rm -f "$INPUT_PATH/exclude.txt"
+                    echo "[+] 已清理外部目录的 exclude.txt: $INPUT_PATH/exclude.txt"
+                fi
+                # rmdir if now empty (best-effort; not fatal if non-empty)
+                rmdir "$INPUT_PATH" 2>/dev/null &&                     echo "[+] 已清理空目录: $INPUT_PATH"
+            fi
+        fi
     fi
 }
 trap cleanup EXIT
