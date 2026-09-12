@@ -154,7 +154,8 @@ main() {
             --pdtm-only)      MODE="pdtm-only"; shift ;;
             --db-align-only)  MODE="db-align-only"; shift ;;
             --ymicp-only)     MODE="ymicp-only"; shift ;;
-            --offline)        OFFLINE=1; shift ;;
+            --offline)        # shellcheck disable=SC2034
+                              OFFLINE=1; shift ;;
             --init-db)        DO_INIT_DB=1; shift ;;
             --no-init-db)     DO_INIT_DB=0; shift ;;
             -h|--help)        usage; exit 0 ;;
