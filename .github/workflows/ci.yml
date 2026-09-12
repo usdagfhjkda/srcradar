@@ -1,0 +1,163 @@
+name: ci
+
+# CI for srcradar. Aims:
+#   - block regressions in Go (db_align only; cdnmatch needs network)
+#   - block regressions in Python (ruff)
+#   - block shell scripts that hit shellcheck warning/error (info is OK)
+#   - block leaked secrets
+#   - sanity-check Apache-2.0 license headers on new code
+#
+# Triggers: push to main + any PR.
+# No network access required at runtime (Go test uses Go modules cache only).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel in-flight runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) Go: db_align module only.
+  #    cdnmatch needs `replace ../cdncheck` which is .gitignored — installing
+  #    it would require `git clone` of the upstream projectdiscovery/cdncheck
+  #    fork at build time. Out of scope for CI; that's what ./install.sh
+  #    does on a real machine.
+  # ---------------------------------------------------------------------------
+  go:
+    name: go (db_align)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false  # db_align deps are tiny; avoid cache poisoning
+
+      - name: go vet
+        working-directory: modules/public/db_align
+        run: go vet ./...
+
+      - name: go test (race + cover)
+        working-directory: modules/public/db_align
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          # Show coverage summary line for visibility in the run log.
+          go tool cover -func=coverage.out | tail -1
+
+  # ---------------------------------------------------------------------------
+  # 2) Python: ruff lint on the whole repo.
+  # ---------------------------------------------------------------------------
+  python:
+    name: python (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: ruff install
+        run: pip install ruff==0.16.7
+
+      - name: ruff check
+        run: ruff check .
+
+  # ---------------------------------------------------------------------------
+  # 3) Shell: shellcheck on every .sh file (fail on warning/error).
+  #    info-level rules are tolerated; see .shellcheckrc for `-x` (source
+  #    tracking) which resolves SC1091 false positives.
+  # ---------------------------------------------------------------------------
+  shell:
+    name: shell (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: shellcheck -S warning
+        run: |
+          set -e
+          mapfile -t FILES < <(find . -name '*.sh' \
+            -not -path './.git/*' \
+            -not -path './.hermes/*' \
+            -not -path './modules/main/db/*.sqlite3*')
+          shellcheck -x -S warning "${FILES[@]}"
+
+  # ---------------------------------------------------------------------------
+  # 4) Secret scan: gitleaks, fail-on-leak.
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: secrets (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history scan is fine — gitleaks is fast on this size.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Default config (no custom rules) — gitleaks community ruleset
+          # catches the common patterns (AWS keys, GitHub PATs, Slack,
+          # generic high-entropy strings). Project's own .gitignore
+          # already excludes cookie.log / *.env / *.sqlite3, but gitleaks
+          # scans history so this catches accidentally-committed secrets.
+
+  # ---------------------------------------------------------------------------
+  # 5) License header: warn-only check that every .go / .sh / .py file
+  #    contains an Apache-2.0 / SPDX reference. New files added by a PR
+  #    without a header will surface as a PR-comment hint. Existing files
+  #    pre-CI are grandfathered (no failure).
+  # ---------------------------------------------------------------------------
+  license-headers:
+    name: license-headers (warn-only)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # warn-only; do not block PRs yet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check Apache-2.0 / SPDX markers
+        run: |
+          set +e
+          # Scan .go / .sh / .py added/modified on this PR.
+          # On push to main, scan the whole tree.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            mapfile -t FILES < <(
+              git diff --name-only --diff-filter=AM origin/main...HEAD \
+                | grep -E '\.(go|sh|py)$' || true
+            )
+          else
+            mapfile -t FILES < <(
+              find . \( -name '*.go' -o -name '*.sh' -o -name '*.py' \) \
+                -not -path './.git/*' \
+                -not -path './.hermes/*' \
+                -not -path '*/vendor/*'
+            )
+          fi
+          MISSING=()
+          for f in "${FILES[@]}"; do
+            [ -f "$f" ] || continue
+            if ! grep -qE 'Apache-2\.0|SPDX-License-Identifier' "$f"; then
+              MISSING+=("$f")
+            fi
+          done
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::warning::Files missing Apache-2.0 / SPDX header:"
+            printf '  - %s\n' "${MISSING[@]}"
+            exit 0  # continue-on-error makes the job green; the warning
+                    # surfaces in the PR / run summary.
+          fi
+          echo "All ${#FILES[@]} files have an Apache-2.0 / SPDX marker."
+

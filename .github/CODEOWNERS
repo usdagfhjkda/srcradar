@@ -1,0 +1,44 @@
+# srcradar CODEOWNERS
+#
+# Code review assignments. GitHub auto-requests reviews from the listed
+# owners when a PR touches a matching path. We keep this minimal —
+# only the load-bearing modules get an explicit owner; everything
+# else falls back to repo admins / maintainers.
+#
+# Format: path pattern -> GitHub usernames / team names.
+# Last matching pattern wins (GitHub convention).
+
+# Default — falls back to repo maintainers if nothing more specific
+# matches. We intentionally do NOT list a single global owner; PRs
+# touching cross-cutting concerns (workflows, etc.) should get
+# explicit owners via more-specific rules below.
+
+# ---- CI / build / tooling ----
+# Workflows, Dependabot config, ruff config — changes here affect
+# every contributor; require an explicit maintainer sign-off.
+/.github/         @YOUR_GITHUB_HANDLE
+/pyproject.toml   @YOUR_GITHUB_HANDLE
+
+# ---- db_align (Go) ----
+# The plugin is LOCKED (manual auth gate per modules/public/db_align/CLAUDE.md);
+# any change here deserves an explicit review of the ENScan cookie-handling
+# implications.
+/modules/public/db_align/   @YOUR_GITHUB_HANDLE
+
+# ---- pdtm pipeline (Bash) ----
+# The active-recon 4-stage pipeline. Touching scanner.sh / scan.sh /
+# pipeline.sh / scope_import.sh changes how assets are enumerated;
+/modules/main/pdtm/        @YOUR_GITHUB_HANDLE
+
+# ---- daily cron (Bash + Python) ----
+# Diff generation, dashboard, snapshot orchestration — runs at 03:00 daily
+# on production deployments.
+/modules/main/daily/        @YOUR_GITHUB_HANDLE
+
+# ---- manage (business entry-point) ----
+/modules/main/manage/       @YOUR_GITHUB_HANDLE
+
+# ---- ymicp plugin (Python) ----
+# Optional plugin; cookie-gated access.
+/modules/public/ymicp/      @YOUR_GITHUB_HANDLE
+

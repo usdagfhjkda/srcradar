@@ -1,0 +1,50 @@
+version: 2
+
+# srcradar — automatic dependency updates.
+#
+# Scope is intentionally narrow:
+#   - Go modules under modules/public/db_align (the only Go module
+#     exercised by CI). cdnmatch depends on the in-tree vendor
+#     projectdiscovery/cdncheck fork via `replace ../cdncheck` and
+#     is NOT touched here — its dep bump path is `cd ../cdncheck
+#     && go run ./generate && cp sources_data.json ../cdnmatch/`
+#     (see modules/main/pdtm/install.sh).
+#   - GitHub Actions versions in .github/workflows/*.yml.
+#
+# We do NOT track pip / uv deps because srcradar has no Python build
+# manifest (pyproject.toml only configures ruff; not a package).
+# The single Python CI dep (ruff) is pinned in the workflow itself.
+
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/modules/public/db_align"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps(go)"
+    # Group patch + minor updates; majors are noisy and rarely
+    # relevant for db_align's tiny dep set (modernc.org/sqlite +
+    # golang.org/x/sys).
+    groups:
+      patch-minor:
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "go"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "ci"
+    open-pull-requests-limit: 3
+
