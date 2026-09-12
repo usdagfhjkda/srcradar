@@ -72,6 +72,7 @@ install_pdtm_tools() {
     [ -n "$pdtm_bin" ] || { err "pdtm 未装;run install_pdtm_bin first"; return 3; }
     log "pdtm -ia (dnsx httpx subfinder alterx naabu cdncheck...)"
     "$pdtm_bin" -ia
+    # shellcheck disable=SC2034 # miss counts missing tools; used in summary below
     local miss=0
     for t in dnsx httpx subfinder alterx naabu; do
         if [ ! -x "$HOME/.pdtm/go/bin/$t" ]; then
@@ -132,7 +133,8 @@ verify() {
 
 # ---- uninstall ----
 uninstall() {
-    rm -rf "$SCRIPT_DIR/bin" "$SCRIPT_DIR/cdncheck"
+    # shellcheck disable=SC2115
+    rm -rf -- "$SCRIPT_DIR/bin" "$SCRIPT_DIR/cdncheck"
     log "已清理 pdtm/bin/ 与 pdtm/cdncheck/(vendor)"
     log "pdtm 编排器仍需 go install 卸载:$HOME/go/bin/pdtm"
     return 0

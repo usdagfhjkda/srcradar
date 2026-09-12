@@ -138,7 +138,8 @@ verify() {
 }
 
 uninstall() {
-    rm -rf "$VENDOR_DIR" "$SCRIPT_DIR/bin"
+    # shellcheck disable=SC2115
+    rm -rf -- "$VENDOR_DIR" "$SCRIPT_DIR/bin"
     log "已清理 ENScan_GO/ 与 bin/(源码保留,下次重装再 clone)"
     return 0
 }

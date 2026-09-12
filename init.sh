@@ -45,7 +45,9 @@ set -euo pipefail
 #   cmd  命令名
 #   min  最低版本(空 = 不校验)
 #   pkg  --install-deps 时按 OS 安装的包名(apt / dnf / brew)
+# shellcheck disable=SC2034 # used by --check-deps / --install-deps sibling scripts
 GO_MIN_VERSION="1.21"
+# shellcheck disable=SC2034 # used by --check-deps / --install-deps sibling scripts
 PY_MIN_VERSION="3.10"
 
 # 完整功能跑通所需工具清单
@@ -182,13 +184,7 @@ check_one_dep() {
     local cmd min apt_pkg dnf_pkg brew_pkg category note
     IFS="|" read -r cmd min apt_pkg dnf_pkg brew_pkg category note <<<"$line"
 
-    local mark status actual
-    case "$category" in
-        go)    mark="[B]" ;;
-        core)  mark="[C]" ;;
-        scan)  mark="[S]" ;;
-        *)     mark="[?]" ;;
-    esac
+    local status actual
 
     if cmd_path "$cmd" >/dev/null 2>&1; then
         actual="$(parse_version "$cmd")"

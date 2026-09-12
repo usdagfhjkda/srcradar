@@ -355,6 +355,7 @@ if has_stage enscan; then
         ENS_RC=$rc
     fi
 else
+# shellcheck disable=SC2034
     ENS_SKIP=1
 fi
 
@@ -365,7 +366,8 @@ if has_stage pdtm; then
             printf '%s\tneeds_onboarding (no 可测资产 scope; run pipeline.sh -b %s -i <input_dir>)\n' \
                 "$BIZ" "$BIZ" >> "$WARNINGS_FILE"
         fi
-        PDTM_SKIP=1
+    # shellcheck disable=SC2034
+    PDTM_SKIP=1
     elif run_stage_pdtm; then
         log "pdtm ok for biz=$BIZ"
     else
@@ -374,6 +376,7 @@ if has_stage pdtm; then
         PDTM_RC=$rc
     fi
 else
+    # shellcheck disable=SC2034
     PDTM_SKIP=1
 fi
 
@@ -389,7 +392,8 @@ if has_stage icp; then
             printf '%s\tneeds_onboarding_companies (no companies; run db_align -n %s -all)\n' \
                 "$BIZ" "$BIZ" >> "$WARNINGS_FILE"
         fi
-        ICP_SKIP=1
+    # shellcheck disable=SC2034
+    ICP_SKIP=1
     elif run_stage_icp; then
         log "icp ok for biz=$BIZ"
     else
@@ -398,6 +402,7 @@ if has_stage icp; then
         ICP_RC=$rc
     fi
 else
+    # shellcheck disable=SC2034
     ICP_SKIP=1
 fi
 
@@ -413,6 +418,7 @@ if has_stage daily-url; then
         URL_RC=$rc
     fi
 else
+# shellcheck disable=SC2034
     URL_SKIP=1
 fi
 

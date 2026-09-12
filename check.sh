@@ -31,6 +31,7 @@
 
 set -euo pipefail
 
+# shellcheck disable=SC2034 # SCRIPT_DIR is referenced by other scripts that source this
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 GO_MIN="1.25"

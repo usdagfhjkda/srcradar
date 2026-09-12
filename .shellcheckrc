@@ -1,0 +1,20 @@
+# shellcheck configuration for srcradar.
+#
+# CI runs `shellcheck -S warning` (warnings + errors fail). info-level
+# rules are tolerated — they include style suggestions (SC2086
+# unquoted vars, SC2015 A && B || C) that often have context-dependent
+# intent and aren't worth blocking PRs on.
+#
+# `-x` (external-sources): follow `source`/`.` chains so SC1091
+# "Not following" warnings are resolved. This is the main reason
+# for SC1091 disappearing as a warning; remaining SC1091 are
+# genuinely unreachable source paths.
+#
+# We intentionally do NOT use `disable=` globally — every warning we
+# currently emit has been triaged (see CI workflow "shell" job). If a
+# new warning appears, fix it; don't disable it.
+
+# Follow source/. directives to resolve SC1091 (Not following: ...)
+# across our install.sh -> modules/*/install.sh chains.
+external-sources=true
+
