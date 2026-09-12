@@ -21,7 +21,11 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  # contents: read       — clone repo, read code (.git/*)
+  # pull-requests: read  — gitleaks-action@v3 fetches /pulls/{n}/commits
+  #                        on PR events; without this it 403s.
   contents: read
+  pull-requests: read
 
 jobs:
   # ---------------------------------------------------------------------------
