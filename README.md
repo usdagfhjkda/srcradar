@@ -651,6 +651,40 @@ scanner.sh inside pipeline  600 秒 timeout,0 输出
 
 ---
 
+### 14. `-i <dir>` 在 import 成功后默认删除外部目录的 target.txt / exclude.txt ✅ v0.1.0 起
+
+**现象**:`add_business.sh -i <dir>` / `pdtm scope_import.sh -i <dir>` /
+`pdtm pipeline.sh -i <dir>` 在 scope 入库成功后,会删除 `<dir>/target.txt`
+和 `<dir>/exclude.txt`(以及 `<dir>/` 目录若变空)。失败路径下也删除(沿用
+pipeline.sh 既有的无条件 trap 语义)。
+
+**根因**:共享 `<dir>/` 作为多业务 scope 池时(典型 SRC 场景:先收集所有候
+选域名到单一 `target.txt`,再 per-business 切分),保留原文件会导致下一个
+业务读到上一轮的陈旧条目。如果 `target.txt` 是 `>>` 累加,跨业务的 scope 会
+互相污染。
+
+**当前缓解**:传 `--keep-files`(scope_import.sh)或 `--keep-input`
+(add_business.sh)显式保留原文件。
+
+**治本**:目前已经是 v0.1.0 期望行为,无 plan。**风险姿态**:破坏性 — 用户
+应把 `<dir>/` 当成临时输入目录(类似 `mktemp -d`)。如果 `<dir>/` 里除了
+`target.txt` / `exclude.txt` 还有别的文件(笔记 / 配置 / 备份),`rmdir` 失
+败但 `rm -f` 不会动它们,所以**只删 target.txt / exclude.txt 两个文件名**。
+
+**用法建议**:
+
+| 场景 | 命令 |
+|---|---|
+| 一次性 batch(默认) | `mktemp -d && cp seed target.txt $d/ && ./srcradar manage add_business -n biz -i $d/` |
+| 想保留 scope 数据 | `./srcradar manage add_business -n biz -i /scope-pool/ --keep-input` |
+| 多业务共享 scope | 给每个业务 `--keep-input` 保持数据共享 |
+
+**未来 API 演进方向**(待 v0.2.0+):语义明确化命名。`-i` 改名为 `--tmp-dir`
+或加 `--consume-input` / `--no-consume-input` 显式 flag,避免 `cd` 到
+`<dir>/` 再 `./srcradar ... -i ./` 误删当前目录文件。
+
+---
+
 ## 九、后续工作优先级
 
 | 优先级 | 项 | 备注 |
