@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Apply round-2 migration: reactivation classification fix.
 
 Idempotent: drops + recreates the two AU triggers. Use:
@@ -53,8 +52,8 @@ def main() -> int:
         if missing:
             print(f"FAIL: missing triggers after migration: {missing}", file=sys.stderr)
             return 1
-        print(f"  trg_ws_au: present")
-        print(f"  trg_ta_au: present")
+        print("  trg_ws_au: present")
+        print("  trg_ta_au: present")
         print("migration applied.")
     finally:
         conn.close()

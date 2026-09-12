@@ -7,7 +7,9 @@ Usage:
 
 Side effects: only schema changes. No row data is modified.
 """
-import sqlite3, sys
+import sqlite3
+import sys
+
 
 def has_column(conn, table, col):
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()

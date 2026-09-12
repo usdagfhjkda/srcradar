@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """将 scanner.sh 的 Web/TCP 结果写入 recon.sqlite3。"""
 
 from __future__ import annotations
@@ -212,7 +211,6 @@ def parse_text_web(path: Path) -> list[dict[str, Any]]:
         if not host or not port:
             continue
         status_match = STATUS_RE.search(line)
-        statuses = STATUS_RE.findall(line)
         length_match = LENGTH_RE.search(line)
         hash_match = HASH_RE.search(line)
         hash_value = None
@@ -259,8 +257,7 @@ def load_ip_domains(scan_dir: Path) -> dict[str, list[str]]:
                     continue
                 domain = left.strip().lower().rstrip(".")
                 value = right.strip()
-                if value.startswith("["):
-                    value = value[1:]
+                value = value.removeprefix("[")
                 ip = value.split("]")[0].strip()
                 if ip and domain and _looks_like_ip(ip):
                     mapping.setdefault(ip, [])
@@ -694,7 +691,7 @@ def main() -> int:
         with conn:
             create_tables(conn)
             web_count, tcp_count = persist(conn, args.business, targets, excludes, web, tcp, wildcards)
-    except Exception as exc:
+    except (sqlite3.Error, OSError, ValueError, KeyError) as exc:
         conn.rollback()
         print(f"入库失败，扫描文件已保留: {exc}", file=sys.stderr)
         return 1

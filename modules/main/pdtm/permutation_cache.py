@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """alterx 排列状态缓存。
 
 子命令:
@@ -14,9 +12,8 @@ import argparse
 import sqlite3
 import sys
 import time
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Iterable
 
 from alterx_runs import mark_ran_with_conn
 

@@ -37,12 +37,12 @@ import json
 import os
 import sqlite3
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import log  # noqa: E402
+import log
 
 TIMESTAMP_NOISE = {
     "fetched_at", "updated_at", "last_seen", "first_seen", "created_at",
@@ -402,7 +402,6 @@ def _classify_table(
 ) -> dict[str, list[dict]]:
     """Split change_type>0 rows into added/reactivated/changed buckets."""
     display_fn = spec["display"]
-    content_fn = spec["content"]
     has_active = spec["has_active"]
     mapp = (name == "mapp_records")
 

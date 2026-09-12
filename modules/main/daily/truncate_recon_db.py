@@ -101,7 +101,7 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
         before = row_counts(con, order)
         print(f"db: {db_path}")
         print(f"journal_mode: {con.execute('PRAGMA journal_mode').fetchone()[0]}")
-        print(f"计划删除顺序（叶子表先删）:")
+        print("计划删除顺序（叶子表先删）:")
         for i, t in enumerate(order, 1):
             print(f"  {i:2}. {t:<22} rows={before[t]}")
         print(
@@ -135,7 +135,6 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
         after = row_counts(con, order)
         print("\n删除完成:")
         for t in order:
-            delta = after[t] - before[t]
             mark = "" if before[t] else " (空表)"
             print(f"  {t:<22} {before[t]:>8} -> {after[t]:>8}{mark}")
         return 0

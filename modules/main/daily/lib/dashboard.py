@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import log  # noqa: E402
+import log
 
 # ---------------------------------------------------------------------------
 # Service classification (port → category + risk)
@@ -227,10 +227,6 @@ def _aggregate(snap: dict) -> dict:
             fp_buckets["11-50 子域"] += 1
         else:
             fp_buckets["≥51 子域 (批量/默认页)"] += 1
-
-    # Subdomains per host
-    sub_per_host = Counter(r["subdomain"].split(".", 1)[-1] if "." in r["subdomain"] else r["subdomain"]
-                           for r in ws)
 
     # ICP-filing assets: 子公司 (companies) + 小程序/公众号 (mapp_records).
     # mapp_records.service_type == 7 → 微信小程序; 其它值归为公众号/其它服务。
@@ -1012,7 +1008,6 @@ def _build_sites(agg: dict, diff_mode: bool = False, biz_name: str = "") -> str:
             '<th>备注</th>'
             '<th>URL 详情</th>'
         )
-        colspan = 13
         empty = '<tr><td colspan="13" class="muted">无新增站点</td></tr>'
     else:
         head_cells = (
@@ -1029,7 +1024,6 @@ def _build_sites(agg: dict, diff_mode: bool = False, biz_name: str = "") -> str:
             '<th>备注</th>'
             '<th>URL 详情</th>'
         )
-        colspan = 12
         empty = '<tr><td colspan="12" class="muted">无 web 子域</td></tr>'
 
     hash_data_json = json.dumps(dict(hash_subs_for_modal), ensure_ascii=False)
@@ -1328,9 +1322,9 @@ def render_html(agg: dict, *, mode: str = "overview", run_id: str = "",
                 f'href="{_e(b["href"])}">{_e(b["name"])}</a>'
             )
         links.append(
-            f'<a style="color:#cfd7e3;text-decoration:none;padding:6px 10px;'
-            f'border-radius:4px;font-size:13px" '
-            f'href="/">全部</a>'
+            '<a style="color:#cfd7e3;text-decoration:none;padding:6px 10px;'
+            'border-radius:4px;font-size:13px" '
+            'href="/">全部</a>'
         )
         nav_html = (
             '<nav class="biz-bar" style="background:#2d333b;padding:8px 24px;'
@@ -1818,7 +1812,7 @@ class _State:
 class Handler(BaseHTTPRequestHandler):
     server_version = "ReconDashboard/1.0"
 
-    def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler API)
+    def do_GET(self) -> None:
         accept_enc = self.headers.get("Accept-Encoding", "").encode()
         raw = self.path.split("?", 1)[0]
         path = urllib.parse.unquote(raw).rstrip("/") or "/"
@@ -1864,9 +1858,9 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
         self._respond(404, "text/plain",
-                      f"not found: {raw}".encode("utf-8"), accept_enc)
+                      f"not found: {raw}".encode(), accept_enc)
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         """POST routes:
           /<业务名>/scan              — 提交 hosts 列表触发 scan-onesite 子流程
           /<业务名>/scan-urls         — 提交 hosts + sources + wordlist 触发 URL 资产扫描
@@ -1890,7 +1884,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._dispatch_scan_urls(biz_name, accept_enc)
                     return
             self._respond(404, "text/plain",
-                          f"bad scan-urls path: {raw}\n".encode("utf-8"),
+                          f"bad scan-urls path: {raw}\n".encode(),
                           accept_enc)
             return
 
@@ -1903,13 +1897,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._handle_schedule_toggle(biz_name, accept_enc)
                     return
             self._respond(404, "text/plain",
-                          f"bad schedule path: {raw}\n".encode("utf-8"),
+                          f"bad schedule path: {raw}\n".encode(),
                           accept_enc)
             return
 
         if not path.startswith("/") or not path.endswith("/scan"):
             self._respond(404, "text/plain",
-                          f"not found: {raw}".encode("utf-8"), accept_enc)
+                          f"not found: {raw}".encode(), accept_enc)
             return
         biz_name = path[1:-len("/scan")]
         if not biz_name:
@@ -1927,7 +1921,7 @@ class Handler(BaseHTTPRequestHandler):
              if b.get("business_name") == biz_name), None)
         if bid is None:
             self._respond(404, "text/plain",
-                          f"unknown business: {biz_name}\n".encode("utf-8"),
+                          f"unknown business: {biz_name}\n".encode(),
                           accept_enc)
             return
 
@@ -2024,7 +2018,7 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.Error as exc:
             self._respond(500, "application/json",
                           f'{{"ok":false,"error":"db error: {_e(str(exc))}"}}\n'
-                          .encode("utf-8"),
+                          .encode(),
                           accept_enc)
             return
 
@@ -2044,12 +2038,12 @@ class Handler(BaseHTTPRequestHandler):
                 _State.cached_snap_json = json.dumps(
                     cached, ensure_ascii=False, separators=(",", ":")
                 ).encode("utf-8")
-        except Exception:
-            pass  # 缓存更新失败不影响写入；reload 会追上
+        except Exception as exc:
+            print(f"[dashboard] cache update failed (reload will retry): {exc}", file=sys.stderr)
 
         body_out = (f'{{"ok":true,"id":{hash_id},'
                     f'"score":{new_score},'
-                    f'"description":{json.dumps(new_desc)}}}\n').encode("utf-8")
+                    f'"description":{json.dumps(new_desc)}}}\n').encode()
         self._respond(200, "application/json", body_out, accept_enc)
         log.info(f"hash edit id={hash_id} score={new_score} desc_len={len(new_desc)}")
 
@@ -2065,7 +2059,7 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > SCAN_MAX_BODY:
             self._respond(400, "text/plain",
                           f"body too large or empty ({length} bytes)\n"
-                          .encode("utf-8"), accept_enc)
+                          .encode(), accept_enc)
             return
         body = self.rfile.read(length)
         try:
@@ -2183,7 +2177,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         else:
             body_inner = (
-                f'<h2>扫描失败</h2>'
+                '<h2>扫描失败</h2>'
                 + "".join(f'<pre>{_e(line)}</pre>' for line in error_lines)
             )
         page = f"""<!doctype html>
@@ -2222,7 +2216,7 @@ class Handler(BaseHTTPRequestHandler):
              if b.get("business_name") == biz_name), None)
         if bid is None:
             self._respond(404, "text/plain",
-                          f"unknown business: {biz_name}\n".encode("utf-8"),
+                          f"unknown business: {biz_name}\n".encode(),
                           accept_enc)
             return
         self._handle_scan_urls(biz_name, accept_enc)
@@ -2245,7 +2239,7 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > SCAN_URLS_MAX_BODY:
             self._respond(400, "text/plain",
                           f"body too large or empty ({length} bytes)\n"
-                          .encode("utf-8"), accept_enc)
+                          .encode(), accept_enc)
             return
         body = self.rfile.read(length)
         try:
@@ -2502,7 +2496,7 @@ class Handler(BaseHTTPRequestHandler):
              if b.get("business_name") == biz_name), None)
         if bid is None:
             self._respond(404, "text/plain",
-                          f"unknown business: {biz_name}\n".encode("utf-8"),
+                          f"unknown business: {biz_name}\n".encode(),
                           accept_enc)
             return
 
@@ -2514,7 +2508,7 @@ class Handler(BaseHTTPRequestHandler):
         if hash_meta is None:
             self._respond(404, "text/plain",
                           f"hash #{hash_id} not in {biz_name}\n"
-                          .encode("utf-8"), accept_enc)
+                          .encode(), accept_enc)
             return
 
         # 3) 实时查 web_hash_urls(独立连接,5s timeout,只读)
@@ -2581,7 +2575,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
         except sqlite3.Error as e:
             self._respond(500, "text/plain",
-                          f"db error: {e}\n".encode("utf-8"), accept_enc)
+                          f"db error: {e}\n".encode(), accept_enc)
             return
 
         # 4) 按 source 分组
@@ -2740,7 +2734,7 @@ class Handler(BaseHTTPRequestHandler):
             # 旧行(None)回退到 str.endswith 判定 — 维持向后兼容
             raw_is_static = e.get("is_static")
             if raw_is_static is None:
-                is_static = 1 if p.endswith(".js") or p.endswith(".css") else 0
+                is_static = 1 if p.endswith((".js", ".css")) else 0
             else:
                 is_static = int(raw_is_static)
             # data-host → 「仅显示当前子域」(过滤 URL 实际 host = 当前 subdomain 的);
@@ -3185,7 +3179,7 @@ h3.src-heading {{
         log.info(f"urls detail biz={biz_name} hash_id={hash_id} "
                  f"rows={len(rows)} per_source={per_source_count}")
 
-    def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
+    def log_message(self, fmt: str, *args: Any) -> None:
         log.info(f"dashboard {self.address_string()} {fmt % args}")
 
     def _serve_page(self, accept_enc: bytes = b"", *, home: bool = True) -> None:
@@ -3259,7 +3253,7 @@ h3.src-heading {{
                     if b.get("business_name") == biz_name), None)
         if bid is None:
             self._respond(404, "text/plain",
-                          f"unknown business: {biz_name}".encode("utf-8"),
+                          f"unknown business: {biz_name}".encode(),
                           accept_enc)
             return
         biz_nav = self._build_biz_nav()
@@ -3337,7 +3331,7 @@ h3.src-heading {{
                 log.error(f"dashboard reload failed: {e}")
                 if not _State.cached_html_home:
                     err = (f"<html><body><h1>Snapshot error</h1><pre>{_e(e)}</pre></body></html>"
-                           ).encode("utf-8")
+                           ).encode()
                     _State.cached_html_home = err
                     _State.cached_html_overview = err
 

@@ -12,7 +12,9 @@ check-only,不修改任何东西。
     - ACCEPTED-DRIFT:   ALTER-列 + 隐式建表 等 A1 协议下预期的差异 → exit 0 但打印提示
     - MISSING/NEW:      同 REAL-DRIFT,exit 1
 """
-import re, sys, pathlib
+import pathlib
+import re
+import sys
 
 schema_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 \
     else pathlib.Path(__file__).resolve().parent.parent / "db/schema.sql"
@@ -58,9 +60,7 @@ def extract_create_tables(text):
         cols = []
         for ln in body.split("\n"):
             ln = ln.strip().rstrip(",")
-            if not ln or ln.startswith("--") or ln.startswith("UNIQUE") \
-               or ln.startswith("CHECK") or ln.startswith("FOREIGN") \
-               or ln.startswith("PRIMARY") or ln.startswith("CONSTRAINT"):
+            if not ln or ln.startswith(("--", "UNIQUE", "CHECK", "FOREIGN", "PRIMARY", "CONSTRAINT")):
                 continue
             mm = re.match(r"(\w+)\s", ln)
             if mm:

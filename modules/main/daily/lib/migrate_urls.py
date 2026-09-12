@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """migrate_urls.py — create web_hash_urls table + add web_hashes.url_count column.
 
 Idempotent: re-runs are no-ops. Mirrors migrate_score.py's style.
@@ -33,7 +32,8 @@ Notes:
       (no trigger bump). scan_urls.py persist should update it manually
       after batch INSERT.
 """
-import sqlite3, sys
+import sqlite3
+import sys
 
 
 def has_table(conn, name):
@@ -147,14 +147,13 @@ def main():
         for idx_name, idx_sql in (
             ("idx_web_hash_urls_risk_flag",
              "CREATE INDEX idx_web_hash_urls_risk_flag "
-             "ON web_hash_urls(risk_flag) WHERE risk_flag != ''"),
+             + "ON web_hash_urls(risk_flag) WHERE risk_flag != ''",)
             ("idx_web_hash_urls_is_dangerous",
              "CREATE INDEX idx_web_hash_urls_is_dangerous "
-             "ON web_hash_urls(is_dangerous) WHERE is_dangerous = 1"),
-            # is_static 部分索引 — 触发器 / dashboard 过滤用,NULL 不索引
+             + "ON web_hash_urls(is_dangerous) WHERE is_dangerous = 1",)
             ("idx_web_hash_urls_is_static",
              "CREATE INDEX idx_web_hash_urls_is_static "
-             "ON web_hash_urls(is_static) WHERE is_static IS NOT NULL"),
+             + "ON web_hash_urls(is_static) WHERE is_static IS NOT NULL",)
         ):
             row = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",

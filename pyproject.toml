@@ -1,0 +1,50 @@
+[tool.ruff]
+# srcradar Python tooling baseline (ruff).
+# Minimal config — we opt into a small list of specific rules, not
+# whole rule families. This avoids pulling in opinionated defaults
+# (e.g. RUF001..003 ambiguous-character detection, E501 line-too-long,
+# PLW2901 for-loop-variable reuse) that don't apply to a codebase with
+# Chinese comments + long inline HTML templates.
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+# pyflakes (F) is the safest base; pycodestyle errors (E) are
+# intentionally NOT included wholesale because E501 (line-too-long)
+# triggers on legitimate template HTML strings.
+#
+# Specific rules we do enforce (each catches a known real bug):
+#   - F                 : pyflakes (unused imports/vars, undefined names)
+#   - UP006/UP007/UP035 : pyupgrade (PEP 585/604 typing, collections.abc)
+#   - ISC004            : implicit string concat inside collections
+#   - PIE810            : startswith/endswith tuple form
+#   - PLW1510           : subprocess.run without explicit check=
+#   - EXE001/EXE002     : shebang / executable-bit mismatch
+#   - BLE001            : blind `except Exception`
+#   - RUF012            : mutable default for class attribute
+select = [
+    "F",
+    "UP006",
+    "UP007",
+    "UP035",
+    "ISC004",
+    "PIE810",
+    "PLW1510",
+    "EXE001",
+    "EXE002",
+    "BLE001",
+    "RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# dashboard.py is a generated-feel HTTP handler with template strings.
+# RUF012 (mutable class default) is intentional: cached_* fields are
+# singleton-scoped caches (only one Dashboard instance per process).
+# BLE001 (blind except Exception) is intentional at the request-handler
+# boundary: we want to log any failure and return a 5xx rather than
+# propagate. Same for the cache-update try/except.
+"modules/main/daily/lib/dashboard.py" = [
+    "RUF012",
+    "BLE001",
+]
+

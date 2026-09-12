@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Apply change_type migration to web_hash_urls table (Phase 2).
 
 Adds:

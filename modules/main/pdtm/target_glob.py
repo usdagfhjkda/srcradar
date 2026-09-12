@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""target_glob.py — 把 target.txt / exclude.txt 编译为 glob 语义 ERE/正则。
+r"""target_glob.py — 把 target.txt / exclude.txt 编译为 glob 语义 ERE/正则。
 
 设计:
 - `*` 语义: glob 通配,匹配任意字符(包括 `.`)。等价 ERE `.*`。
@@ -22,8 +21,8 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 
 def extract_base(pattern: str) -> str:

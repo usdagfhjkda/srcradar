@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """score.py — web_hashes score computation.
 
 Two entry points:
@@ -132,7 +131,7 @@ def _main(argv: list[str]) -> int:
             ids = [int(x) for x in args.ids.split(",") if x.strip()]
             n = score_new(conn, ids)
             print(json.dumps({"mode": "score-new", "requested": len(ids), "updated": n}))
-    except Exception as e:
+    except (sqlite3.Error, ValueError, KeyError, RuntimeError) as e:
         print(f"[score.py] error: {e}", file=sys.stderr)
         return 1
     finally:

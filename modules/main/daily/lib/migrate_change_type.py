@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Apply change_type migration to recon.sqlite3.
 
 Idempotent: each ALTER uses a guard (column/trigger already exists → skip).

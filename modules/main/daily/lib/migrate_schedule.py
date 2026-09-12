@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Apply schedule migration: web_subdomain_scan_schedule table.
 
 Idempotent: re-runs are no-ops (CREATE TABLE IF NOT EXISTS + ALTER guards).

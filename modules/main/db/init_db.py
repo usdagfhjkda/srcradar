@@ -73,7 +73,7 @@ def main() -> int:
         missing = NEED_TABLES - got
         if missing:
             print(f"[err] DB 建好后缺表: {sorted(missing)}", file=sys.stderr)
-            print(f"[err]  schema.sql 不完整,看 db/schema.sql", file=sys.stderr)
+            print("[err]  schema.sql 不完整,看 db/schema.sql", file=sys.stderr)
             return 2
 
         n_tbl   = len(got)

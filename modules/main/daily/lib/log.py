@@ -10,7 +10,6 @@ import sys
 import time
 from pathlib import Path
 
-
 _RUN_ID = os.environ.get("RUN_ID", time.strftime("%Y%m%d-%H%M%S"))
 _LOG_FILE = os.environ.get("LOG_FILE")  # set by daily_monitor.sh
 

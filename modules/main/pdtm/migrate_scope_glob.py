@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """migrate_scope_glob.py — 把现有 scope 行 (无 *) 前面加 *. 前缀。
 
 背景: pdtm scope 格式从纯域名 (example.com) 升级为 glob (.*.example.com)。

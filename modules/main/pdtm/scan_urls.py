@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """scan_urls.py — URL 级资产扫描(ffuf / URLFinder / gau) → web_hash_urls 表。
 
 与 import_scan_results.py 的关系:
@@ -42,7 +41,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlparse
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "db" / "recon.sqlite3"
@@ -274,8 +273,8 @@ def run_ffuf(seed_url: str, wordlist: Path) -> list[dict]:
             "-o", out_path,
             "-s",                                         # 静默,只输出 JSON 文件
         ]
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=URLFINDER_TIMEOUT
+        subprocess.run(
+            cmd, capture_output=True, text=True, timeout=URLFINDER_TIMEOUT, check=False
         )
         # ffuf 退出码非零大多是 rate-limit 触发,JSON 文件可能仍含部分命中
         data = json.loads(Path(out_path).read_text(encoding="utf-8"))
@@ -349,7 +348,7 @@ def run_urlfinder(seed_url: str) -> list[dict]:
         ]
         try:
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=URLFINDER_TIMEOUT
+                cmd, capture_output=True, text=True, timeout=URLFINDER_TIMEOUT, check=False
             )
         except subprocess.TimeoutExpired:
             _log("urlfinder", f"timeout after {URLFINDER_TIMEOUT}s ({seed_url})")
@@ -472,7 +471,7 @@ def run_gau(domain: str) -> list[dict]:
         # gau 的 --timeout 是纯数字秒数(NOT "30s");version<2.2 老版本才支持 "30s"
         proc = subprocess.run(
             [GAU_BIN, "--threads", "5", "--timeout", "30", domain],
-            capture_output=True, text=True, timeout=GAU_TIMEOUT,
+            capture_output=True, text=True, timeout=GAU_TIMEOUT, check=False,
         )
     except subprocess.TimeoutExpired:
         _log("gau", f"timeout after {GAU_TIMEOUT}s ({domain})")

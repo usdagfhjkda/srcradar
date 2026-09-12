@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 icp_mapp_query.py
 
@@ -28,10 +26,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import requests
-
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "main" / "db" / "recon.sqlite3"
 
@@ -108,7 +105,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def fetch_mapp(base: str, name: str, page_num: int, page_size: int,
-               auth: tuple, timeout: int = 30) -> Dict[str, Any]:
+               auth: tuple, timeout: int = 30) -> dict[str, Any]:
     """调 ymicp /query/mapp，返回原始 JSON。"""
     url = f"{base.rstrip('/')}/query/mapp"
     params = {"search": name, "pageNum": page_num, "pageSize": page_size}
@@ -118,7 +115,7 @@ def fetch_mapp(base: str, name: str, page_num: int, page_size: int,
 
 
 def fetch_web(base: str, name: str, page_num: int, page_size: int,
-              auth: tuple, timeout: int = 30) -> Dict[str, Any]:
+              auth: tuple, timeout: int = 30) -> dict[str, Any]:
     """调 ymicp /query/web (网站备案), 返回原始 JSON."""
     url = f"{base.rstrip('/')}/query/web"
     params = {"search": name, "pageNum": page_num, "pageSize": page_size}
@@ -127,7 +124,7 @@ def fetch_web(base: str, name: str, page_num: int, page_size: int,
     return r.json()
 
 
-def extract_records(payload: Any) -> List[Dict[str, Any]]:
+def extract_records(payload: Any) -> list[dict[str, Any]]:
     """兼容多种返回结构：{params: {list: [...]}} / {data: [...]} / [...] / 单 dict。"""
     if payload is None:
         return []
@@ -149,7 +146,7 @@ def extract_records(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
-def extract_last_page(payload: Any) -> Optional[int]:
+def extract_last_page(payload: Any) -> int | None:
     if not isinstance(payload, dict):
         return None
 
@@ -170,7 +167,7 @@ def extract_last_page(payload: Any) -> Optional[int]:
     return None
 
 
-def open_database(path: str) -> Tuple[sqlite3.Connection, Path]:
+def open_database(path: str) -> tuple[sqlite3.Connection, Path]:
     db_path = Path(path).expanduser().resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -196,7 +193,7 @@ def open_database(path: str) -> Tuple[sqlite3.Connection, Path]:
     return conn, db_path
 
 
-def clean_text(value: Any) -> Optional[str]:
+def clean_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -205,7 +202,7 @@ def clean_text(value: Any) -> Optional[str]:
 
 def lookup_business_subsidiaries(
     conn: sqlite3.Connection, business_name: str
-) -> List[str]:
+) -> list[str]:
     """按业务名查 DB，返回该业务下所有子公司 unit_name 列表（按字母排序）。
 
     业务名严格匹配；命中 0 业务时抛 ValueError。
@@ -228,9 +225,9 @@ def lookup_business_subsidiaries(
 
 
 def prepare_records(
-    records: List[Dict[str, Any]],
-) -> Tuple[List[Dict[str, Any]], int]:
-    unique: Dict[str, Dict[str, Any]] = {}
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    unique: dict[str, dict[str, Any]] = {}
     skipped = 0
     for record in records:
         unit_name = clean_text(record.get("unitName"))
@@ -245,12 +242,12 @@ def prepare_records(
 
 def persist_records(
     conn: sqlite3.Connection,
-    records: List[Dict[str, Any]],
-    business_name: Optional[str] = None,
-) -> Tuple[int, int, int, int]:
+    records: list[dict[str, Any]],
+    business_name: str | None = None,
+) -> tuple[int, int, int, int]:
     valid_records, skipped = prepare_records(records)
     fetched_at = datetime.now().astimezone().isoformat(timespec="seconds")
-    company_ids: Dict[str, int] = {}
+    company_ids: dict[str, int] = {}
     inserted = 0
     updated = 0
     unchanged = 0
@@ -271,7 +268,7 @@ def persist_records(
                 raise sqlite3.IntegrityError(f"无法读取业务 ID：{business_name}")
             business_id = int(business_row[0])
 
-        company_records: Dict[str, Dict[str, Any]] = {}
+        company_records: dict[str, dict[str, Any]] = {}
         for record in valid_records:
             unit_name = clean_text(record.get("unitName"))
             if unit_name is not None:
@@ -391,9 +388,9 @@ def main() -> int:
     except KeyboardInterrupt:
         return 130
 
-    queries: List[Tuple[Optional[str], str]] = []
-    conn: Optional[sqlite3.Connection] = None
-    db_path: Optional[Path] = None
+    queries: list[tuple[str | None, str]] = []
+    conn: sqlite3.Connection | None = None
+    db_path: Path | None = None  # noqa: F823
     had_error = False
 
     try:
@@ -465,7 +462,7 @@ def main() -> int:
             print(f"\n[{index}/{len(queries)}] 查询词：{name}")
             print(f"归属业务：{business_name or '未指定'}")
 
-            all_records: List[Dict[str, Any]] = []
+            all_records: list[dict[str, Any]] = []
             page_num = 1
             pages_used = 0
             last_payload = None
@@ -573,7 +570,7 @@ def main() -> int:
             Path(args.out_domains).write_text("\n".join(ordered) + "\n", encoding="utf-8")
             print(f"[--out-domains] wrote {len(ordered)} unique domains to {args.out_domains}")
         else:
-            print(f"[--out-domains] 0 valid domains to write")
+            print("[--out-domains] 0 valid domains to write")
 
     return 1 if had_error else 0
 

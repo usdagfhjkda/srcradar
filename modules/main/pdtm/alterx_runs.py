@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """alterx 节奏控制:决定本轮是否跑 alterx 派生。
 
 子命令:
@@ -18,7 +16,7 @@ import argparse
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 DEFAULT_CADENCE_DAYS = 30
 
@@ -122,7 +120,7 @@ def main() -> int:
     if args.cmd == "should-run":
         forced = args.force or os.environ.get("FORCE_ALTERX") == "1"
         if forced:
-            print(f"[alterx_runs] FORCE_ALTERX 强制本轮跑", file=sys.stderr)
+            print("[alterx_runs] FORCE_ALTERX 强制本轮跑", file=sys.stderr)
             return 0
         run, reason = should_run(args.db, args.business_id, args.cadence_days)
         print(f"[alterx_runs] {reason}", file=sys.stderr)
