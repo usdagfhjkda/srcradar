@@ -35,7 +35,7 @@ jobs:
     name: go (db_align)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -60,7 +60,7 @@ jobs:
     name: python (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -81,7 +81,7 @@ jobs:
     name: shell (shellcheck)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -102,7 +102,7 @@ jobs:
     name: secrets (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history scan is fine — gitleaks is fast on this size.
           fetch-depth: 0
@@ -126,7 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # warn-only; do not block PRs yet
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: check Apache-2.0 / SPDX markers
         run: |
