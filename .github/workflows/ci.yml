@@ -110,7 +110,7 @@ jobs:
         with:
           # Full history scan is fine — gitleaks is fast on this size.
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Default config (no custom rules) — gitleaks community ruleset
