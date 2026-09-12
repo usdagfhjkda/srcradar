@@ -67,6 +67,23 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 
 > **运行要求**:srcradar 的主动扫描能力依赖 `install.sh` 自动装的外部工具(`httpx`、`dnsx`、`naabu`、`subfinder`、`alterx`、`cdncheck`)。这些工具不随仓库分发,需要先跑 `./check.sh` + `./install.sh`。详见 §五末尾工具列表与 §三-上游致谢。
 
+### Quick reference (`./srcradar` dispatcher)
+
+不必 `cd modules/<x>/<y>` —— 根目录的 `./srcradar` 自动发现并执行所有模块脚本:
+
+```bash
+./srcradar --list                    # 列出全部 (module, script) 对
+./srcradar manage add_business -n exampleCo    # 业务录入
+./srcradar manage set_config  -n exampleCo    # 配置修改
+./srcradar db init_db                          # 建空 SQLite
+./srcradar db check_schema                    # 校对 schema 漂移
+./srcradar pdtm scan -b exampleCo             # 单业务主动扫描
+./srcradar daily daily_monitor                 # 手动跑日级流水线
+./srcradar ymicp icp_mapp_query -b exampleCo  # 备案反查
+```
+
+模块解析顺序 `modules/private` → `modules/main` → `modules/public`(内部模块覆盖公开模块);脚本类型 `.sh` 优先于 `.py`,并要求 `.sh` 文件带可执行位。完整脚本列表跑 `./srcradar --list`。
+
 ---
 
 ## 一、项目目标

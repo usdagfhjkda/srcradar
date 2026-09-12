@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# srcradar — root-level dispatcher for all module scripts.
+#
+# Resolves <module> <script> from modules/{main,public,private}/ and
+# exec's the target. Zero business logic in this file; everything
+# lives in the submodule scripts.
+#
+# Usage:
+#   ./srcradar <module> <script> [args...]
+#   ./srcradar --list
+#   ./srcradar -h|--help
+#
+# Examples:
+#   ./srcradar manage add_business -n ExampleCo
+#   ./srcradar pdtm scan -b ExampleCo
+#   ./srcradar db init_db
+#   ./srcradar daily daily_monitor
+#   ./srcradar ymicp icp_mapp_query -b ExampleCo
+#
+# Module resolution order: modules/private > modules/main > modules/public
+# (internal modules override public / default-installed modules)
+# Script resolution order: <script>.sh > <script>.py
+# (executable bit required for .sh, optional for .py)
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+    sed -n '2,18p' "${BASH_SOURCE[0]}"
+    exit "${1:-0}"
+}
+
+print_help() { usage 0; }
+
+list_scripts() {
+    local prefix found=0
+    for prefix in modules/private modules/main modules/public; do
+        [ -d "${ROOT_DIR}/${prefix}" ] || continue
+        while IFS= read -r -d '' f; do
+            found=1
+            rel="${f#${ROOT_DIR}/}"
+            mod="$(printf '%s' "${rel}" | awk -F/ '{print $2}')"
+            base="$(basename "${f}")"
+            printf '  %-12s %s\n' "${mod}" "${base}"
+        done < <(find "${ROOT_DIR}/${prefix}" -mindepth 2 -maxdepth 2 \
+                    -type f \( -name '*.sh' -o -name '*.py' \) \
+                    -not -path '*/__pycache__/*' \
+                    -print0 | sort -z)
+    done
+    if [ "${found}" = "0" ]; then
+        printf '  (no scripts found under modules/{main,public,private})\n' >&2
+        exit 5
+    fi
+}
+
+case "${1:-}" in
+    -h|--help|"") print_help ;;
+    --list)        list_scripts; exit 0 ;;
+esac
+
+MODULE="${1:?missing <module>}"
+SCRIPT="${2:?missing <script>}"
+shift 2
+
+# Resolve module path: main > public > private
+MODULE_PATH=""
+for prefix in modules/private modules/main modules/public; do
+    if [ -d "${ROOT_DIR}/${prefix}/${MODULE}" ]; then
+        MODULE_PATH="${prefix}/${MODULE}"
+        break
+    fi
+done
+
+if [ -z "${MODULE_PATH}" ]; then
+    printf '[srcradar] ERROR: module "%s" not found under modules/{main,public,private}/\n' "${MODULE}" >&2
+    printf '       run "%s --list" to see available modules\n' "${BASH_SOURCE[0]}" >&2
+    exit 3
+fi
+
+# Resolve target file. Prefer .sh (must be +x), fall back to .py (any perm).
+TARGET=""
+for ext in sh py; do
+    cand="${ROOT_DIR}/${MODULE_PATH}/${SCRIPT}.${ext}"
+    if [ -f "${cand}" ]; then
+        if [ "${ext}" = "sh" ] && [ ! -x "${cand}" ]; then
+            printf '[srcradar] ERROR: %s exists but is not executable; chmod +x it first\n' "${cand}" >&2
+            exit 4
+        fi
+        TARGET="${cand}"
+        break
+    fi
+done
+
+if [ -z "${TARGET}" ]; then
+    printf '[srcradar] ERROR: script "%s.{sh,py}" not found in %s/\n' "${SCRIPT}" "${MODULE_PATH}" >&2
+    printf '       run "%s --list" to see available scripts\n' "${BASH_SOURCE[0]}" >&2
+    exit 4
+fi
+
+# Dispatch: exec replaces this process so argv / $0 stays correct
+# for the target script (its ${BASH_SOURCE[0]} resolves to itself,
+# not back to this dispatcher).
+case "${TARGET}" in
+    *.sh) exec "${TARGET}" "$@" ;;
+    *.py) exec python3 "${TARGET}" "$@" ;;
+    *)    printf '[srcradar] ERROR: %s has unsupported extension\n' "${TARGET}" >&2; exit 6 ;;
+esac
