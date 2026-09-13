@@ -1,0 +1,56 @@
+# ============================================================================
+# docker-compose.yml — srcradar single-host deployment
+#
+# Usage:
+#   docker compose up -d                    # background
+#   docker compose logs -f                  # follow logs
+#   docker compose exec srcradar bash       # interactive shell
+#   docker compose exec srcradar srcradar pdtm scan -b ExampleCo
+#   docker compose exec srcradar srcradar daily daily_monitor
+#   docker compose down                     # stop (data volume preserved)
+#
+# Persistence:
+#   - srcradar-data: /data (recon.sqlite3 + reports + snapshots + logs)
+#   - srcradar-config: /opt/srcradar/config (user-managed business configs)
+# ============================================================================
+
+services:
+  srcradar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SRCRADAR_VERSION: 0.1.0
+        PDTM_VERSION: v0.1.5       # pdtm 包管理器版本(锁);pdtm 拉的 PD 工具 = build 时 latest,被 image 冻结
+    image: ghcr.io/wgpsec/srcradar:0.1.0
+    container_name: srcradar
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      # TODO(Q3): ENScan cookie injection. Pick ONE:
+      #   (a) Mount a host directory (recommended for persistent sessions)
+      #       volumes: [ "~/.enscan:/data/enscan:ro" ]
+      #   (b) Pass a single cookie file via env (for CI / ephemeral runs)
+      #       ENSCAN_COOKIE_FILE: /run/secrets/enscan_cookie
+    volumes:
+      - srcradar-data:/data
+      - srcradar-config:/opt/srcradar/config
+      # Optional: ENScan cookie (uncomment to use)
+      # - ${HOME}/.enscan:/data/enscan:ro
+      # Optional: host naabu SYN mode requires NET_RAW; or use CONNECT mode
+      #   cap_add:
+      #     - NET_RAW
+    # cap_add:
+    #   - NET_RAW                  # uncomment if you want naabu SYN mode
+    ports:
+      # Dashboard: bind to localhost only; expose via SSH tunnel if remote
+      - "127.0.0.1:8765:8765"
+    # Default command prints help; override per-run:
+    #   docker compose exec srcradar srcradar pdtm scan -b ExampleCo
+    command: ["srcradar", "--list"]
+
+volumes:
+  srcradar-data:
+    name: srcradar-data
+  srcradar-config:
+    name: srcradar-config
