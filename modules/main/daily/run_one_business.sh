@@ -114,7 +114,8 @@ DAILY="$RECON_ROOT/main/daily"
 PDTM="$RECON_ROOT/main/pdtm"
 DBALIGN="$RECON_ROOT/public/db_align"
 YMICP="$RECON_ROOT/public/ymicp"
-DB="$RECON_ROOT/main/db/recon.sqlite3"
+# DB:env var > RECON_DB > 默认 RECON_ROOT/main/db/recon.sqlite3
+DB="${DB:-${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}}"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] [run_one] $*" >&2; }

@@ -30,7 +30,8 @@ cd "$SCRIPT_DIR"
 
 BUSINESS=
 INPUT_PATH=
-DB=../db/recon.sqlite3
+# DB:env var > RECON_DB > ../db/recon.sqlite3 默认(兼容 docker / 裸跑)
+DB="${DB:-${RECON_DB:-../db/recon.sqlite3}}"
 DRY_RUN=
 KEEP_FILES=
 SKIP_WILDCARD=
@@ -65,10 +66,12 @@ mkdir -p "$DB_DIR"
 # -ef 检查避免「cp 同源/目标」报错. 在 INPUT_PATH 已通过 -d 校验的前提下:
 #   - INPUT_PATH/target.txt 存在 → -ef 在「./ 就是 INPUT_PATH」时为真,跳过 cp
 #   - 其他情况 cp 到 pdtm/ 本地
+# -ef 检查保留为兜底(避免 cp 同源报错); 但 docker mount bind 场景下
+# -ef 误判,强制 cp -f. --keep-files 才能正常保留 target.txt.
 if [ "$INPUT_PATH/target.txt" -ef "target.txt" ]; then
-    :
+    cp -f "$INPUT_PATH/target.txt" "target.txt"
 else
-    cp "$INPUT_PATH/target.txt" "target.txt"
+    cp -f "$INPUT_PATH/target.txt" "target.txt"
 fi
 INPUT_GENERATED=1
 if [ -f "$INPUT_PATH/exclude.txt" ]; then

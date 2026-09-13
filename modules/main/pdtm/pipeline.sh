@@ -13,7 +13,7 @@
 #   -t, --target string           target 文件路径(默认 target.txt)
 #
 # PATHS:
-#   -d, --db string               DB 路径(默认 ../db/recon.sqlite3)
+#   -d, --db string               DB 路径(默认 ${DB:-${RECON_DB:-../db/recon.sqlite3}})
 #   -o, --scan-dir string         scanner 输出目录(默认 scan_results)
 #
 # STAGES:
@@ -46,7 +46,7 @@ TARGET_FILE=target.txt
 EXCLUDE_FILE=exclude.txt
 WILDCARD_OUT=wildcard.txt
 SCAN_DIR=scan_results
-DB=../db/recon.sqlite3
+DB=${DB:-${RECON_DB:-../db/recon.sqlite3}}
 DB_DIR="$(dirname "$DB")"
 
 BUSINESS=

@@ -47,7 +47,7 @@ set -euo pipefail
 export PATH="$PATH:$HOME/.pdtm/go/bin"
 
 RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DB="${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}"
+DB="${DB:-${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}}"
 
 NAME=""
 SEED=""

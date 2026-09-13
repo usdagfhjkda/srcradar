@@ -3502,7 +3502,7 @@ def main() -> int:
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         log.warn(f"BINDING TO {args.host} — recon data is now reachable beyond localhost!")
 
-    _State.db_path = _resolve_db(args.db)
+    _State.db_path = _resolve_db(args.db or os.environ.get("RECON_DB") or os.environ.get("DB"))
     _State.reload_lock = threading.Lock()
     # Eager initial load so the first request doesn't pay 5-10s of cold-start.
     try:

@@ -52,7 +52,7 @@ def _s(v: Any) -> Any:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="scanner.sh 结果入库工具")
     parser.add_argument("--business", required=True, help="业务名称")
-    parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite 数据库路径")
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help="SQLite 数据库路径")
     parser.add_argument("--scan-dir", default=str(DEFAULT_SCAN_DIR), help="scanner 输出目录")
     parser.add_argument("--target-file", default="target.txt", help="可测资产文件")
     parser.add_argument("--exclude-file", default="exclude.txt", help="非可测资产文件")
@@ -719,7 +719,7 @@ def _parse_scan_onesite_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--business", required=True, help="业务名")
     parser.add_argument("--hosts-file", required=True, type=Path,
                         help="一行一个域名的输入文件，可写 # 注释")
-    parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite 数据库路径")
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help="SQLite 数据库路径")
     return parser.parse_args(argv)
 
 
