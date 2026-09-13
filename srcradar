@@ -33,19 +33,42 @@ usage() {
 
 print_help() { usage 0; }
 
+# 别名处理:daily/dashboard → modules/main/daily/lib/dashboard.py
+# 注意:这个 alias 必须在 MODULE/SCRIPT 设置后立即执行,因为后续
+# Resolve module path 段会重新设 MODULE_PATH=""(非 export)
+# 所以 alias 要"重写"MODULE/SCRIPT 让后续 Resolve 自然走到 modules/main/daily
+list_scripts_alias() {
+    if [ "${MODULE}/$SCRIPT" = "daily/dashboard" ]; then
+        # 把 MODULE 改成一个特殊的 "daily_dashboard_alias" 让 Resolve 跳过
+        # 不行,Resolve 还是按模块名找目录。最简单:让 alias 设置 ALIAS_TARGET
+        # 然后 Resolve target 段根据 ALIAS_TARGET 直接设 TARGET
+        ALIAS_TARGET="/opt/srcradar/modules/main/daily/lib/dashboard.py"
+        export ALIAS_TARGET
+        export ALIAS_DAILY_LIB=1
+    fi
+}
+
 list_scripts() {
     local prefix found=0
     for prefix in modules/private modules/main modules/public; do
         [ -d "${ROOT_DIR}/${prefix}" ] || continue
+        # 扫 modules/<m>/<script>.{sh,py} + modules/<m>/lib/<script>.{sh,py}
+        # 过滤 install.sh/init.sh/check.sh(用户不该直接跑)
         while IFS= read -r -d '' f; do
             found=1
             rel="${f#${ROOT_DIR}/}"
             mod="$(printf '%s' "${rel}" | awk -F/ '{print $2}')"
             base="$(basename "${f}")"
             printf '  %-12s %s\n' "${mod}" "${base}"
-        done < <(find "${ROOT_DIR}/${prefix}" -mindepth 2 -maxdepth 2 \
+        done < <(find "${ROOT_DIR}/${prefix}" -mindepth 2 -maxdepth 3 \
                     -type f \( -name '*.sh' -o -name '*.py' \) \
                     -not -path '*/__pycache__/*' \
+                    -not -name 'install.sh' \
+                    -not -name 'init.sh' \
+                    -not -name 'check.sh' \
+                    -not -name 'init_db.py' \
+                    -not -name 'install_cron.sh' \
+                    -not -name 'check_schema.py' \
                     -print0 | sort -z)
     done
     if [ "${found}" = "0" ]; then
@@ -62,6 +85,8 @@ esac
 MODULE="${1:?missing <module>}"
 SCRIPT="${2:?missing <script>}"
 shift 2
+# 别名处理 (必须在 MODULE/SCRIPT 定义之后,因 alias 内引用)
+list_scripts_alias
 
 # Resolve module path: main > public > private
 MODULE_PATH=""
@@ -79,17 +104,28 @@ if [ -z "${MODULE_PATH}" ]; then
 fi
 
 # Resolve target file. Prefer .sh (must be +x), fall back to .py (any perm).
+# 别名检查 (list_scripts 已用,但 dispatch 前再调一次保险)
+list_scripts_alias
+
 TARGET=""
-for ext in sh py; do
-    cand="${ROOT_DIR}/${MODULE_PATH}/${SCRIPT}.${ext}"
-    if [ -f "${cand}" ]; then
-        if [ "${ext}" = "sh" ] && [ ! -x "${cand}" ]; then
-            printf '[srcradar] ERROR: %s exists but is not executable; chmod +x it first\n' "${cand}" >&2
-            exit 4
+# 别名:优先用 ALIAS_TARGET (e.g. daily/dashboard → lib/dashboard.py)
+if [ -n "${ALIAS_TARGET:-}" ] && [ -f "${ALIAS_TARGET}" ]; then
+    TARGET="${ALIAS_TARGET}"
+    SCRIPT="dashboard.py"  # for logging
+fi
+# 先查模块根目录 <SCRIPT>.{sh,py},再查 lib/<SCRIPT>.{sh,py}
+for base in "" "lib/"; do
+    for ext in sh py; do
+        cand="${ROOT_DIR}/${MODULE_PATH}/${base}${SCRIPT}.${ext}"
+        if [ -f "${cand}" ]; then
+            if [ "${ext}" = "sh" ] && [ ! -x "${cand}" ]; then
+                printf '[srcradar] ERROR: %s exists but is not executable; chmod +x it first\n' "${cand}" >&2
+                exit 4
+            fi
+            TARGET="${cand}"
+            break 2
         fi
-        TARGET="${cand}"
-        break
-    fi
+    done
 done
 
 if [ -z "${TARGET}" ]; then
@@ -101,6 +137,30 @@ fi
 # Dispatch: exec replaces this process so argv / $0 stays correct
 # for the target script (its ${BASH_SOURCE[0]} resolves to itself,
 # not back to this dispatcher).
+# 默认 DB 路径:docker entrypoint 把 DB 写到 /data/recon.sqlite3;
+# 若用户没显式 RECON_DB / DB,且 /data/recon.sqlite3 存在,用之;
+# 否则让子脚本用自己的 default (RECON_ROOT/main/db/...).
+# DB 路径自动推断(用户不需指定):
+#   1) /opt/srcradar/db/recon.sqlite3(image 内固定,entrypoint init-db 写的)
+#   2) /data/recon.sqlite3(兼容老 mount)
+#   3) 用户显式 RECON_DB / DB 优先
+if [ -z "${RECON_DB:-}" ] && [ -z "${DB:-}" ]; then
+    if [ -f /opt/srcradar/db/recon.sqlite3 ]; then
+        export RECON_DB=/opt/srcradar/db/recon.sqlite3
+        export DB=/opt/srcradar/db/recon.sqlite3
+    elif [ -f /data/recon.sqlite3 ]; then
+        export RECON_DB=/data/recon.sqlite3
+        export DB=/data/recon.sqlite3
+    fi
+fi
+# 某些模块脚本(如 pdtm/scan.sh)假设 CWD 在自己的目录。
+# 用模块目录作为 CWD,让用户免去手动 cd。
+# 例外:daily/dashboard 别名要求 CWD 在 lib/(dashboard.py 引用同目录模块)
+if [ -n "${ALIAS_DAILY_LIB:-}" ]; then
+    cd "${ROOT_DIR}/modules/main/daily/lib"
+else
+    cd "${ROOT_DIR}/${MODULE_PATH}"
+fi
 case "${TARGET}" in
     *.sh) exec "${TARGET}" "$@" ;;
     *.py) exec python3 "${TARGET}" "$@" ;;
