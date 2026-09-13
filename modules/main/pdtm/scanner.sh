@@ -144,8 +144,7 @@ awk '{print $1}' "$DNSX_INPUT_RAW" \
 | tr -d '\r' \
 | sed -e 's|https\?://||g' -e 's|/.*||g' \
 | grep -E '^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$' \
-| sort -u \
-: > 
+| sort -u -o "$OUTPUT_DIR/pure_domains.txt"
 
 DOMAIN_COUNT=$(grep -c . "$OUTPUT_DIR/pure_domains.txt" || true)
 
@@ -241,8 +240,8 @@ log "[+] 扫描目标: 非CDN IP: $NON_CDN_IP_COUNT, 非CDN 域名: $NON_CDN_DOM
 # ==============================================================================
 log "[*] 阶段 3: 过滤大型负载均衡..."
 
-: > 
-: > 
+: > "$OUTPUT_DIR/pure_domains.txt"
+: > "$OUTPUT_DIR/pure_domains.txt"
 
 FILTERED_LB=0
 
@@ -282,13 +281,12 @@ cat "$OUTPUT_DIR/cdn_ips.txt" \
     "$OUTPUT_DIR/cloud_ips.txt" \
     "$OUTPUT_DIR/lb_ips.txt" \
     2>/dev/null \
-| sort -u \
-: > 
+| sort -u -o "$OUTPUT_DIR/cdn_lb_combined_ips.txt"
 
 CDN_LB_TOTAL=$(wc -l < "$OUTPUT_DIR/cdn_lb_combined_ips.txt" | tr -d ' ')
 log "[+] CDN+LB合并IP总数: $CDN_LB_TOTAL 个"
 
-: > 
+: > "$OUTPUT_DIR/pure_domains.txt"
 CDN_LB_WEB_COUNT=0
 
 if [ "$CDN_LB_TOTAL" -gt 0 ]; then
@@ -391,8 +389,7 @@ naabu -l "$OUTPUT_DIR/non_cdn_ips.txt" \
       2>/dev/null \
 | sed 's|https\?://||g' \
 | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$' \
-| sort -u \
-: > 
+| sort -u -o "$OUTPUT_DIR/raw_naabu_passive.txt"
 
 NAABU_COUNT=$(grep -c . "$OUTPUT_DIR/raw_naabu_passive.txt" || true)
 
@@ -429,7 +426,7 @@ log "[+] naabu 主动扫描发现 $NAABU_ACTIVE_COUNT 个端口"
 # ------------------------------------------------------------------------------
 log "[*] 阶段 4.5: 主动扫描结果 IP→域名 反查映射..."
 
-: > 
+: > "$OUTPUT_DIR/pure_domains.txt"
 
 while read -r line; do
 
@@ -479,7 +476,7 @@ log "[*] 阶段 5: httpx 主动探测..."
 
 # 构造 domain:port 输入（带 Host 头，避免共享 IP 默认页 404）
 # 每个 non-CDN IP 取所有绑定域名 × 9 端口 = Host 自动对 + 端口全覆盖
-: > 
+: > "$OUTPUT_DIR/pure_domains.txt"
 while read -r ip; do
     [ -z "$ip" ] && continue
     grep "^$ip " "$FILE_IP" \
@@ -518,7 +515,7 @@ log "[+] 主动探测发现 $ACTIVE_COUNT 个存活端口"
 # ==============================================================================
 log "[*] 阶段 6: URL 清洗（输入已是 domain:port,无需 IP 反查）..."
 
-: > 
+: > "$OUTPUT_DIR/pure_domains.txt"
 
 while read -r line; do
 
@@ -554,8 +551,7 @@ cat "$OUTPUT_DIR/raw_naabu_passive.txt" \
     2>/dev/null \
 | sed 's|https\?://||g' \
 | grep -E '^.+:[0-9]+$' \
-| sort -u \
-: > 
+| sort -u -o "$OUTPUT_DIR/non_cdn_all_ports.txt"
 
 ALL_COUNT=$(grep -c . "$OUTPUT_DIR/non_cdn_all_ports.txt" || true)
 
@@ -633,8 +629,7 @@ cat "$OUTPUT_DIR/raw_naabu_passive.txt" \
     2>/dev/null \
 | sed 's|https\?://||g' \
 | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$' \
-| sort -u \
-: > 
+| sort -u -o "$OUTPUT_DIR/tmp_all_ip_ports.txt"
 
 log "[!] web IP:端口列表:"
 cat "$OUTPUT_DIR/tmp_web_ip_ports.txt" | while read l; do log "    $l"; done
@@ -645,7 +640,7 @@ cat "$OUTPUT_DIR/tmp_all_ip_ports.txt" | while read l; do log "    $l"; done
 comm -23 \
     "$OUTPUT_DIR/tmp_all_ip_ports.txt" \
     "$OUTPUT_DIR/tmp_web_ip_ports.txt" \
-: > 
+> "$OUTPUT_DIR/non_cdn_tcp_ports.txt"
 
 rm -f "$OUTPUT_DIR/tmp_web_ip_ports.txt" \
       "$OUTPUT_DIR/tmp_all_ip_ports.txt"
