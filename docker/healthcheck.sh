@@ -14,6 +14,7 @@ set -euo pipefail
 
 DATA=/opt/srcradar/db
 BIN=/opt/srcradar/bin
+# shellcheck disable=SC2034
 EXPECTED_BINS=(pdtm dnsx httpx subfinder alterx naabu cdncheck cdnmatch db_align)
 # (上方的 EXPECTED_BINS 保留只为向后兼容文档;实际检查见下方 REQUIRED_BINS / PD_CORE)
 
