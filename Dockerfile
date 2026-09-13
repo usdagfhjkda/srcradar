@@ -84,13 +84,26 @@ COPY modules/public/db_align ./db_align-src
 WORKDIR /build/db_align-src
 RUN go build -o /out/db_align ./cmd/run
 
-# ---- 4) ENScan(vendored at .vendor/enscan-go/,Apache-2.0)----
-# 不在 builder stage clone 上游:
-#   - upstream wgpsec/ENScan_GO 已删除(API 404)
-#   - 后续 fork(mssky9527/zh0u9527)未验证稳定性
-# 直接 COPY 本仓已 vendor 的源码; Apache-2.0 LICENSE 保留在 code/LICENSE
-# 修改清单见 docker/MODIFICATIONS.txt (§5 合规)
-COPY .vendor/enscan-go /tmp/ENScan_GO
+# ---- 4) ENScan(cloned from archival mirror,Apache-2.0)----
+# Source: usdagfhjkda/wgpsec-ENScan_GO, an archival mirror of the
+# deleted upstream wgpsec/ENScan_GO (commit 9969d51 by keac).
+# We pin the tag wgpsec-v1.4.0-fork1 instead of a branch or SHA so
+# that future upstream-archive revisions require an explicit
+# Dockerfile bump, mirroring how PDTM_VERSION is pinned.
+#
+# The mirror's MODIFICATIONS.md is included in the clone but
+# discarded after the build (rm -rf) so it does not enter the
+# runtime image. Apache-2.0 LICENSE at code/LICENSE is preserved
+# in the source tree we compile but is not copied to the runtime.
+#
+# srcradar-specific changes (qimai module) are NOT applied here;
+# srcradar shells out to ENScan via db_align, and the modifications
+# currently in srcradar are documented in docker/MODIFICATIONS.txt
+# for the historical .vendor/ tree. Future srcradar consumer
+# patches should live on top of the mirror, not inside it.
+ARG ENSCAN_GO_REPO=https://github.com/usdagfhjkda/wgpsec-ENScan_GO.git
+ARG ENSCAN_GO_TAG=wgpsec-v1.4.0-fork1
+RUN git clone --branch "${ENSCAN_GO_TAG}" "${ENSCAN_GO_REPO}" /tmp/ENScan_GO
 WORKDIR /tmp/ENScan_GO/code
 # vendor 自带 build.sh 依赖 xgo + upx,Dockerfile 不调;直接 go build
 RUN go build -o /out/ENScan . && \
