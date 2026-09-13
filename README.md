@@ -86,6 +86,47 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 
 ---
 
+## 一点零、Docker 快速启动
+
+> 单容器把 srcradar 全栈跑起来:DB 持久化到 named volume,业务 scope 从 bind-mount 目录喂入,dashboard 默认仅 loopback 暴露(下文给一条 `--host 0.0.0.0` 的命令用于同主机访问)。
+
+```bash
+# 1. 加载本地镜像(从 srcradar-0.1.0.tar)
+sudo docker load -i /home/ubuntu/srcradar-0.1.0.tar
+
+# 2. 启动容器
+#    -v ~/scope:/scope             target.txt / exclude.txt 输入目录
+#    -v srcradar-db:/opt/srcradar/db   DB 持久化(named volume,容器删了 DB 还在)
+#    -p 127.0.0.1:8765:8765        dashboard 仅本机可访问(防公网暴露)
+sudo docker run -d --name srcradar \
+  -v ~/scope:/scope \
+  -v srcradar-db:/opt/srcradar/db \
+  -p 127.0.0.1:8765:8765 \
+  srcradar:0.1.0
+
+# 3. 进容器交互 shell
+sudo docker exec -it srcradar /bin/bash
+
+# 4. 列脚本(验证 dispatcher)
+srcradar --list
+
+# 5. 喂入一个精确单子域 + 注册业务
+echo www.scanme.sh > /scope/target.txt
+srcradar manage add_business -n test -i /scope
+
+# 6. 跑该业务的 pdtm 流水线(dnsx + scanner.sh + import)
+srcradar daily run_one_business test
+
+# 7. 起 dashboard(同主机访问用 --host 0.0.0.0;仅自己访问可省)
+srcradar daily dashboard --host 0.0.0.0
+```
+
+> **端口暴露面**:`-p 127.0.0.1:8765:8765` 仅绑定 loopback,公网与内网其他机器都访问不到;要看 dashboard,从同主机 `curl http://127.0.0.1:8765/` 即可,或从远端走 SSH 隧道 (`ssh -L 8765:127.0.0.1:8765 user@recon-host`)。
+>
+> **DB 持久化**:`srcradar-db` 是 docker named volume,容器被 `docker rm` 后下次 `docker run -v srcradar-db:/opt/srcradar/db` 还能挂回同名 volume,业务数据不丢。需要看 DB 内容:`sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`。
+>
+> **target.txt 一次性消费**:`add_business` 成功后会自动清理 `/scope/target.txt`(README §八-14);下次再喂 scope 直接重写 `/scope/target.txt` 重跑 `add_business` 即可。
+
 ## 一、项目目标
 
 为 SRC(安全响应中心)运营场景,把「业务名 → 法律实体图谱 → 主动测绘资产 → 每日增量监控」做成一条流水线:
