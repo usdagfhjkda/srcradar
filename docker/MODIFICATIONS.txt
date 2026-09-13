@@ -1,0 +1,96 @@
+srcradar vendor of ENScan_GO — modifications made
+==================================================
+
+Upstream:    https://github.com/wgpsec/ENScan_GO  (now deleted)
+Upstream commit: 9969d5156c2fec80d5f4724b8d6d6bbb45471933
+                (HEAD of master, 2026-03-28, by keac <admin@wgpsec.org>)
+Upstream license: Apache License 2.0
+                (full text in code/LICENSE; preserved verbatim)
+Vendor date: 2026-07-24
+Vendor location (this srcradar repo): .vendor/enscan-go/
+
+────────────────────────────────────────────────────────────────────
+Files modified by srcradar (relative to upstream code/ tree):
+────────────────────────────────────────────────────────────────────
+
+1. common/config.go
+   - 1-line change: added "qimai" to the ENSApps list
+   - var ENSApps = []string{"miit"}  →  var ENSApps = []string{"miit", "qimai"}
+   - Effect: enables the qimai (七麦) app module; without this line the
+     qimai module added in #2/#3/#4 below would not be reachable.
+
+2. internal/app/qimai/qimai.go
+   - Full rewrite (~140 lines): original three top-level functions
+     (GetInfoByKeyword / GetInfoByCompanyId / getInfoList) replaced
+     with a Qimai struct implementing the v2 ENScan App interface:
+       GetENMap / searchCompanyId / GetInfoList / GetInfoByPage /
+       fetchAppList
+   - Effect: matches the interface contract that db_align expects when
+     shelling out to ENScan; upstream's original function signatures
+     were incompatible with srcradar's runner.go consumer.
+
+3. internal/app/qimai/utils.go
+   - Companion change to #2: removed local type definitions (EnsGo,
+     EnInfos, GetData) that were promoted into the common package
+     (so qimai.go's struct methods can share them); updated getENMap()
+     to return common.EnsGo instead of the local type.
+   - Misc: dropped unused "github.com/tidwall/gjson" import; modernised
+     "for k, _ := range" → "for k := range" (Go 1.22+ lint).
+
+4. runner/runner.go
+   - 2-line change:
+       a) imported "github.com/wgpsec/ENScan/internal/app/qimai"
+       b) registered the app: "qimai": &qimai.Qimai{Options: op}
+          in the runner's apps map.
+   - Effect: wires the qimai module into the dispatch map. Without
+     this line the new qimai.go code would never be called.
+
+────────────────────────────────────────────────────────────────────
+Rationale
+────────────────────────────────────────────────────────────────────
+
+Enable qimai (七麦 / qimai) as a data source for db_align's ENScan
+wrapper. The upstream ENScan_GO at the vendor commit did not include
+qimai integration; srcradar added it to extend db_align's data
+source coverage to APP metadata (应用宝 / App Store metadata).
+
+The rewrite of qimai.go (#2) is the only substantive change. The
+other three files (#1, #3, #4) are the supporting wiring needed to
+make #2 reachable.
+
+────────────────────────────────────────────────────────────────────
+Compliance with Apache License 2.0 §5
+────────────────────────────────────────────────────────────────────
+
+§5(a) — recipients receive a copy of this License:
+    ✔ LICENSE file preserved verbatim at .vendor/enscan-go/code/LICENSE
+      (not modified, not removed).
+
+§5(b) — indicate that modified files have been modified:
+    ✔ This file (docker/MODIFICATIONS.txt) ships in the srcradar
+      Docker image and the source tree, listing the 4 files modified
+      and what changed.
+
+§5(c) — preserve copyright/patent/trademark/attribution notices
+    in source form:
+    ✔ The upstream LICENSE contains the copyright notice ("Copyright
+      2026 srcradar contributors" is not added by srcradar; the
+      upstream copyright holder is keac per LICENSE boilerplate).
+      srcradar's own NOTICE file also credits ENScan_GO separately.
+
+§5(d) — if Work includes NOTICE, include attribution notices:
+    ✔ Upstream did NOT ship a NOTICE file. This obligation is therefore
+      N/A. srcradar's own NOTICE nonetheless credits ENScan_GO
+      upstream and keac @ wgpsec.
+
+────────────────────────────────────────────────────────────────────
+Context: upstream repository deletion
+────────────────────────────────────────────────────────────────────
+
+Since this vendor was taken on 2026-07-24, the upstream repository
+(wgpsec/ENScan_GO) has been deleted by its owner. Per Apache-2.0 §4
+("This License is irrevocable"), deletion of the upstream repository
+does not terminate or alter this vendor's right to redistribute the
+source under the original terms. Subsequent forks (mssky9527/ENScan_GO
+and zh0u9527/ENScan_GO on GitHub) exist but were created after the
+upstream deletion and are not used by this srcradar release.

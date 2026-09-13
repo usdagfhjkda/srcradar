@@ -1,0 +1,103 @@
+# ============================================================================
+# .dockerignore — keep the build context small
+#
+# srcradar build context = current repo root (Dockerfile expects modules/ at
+# root, srcradar dispatcher, etc.). We exclude:
+#   - everything gitignored (.gitignore is source of truth for vendor/build)
+#   - Python caches
+#   - local data, logs, configs
+# ============================================================================
+
+# ---- git (rebuild context has no need) ----
+.git
+.gitignore
+
+# ---- vendored upstream ----
+# db_align 的 vendor(已 .gitignore,这里再 exclude 防 COPY 进 image)
+modules/public/db_align/ENScan_GO/
+# pdtm 的 vendor: cdncheck(本仓 in-tree,go.mod replace 指向 ../cdncheck)
+modules/main/pdtm/cdncheck/
+
+# ---- srcradar 自己 vendor 的上游源码(.vendor/ 不进 git 但需要进 image)----
+# 不排除 .vendor/ 本身(Dockerfile step 4 COPY 它)
+# 但要剥掉 .vendor/ 内的 .claude/ 和 .git/ (如果有)
+.vendor/**/.claude/
+.vendor/**/.git/
+.vendor/**/code.bak.*
+
+# ---- build artifacts ----
+modules/main/pdtm/bin/
+modules/public/db_align/bin/
+modules/main/pdtm/cdnmatch/cdncheck
+**/*.test
+**/*.out
+
+# ---- runtime data (generated, not source) ----
+modules/main/db/*.sqlite3*
+modules/main/db/recon.sqlite3*
+scan_results/
+scan_outputs/
+logs/
+*.log
+modules/main/daily/reports/
+modules/main/daily/snapshots/2*.json
+modules/main/daily/.lock
+modules/main/daily/logs/
+modules/public/db_align/logs/
+modules/public/db_align/.claude/
+
+# ---- Python caches ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- editor / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ---- temp / backup ----
+*.bak
+*.orig
+*.rej
+*.tmp
+.tmp/
+
+# ---- Hermes / Claude agent workspace (NEVER ship into image) ----
+.hermes/
+
+# ---- private modules (per .gitignore: future internal only) ----
+modules/private/*
+!modules/private/.gitkeep
+
+# ---- local config (user-specific; mount at runtime) ----
+config/*
+!config/.gitkeep
+*.local.yaml
+*.local.yml
+.env
+.env.*
+
+# ---- docs / extras (not needed in image; image is executable, not docs) ----
+*.md
+!README.md
+!LICENSE
+!NOTICE
+!TERMS_ADDENDUM.md
+assets/
+
+# ---- CI files (not needed in image) ----
+.github/
+
+# ---- the docker files themselves (avoid self-reference in build context) ----
+# 但 entrypoint.sh / healthcheck.sh / MODIFICATIONS.txt 必须 COPY 进 image
+# 所以只排除顶层 Dockerfile 和 docker-compose.yml
+# Dockerfile:不 COPY(我们用 builder /out-bin + COPY modules/,不需要 Dockerfile)
+# docker-compose.yml:用户外部编排,不入 image
