@@ -104,7 +104,7 @@ RUN go build -o /out/db_align ./cmd/run
 ARG ENSCAN_GO_REPO=https://github.com/usdagfhjkda/wgpsec-ENScan_GO.git
 ARG ENSCAN_GO_TAG=wgpsec-v1.4.0-fork1
 RUN git clone --branch "${ENSCAN_GO_TAG}" "${ENSCAN_GO_REPO}" /tmp/ENScan_GO
-WORKDIR /tmp/ENScan_GO/code
+WORKDIR /tmp/ENScan_GO
 # vendor 自带 build.sh 依赖 xgo + upx,Dockerfile 不调;直接 go build
 RUN go build -o /out/ENScan . && \
     rm -rf /tmp/ENScan_GO
