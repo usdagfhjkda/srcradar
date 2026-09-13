@@ -38,6 +38,18 @@ cookie.log
 scan_results/
 scan_outputs/
 logs/
+
+# ---- pdtm 模块根目录下的运行时产物(单文件,scan.sh / scope_import.sh / scanner.sh 生成) ----
+modules/main/pdtm/alive.txt
+modules/main/pdtm/alterx.txt
+modules/main/pdtm/dnsx_output.txt
+modules/main/pdtm/exclude.txt
+modules/main/pdtm/target.txt
+modules/main/pdtm/no_wildcard.txt
+modules/main/pdtm/wildcard.txt
+modules/main/pdtm/targets.regex
+modules/main/pdtm/excludes.regex
+modules/main/pdtm/.lock
 *.log
 modules/main/daily/reports/
 modules/main/daily/snapshots/2*.json
