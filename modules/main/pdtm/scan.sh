@@ -30,7 +30,7 @@ EXCLUDE="exclude.txt"
 ALIVE="alive.txt"
 ALTERX_OUT="alterx.txt"
 DNSX_OUT="dnsx_output.txt"
-DB="${DB:-db/recon.sqlite3}"
+DB="${DB:-${RECON_DB:-db/recon.sqlite3}}"
 BUSINESS_ID="${BUSINESS_ID:-1}"
 WORDLIST="${WORDLIST:-}"
 if [ -n "$WORDLIST" ] && [ -f "$WORDLIST" ]; then
@@ -101,12 +101,35 @@ if [ -s "$PRECISE_HOSTS" ]; then
 fi
 rm -f "$PRECISE_HOSTS"
 
-# ===== 早期快路径:target 全部为精确子域(无 *)→ 已入 DNSX_OUT,直接退出 =====
+# ===== 早期快路径:target 全部为精确子域(无 *)→ 仍要跑完整流程(dnsx + scanner) =====
+# 精确子域不能直接 exit 0 — 下游 scanner.sh / import 都不会跑,
+# 那样精确子域只会产生 DNSX_OUT,没有 tcp_assets / web_hashes。
+# 这里跑 dnsx 解析精确子域,然后继续往下走(后续 subfinder 循环会空跑,无副作用)。
 if [ ! -s "$GLOB_HOSTS" ]; then
-    rm -f "$GLOB_HOSTS"
+    # keep GLOB_HOSTS (mktemp) alive — line 144 target_glob.py all-bases
+    # reads it; empty file is fine (returns no bases, falls into
+    # the "no glob base" skip path below).
     [ -s "$DNSX_OUT" ] && sort -u "$DNSX_OUT" -o "$DNSX_OUT"
-    echo "[+] done -> $DNSX_OUT ($(wc -l < "$DNSX_OUT") 条) (精确快路径)"
-    exit 0
+    echo "[+] 精确快路径:$(wc -l < "$DNSX_OUT") 条已入 DNSX_OUT,继续跑 dnsx"
+    # dnsx 解析精确子域 → 写 ALIVE(给 scanner.sh 用)
+    DNSX_BIN="${DNSX_BIN:-$HOME/.pdtm/go/bin/dnsx}"
+    [ -x "$DNSX_BIN" ] || DNSX_BIN=$(command -v dnsx || echo /opt/srcradar/bin/dnsx)
+    [ -x "$DNSX_BIN" ] || DNSX_BIN=$(command -v dnsx || true)
+    if [ -x "$DNSX_BIN" ]; then
+        echo "[*] dnsx (精确快路径) ..."
+        "$DNSX_BIN" -rl 100 -t 150 -retry 2 -o "$ALIVE" -r "$RESOLVERS_CSV" < "$DNSX_OUT" || true
+        LINES=$(wc -l < "$ALIVE")
+        echo "[*] alive: $LINES 条"
+        # 把 alive 追加到 DNSX_OUT(scanner.sh 阶段 1 读 DNSX_OUT)
+        [ -s "$ALIVE" ] && cat "$ALIVE" >> "$DNSX_OUT" && sort -u "$DNSX_OUT" -o "$DNSX_OUT"
+    else
+        echo "[!] 跳过 dnsx (找不到 binary),精确子域无 alive 数据"
+    fi
+    # 精确快路径后续:不跑 alterx/permutation/wildcard(那些针对 glob 模式),
+    # 但保留空 targets.regex + 跳过 subfinder 循环,让 scanner.sh 接管。
+    : > targets.regex; echo '^  * $' > targets.regex
+    : > excludes.regex
+    SUBS_TMP="$(mktemp)"   # fast-path 提前定义,避免 set -u unbound
 fi
 
 # ===== 后续:glob 流程(ERE 编译 → subfinder → alterx → permutation_cache → wildcard) =====
@@ -121,7 +144,14 @@ python3 target_glob.py excludes-ere --input "$EXCLUDE" > excludes.regex
 
 # BASES 只从 glob 模式提取 — 精确子域无需 subfinder 枚举(已在 DNSX_OUT)
 BASES=$(python3 target_glob.py all-bases --input "$GLOB_HOSTS" || true)
-[ -n "$BASES" ] || { echo "[-] target.txt 里没有可用的 glob base" >&2; exit 1; }
+# 精确子域快路径(target 全无 *)已在阶段 0 把 PRECISE_HOSTS 直入 DNSX_OUT,
+#   glob base 本来就是空,继续往下走让 subfinder/alterx 空跑、无副作用。
+# 不在这里 exit 1,否则 scanner.sh / import 都不会跑。
+if [ -z "$BASES" ] && [ -s "$DNSX_OUT" ]; then
+    : # precise fast-path; continue
+elif [ -z "$BASES" ]; then
+    echo "[-] target.txt 里没有可用的 glob base" >&2; exit 1
+fi
 rm -f "$GLOB_HOSTS"
 
 # 剔除泛解析 base：它们已被阶段 6 的 wildcard 独立 subfinder 路径覆盖
