@@ -65,8 +65,11 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 ## 快速开始
 
 ```bash
-# 1. 检查环境(只查不装):
-#    需要 go>=1.25, python3>=3.12, git>=2.0
+# 0. 拉代码(public 镜像)
+git clone https://github.com/usdagfhjkda/srcradar.git
+cd srcradar
+
+# 1. 检查环境(只查不装):需要 go>=1.25, python3>=3.12, git>=2.0
 ./check.sh
 
 # 2. 装所有上游依赖(pdtm -> PD 工具 -> cdnmatch -> 自动 init-db;
@@ -79,6 +82,24 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 #     见 [db_align/README.md](./modules/public/db_align/README.md) §运维)
 
 # 4. (可选) 如需小程序备案反查 plugin,详见 [ymicp/README.md](./modules/public/ymicp/README.md) §部署
+
+# 装完先看一眼 dispatcher 能干啥(列出全部 module/script 对,常用 cheat sheet)
+./srcradar --list
+
+# 5. 喂入一个精确单子域 + 注册业务
+#    add_business -i <dir> 要求目录下有 target.txt;
+#    成功后会自动清理 target.txt(详见 已知问题 §14)
+mkdir -p ~/scope
+echo www.scanme.sh > ~/scope/target.txt
+./srcradar manage add_business -n test -i ~/scope
+
+# 6. 跑该业务的 pdtm 流水线(dnsx + scanner.sh + import)
+#    stages 由 recon_business_config 表按位 gating(详见 日常运维):
+#    -n test 业务用默认值 web=1 / tcp=0 / icp=1,实际跑 pdtm + icp
+./srcradar daily run_one_business test
+
+# 7. 起 dashboard(默认 127.0.0.1:8765,仅本机可访问;docker / 远程访问见 §Docker 启动)
+./srcradar daily dashboard
 ```
 
 > **入口约定**:`check.sh` 与 `install.sh` 是 2026-09 重构后的入口;老 `init.sh` 仅保留 `--init-db` / `--check-schema` 两个独立工具入口(详见 [日常运维](#日常运维))。
