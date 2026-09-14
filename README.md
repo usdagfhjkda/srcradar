@@ -30,11 +30,11 @@
 | **可选 plugin** | `db_align`（enscan，企业图谱，标 LOCKED tag）+ `ymicp`（小程序 / 公众号备案反查） | 自部署、自启用 |
 | **共享数据** | 单 SQLite (`db/recon.sqlite3`) 串联所有产出 |
 
-可选用 plugin 的安装 / 使用 / 运维 详见各自 README：[`db_align/README.md`](./modules/public/db_align/README.md) · [`ymicp/README.md`](./modules/public/ymicp/README.md)。**仅供合法授权场景使用**（详见 §零）。本工具**只做信息收集**，不涉及漏洞利用。
+可选用 plugin 的安装 / 使用 / 运维 详见各自 README：[`db_align/README.md`](./modules/public/db_align/README.md) · [`ymicp/README.md`](./modules/public/ymicp/README.md)。**仅供合法授权场景使用**（详见使用前提与合规）。本工具**只做信息收集**，不涉及漏洞利用。
 
 ---
 
-## 使用前提（必读）
+## 使用前提与合规
 
 本工具**仅供持有合法书面授权的用户**使用，合规授权包括但不限于：
 
@@ -52,7 +52,17 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 
 ---
 
-## Quick start
+## 是什么
+
+为 SRC(安全响应中心)运营场景,把「业务名 → 法律实体图谱 → 主动测绘资产 → 每日增量监控」做成一条流水线:
+
+- **数据契约**:所有产出沉淀在一个共享的 SQLite(`db/recon.sqlite3`),按业务名隔离
+- **运维契约**:每天 03:00 北京时间自动跑一轮,产出增量报告 + 本地可视化 dashboard
+- **协作契约**:不抢上游(`ENScan_GO`)、不抢下游(其它 recon 工具),只做连接与编排
+
+---
+
+## 快速开始
 
 ```bash
 # 1. 检查环境(只查不装):
@@ -71,13 +81,13 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 # 4. (可选) 如需小程序备案反查 plugin,详见 [ymicp/README.md](./modules/public/ymicp/README.md) §部署
 ```
 
-> **入口约定**:`check.sh` 与 `install.sh` 是 2026-09 重构后的入口;老 `init.sh` 仅保留 `--init-db` / `--check-schema` 两个独立工具入口(详见 [§五](#五快速开始))。
+> **入口约定**:`check.sh` 与 `install.sh` 是 2026-09 重构后的入口;老 `init.sh` 仅保留 `--init-db` / `--check-schema` 两个独立工具入口(详见 [日常运维](#日常运维))。
 
 > **新 shell 必跑**:`pdtm` 与 PD 工具装到 `~/go/bin/` 与 `~/.pdtm/go/bin/`,**不会**自动进当前 shell 的 PATH;新开的 shell 需要手动 `source ~/.bashrc` 或 `source ~/.zshrc`(按你的 shell 选),或者在脚本里 `export PATH="$PATH:$HOME/go/bin:$HOME/.pdtm/go/bin"` 才能直接 `pdtm` / `dnsx` 不报 not found。
 
 > **装到哪**:pdtm 装到 `~/go/bin/`;PD 工具链(dnsx/httpx/subfinder/alterx/naabu/cdncheck 等)由 pdtm 管理在 `~/.pdtm/go/bin/`;cdnmatch 在 `pdtm/bin/`;空 DB `db/recon.sqlite3` 由 install.sh 末尾自动建。详见 [`install.sh`](install.sh) 头部注释。
 
-> **运行要求**:srcradar 的主动扫描能力依赖 `install.sh` 自动装的外部工具(`httpx`、`dnsx`、`naabu`、`subfinder`、`alterx`、`cdncheck`)。这些工具不随仓库分发,需要先跑 `./check.sh` + `./install.sh`。详见 §五末尾工具列表与 §三-上游致谢。
+> **运行要求**:srcradar 的主动扫描能力依赖 `install.sh` 自动装的外部工具(`httpx`、`dnsx`、`naabu`、`subfinder`、`alterx`、`cdncheck`)。这些工具不随仓库分发,需要先跑 `./check.sh` + `./install.sh`。详见 上游致谢。
 
 ### Quick reference (`./srcradar` dispatcher)
 
@@ -98,7 +108,7 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 
 ---
 
-## 一点零、Docker 快速启动
+## Docker 启动
 
 > 单容器把 srcradar 全栈跑起来:DB 持久化到 named volume,业务 scope 从 bind-mount 目录喂入,dashboard 默认仅 loopback 暴露(下文给一条 `--host 0.0.0.0` 的命令用于同主机访问)。
 
@@ -137,19 +147,11 @@ srcradar daily dashboard --host 0.0.0.0
 >
 > **DB 持久化**:`srcradar-db` 是 docker named volume,容器被 `docker rm` 后下次 `docker run -v srcradar-db:/opt/srcradar/db` 还能挂回同名 volume,业务数据不丢。需要看 DB 内容:`sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`。
 >
-> **target.txt 一次性消费**:`add_business` 成功后会自动清理 `/scope/target.txt`(README §八-14);下次再喂 scope 直接重写 `/scope/target.txt` 重跑 `add_business` 即可。
-
-## 一、项目目标
-
-为 SRC(安全响应中心)运营场景,把「业务名 → 法律实体图谱 → 主动测绘资产 → 每日增量监控」做成一条流水线:
-
-- **数据契约**:所有产出沉淀在一个共享的 SQLite(`db/recon.sqlite3`),按业务名隔离
-- **运维契约**:每天 03:00 北京时间自动跑一轮,产出增量报告 + 本地可视化 dashboard
-- **协作契约**:不抢上游(`ENScan_GO`)、不抢下游(其它 recon 工具),只做连接与编排
+> **target.txt 一次性消费**:`add_business` 成功后会自动清理 `/scope/target.txt`(README 已知问题 §14);下次再喂 scope 直接重写 `/scope/target.txt` 重跑 `add_business` 即可。
 
 ---
 
-## 二、架构概览
+## 架构
 
 ```
    ┌─────────────────┐
@@ -194,7 +196,7 @@ srcradar daily dashboard --host 0.0.0.0
 
 ---
 
-## 三、模块速查
+## 模块
 
 | 模块 | 角色 | 详情 |
 |---|---|---|
@@ -207,8 +209,8 @@ srcradar daily dashboard --host 0.0.0.0
 | `pipeline.sh` | 顶层编排 + 自动清理 | `flock` 互斥,失败保留现场可选 |
 | `scan.sh` | 子域派生 + 精确/glob 双路 | 无 `*` 走 fast path 直接 dnsx,有 `*` 走 subfinder → alterx → permutation |
 | `scanner.sh` | DNS 解析 + CDN 研判 + 端口扫描 | `cdnmatch` 离线研判替代老 cdncheck 阻塞调用;`httpx` / `dnsx` 加 `< /dev/null` 防 stdin hang |
-| `cdnmatch/` | Go 包装器(可选):CDN/WAF/Cloud 分类 | 离线网段匹配,需 build,详见 §八-10 |
-| 外部依赖 | `httpx` / `dnsx` / `naabu` / `subfinder` / `alterx` 等 | 由用户安装到 PATH(见 §五),srcradar 仅调用 |
+| `cdnmatch/` | Go 包装器(可选):CDN/WAF/Cloud 分类 | 离线网段匹配,需 build,详见 已知问题 §10 |
+| 外部依赖 | `httpx` / `dnsx` / `naabu` / `subfinder` / `alterx` 等 | 由用户安装到 PATH(见 日常运维),srcradar 仅调用 |
 | `bin/` | build 产物目录(cdnmatch 可选) | 不随仓库分发,需要用户自行 build |
 | `target_glob.py` | `target.txt` → ERE + base 提取 | `(^&#124;\.)` POSIX ERE 合规(原 PCRE 静默 0 命中已修) |
 | `import_scan_results.py` | `scan_results/` → 入库 | 按 `response_hash` 去重 |
@@ -223,47 +225,7 @@ srcradar daily dashboard --host 0.0.0.0
 
 ---
 
-## 三点五、上游致谢与 License
-
-本项目的可执行能力由下列上游项目支撑,详见顶部 `LICENSE`(Apache-2.0)与 [`NOTICE`](./NOTICE) 文件。
-
-### 代码上游（srcradar 直接调用或源码依赖）
-
-| 上游项目 | 角色 | License | 维护关系 |
-|---|---|---|---|
-| **[mssky9527/ENScan_GO](https://github.com/mssky9527/ENScan_GO)**（原仓库 [wgpsec/ENScan_GO](https://github.com/wgpsec/ENScan_GO) 已迁移）| 企业信息采集（爱企查/天眼查/七麦/风鸟） | **Apache-2.0** | © 2023-2026 keac @ wgpsec |
-| **[projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)** | Web 主动探测 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[projectdiscovery/dnsx](https://github.com/projectdiscovery/dnsx)** | DNS 批量解析 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **projectdiscovery/cdncheck**（被 [`pdtm/cdnmatch`](./pdtm/cdnmatch/) import，未修改源码）| CDN/WAF 离线分类 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **modernc.org/sqlite**（`db_align` 依赖）| 纯 Go SQLite 驱动 | **BSD-3-Clause** | © modernc.org/sqlite authors |
-
-### 包管理与外部依赖（pdtm 装的工具集 + 推荐装工具）
-
-| 工具 | 上游 | License | 维护关系 |
-|---|---|---|---|
-| **[pdtm](https://github.com/projectdiscovery/pdtm)** | 包管理器（装 PD 工具链） | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[subfinder](https://github.com/projectdiscovery/subfinder)** | 子域枚举 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[alterx](https://github.com/projectdiscovery/alterx)** | 关键词派生 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[naabu](https://github.com/projectdiscovery/naabu)** | TCP 端口扫描 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[ffuf](https://github.com/ffuf/ffuf)** | URL 字典爆破（`pdtm/scan_urls.py`）| **MIT** | © 2021 Joona Hoikkala |
-| **[gau](https://github.com/lc/gau)** | wayback / 历史 URL（`pdtm/scan_urls.py`）| **MIT** | © 2025 Corben Leo |
-| **[URLFinder](https://github.com/pingc0y/URLFinder)**（中文社区版 by pingc0y）| 主动爬虫（`pdtm/scan_urls.py`）| **MIT** | © 2022 pingc0y |
-
-> **集成模式**:本节列出的工具均通过 `pdtm/scan_urls.py` 等脚本以 `subprocess.run()` 调用,**非源码 fork / import**。`pdtm` 是包管理器,**不是**这些工具的代码上游。
->
-> **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -ia` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
-
-### 第三方服务声明(用户自部署)
-
-| 服务 | 提供方 | License | 维护关系 |
-|---|---|---|---|
-| **ymicp / ICP_Query** | [HG-ha / 一铭](https://github.com/HG-ha/ICP_Query) | ⚠️ **未声明**(GitHub 默认视为 All rights reserved)| **非 srcradar 维护**,原项目 README 声明仅供学习交流 |
-
-ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重新分发服务端、不主动拉镜像、**不**背书其合规性。详见 [`ymicp/README.md`](./modules/public/ymicp/README.md) §声明。
-
----
-
-## 四、共享数据模型
+## 共享数据模型
 
 数据库 `db/recon.sqlite3`,WAL 模式 + busy_timeout 5s。
 
@@ -276,14 +238,14 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 | `scopes` | 可测/非可测资产白名单 | **`db_align -scope`** / **`pdtm finalize_scope`** / **`manage/scope_import.sh`**（3 条独立路径，任一即可） |
 | `web_subdomains` / `web_hashes` | Web 资产 + 指纹库 | `pdtm/import_scan_results.py` |
 | `tcp_assets` | TCP 端口资产 | `pdtm/import_scan_results.py` |
-| `permutation_state` | alterx 派生状态缓存(当前 per-entry 30 天冷却;**待改为按周期整表 wipe — 见 §八 #13**) | `pdtm/permutation_cache.py` |
+| `permutation_state` | alterx 派生状态缓存(当前 per-entry 30 天冷却;**待改为按周期整表 wipe — 见已知问题 §13**) | `pdtm/permutation_cache.py` |
 | `service_type_map` | `service_type` 整型 → 人类可读名(自动累积) | `db_align` upsert 时 `INSERT OR IGNORE` |
 
 字段协作契约见各模块 README —— `db_align/README.md` §Caveats / `pdtm/README.md` §DB Schema。
 
 ---
 
-## 五半、日常运维跑哪里（命令速查）
+## 日常运维
 
 > 这一节是**答"装完该怎么用"**。脚本入口级 runbook 见各模块 README,这里只给最常用的几条。
 
@@ -346,7 +308,47 @@ scopes            tcp_assets
 
 ---
 
-## 六、运维硬性约定
+## 上游致谢
+
+本项目的可执行能力由下列上游项目支撑,详见顶部 `LICENSE`(Apache-2.0)与 [`NOTICE`](./NOTICE) 文件。
+
+### 代码上游（srcradar 直接调用或源码依赖）
+
+| 上游项目 | 角色 | License | 维护关系 |
+|---|---|---|---|
+| **[mssky9527/ENScan_GO](https://github.com/mssky9527/ENScan_GO)**（原仓库 [wgpsec/ENScan_GO](https://github.com/wgpsec/ENScan_GO) 已迁移）| 企业信息采集（爱企查/天眼查/七麦/风鸟） | **Apache-2.0** | © 2023-2026 keac @ wgpsec |
+| **[projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)** | Web 主动探测 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[projectdiscovery/dnsx](https://github.com/projectdiscovery/dnsx)** | DNS 批量解析 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **projectdiscovery/cdncheck**（被 [`modules/main/pdtm/cdnmatch`](./modules/main/pdtm/cdnmatch/) import，未修改源码）| CDN/WAF 离线分类 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **modernc.org/sqlite**（`db_align` 依赖）| 纯 Go SQLite 驱动 | **BSD-3-Clause** | © modernc.org/sqlite authors |
+
+### 包管理与外部依赖（pdtm 装的工具集 + 推荐装工具）
+
+| 工具 | 上游 | License | 维护关系 |
+|---|---|---|---|
+| **[pdtm](https://github.com/projectdiscovery/pdtm)** | 包管理器（装 PD 工具链） | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[subfinder](https://github.com/projectdiscovery/subfinder)** | 子域枚举 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[alterx](https://github.com/projectdiscovery/alterx)** | 关键词派生 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[naabu](https://github.com/projectdiscovery/naabu)** | TCP 端口扫描 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[ffuf](https://github.com/ffuf/ffuf)** | URL 字典爆破（`pdtm/scan_urls.py`）| **MIT** | © 2021 Joona Hoikkala |
+| **[gau](https://github.com/lc/gau)** | wayback / 历史 URL（`pdtm/scan_urls.py`）| **MIT** | © 2025 Corben Leo |
+| **[URLFinder](https://github.com/pingc0y/URLFinder)**（中文社区版 by pingc0y）| 主动爬虫（`pdtm/scan_urls.py`）| **MIT** | © 2022 pingc0y |
+
+> **集成模式**:本节列出的工具均通过 `pdtm/scan_urls.py` 等脚本以 `subprocess.run()` 调用,**非源码 fork / import**。`pdtm` 是包管理器,**不是**这些工具的代码上游。
+>
+> **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -ia` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
+
+### 第三方服务声明(用户自部署)
+
+| 服务 | 提供方 | License | 维护关系 |
+|---|---|---|---|
+| **ymicp / ICP_Query** | [HG-ha / 一铭](https://github.com/HG-ha/ICP_Query) | ⚠️ **未声明**(GitHub 默认视为 All rights reserved)| **非 srcradar 维护**,原项目 README 声明仅供学习交流 |
+
+ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重新分发服务端、不主动拉镜像、**不**背书其合规性。详见 [`ymicp/README.md`](./modules/public/ymicp/README.md) §声明。
+
+---
+
+## 运维硬性约定
 
 源自 [`modules/public/db_align/CLAUDE.md`](./modules/public/db_align/CLAUDE.md),所有模块共用:
 
@@ -358,11 +360,11 @@ scopes            tcp_assets
    - 后续 run 自动从 `-type` 排除;**所有源都失效 → FATAL 停止**
 3. **ENScan 失败清缓存**:`rm -f ../ENScan_GO/enscan.gob`,只在"上次成功 → 这次失败"且无 cookie 信号时清
 4. **DB 路径**:所有 `-db` / `--db` 默认指向 `../db/recon.sqlite3`,写之前确认;不要把 `cookie.log` / `logs/*.log` 进版本控制
-5. **ProjectDiscovery 工具 stdin 防御**:任何 `dnsx / httpx / naabu / subfinder / cdncheck` 的 shell 调用,只要上游是 `pipeline.sh` / `scan.sh` / `scanner.sh` 这类被外部 `bash script.sh` 调用的脚本,就要加 `< /dev/null`。**ProjectDiscovery 工具 best-effort 关闭 stdin,但在子 shell 中实测会永久 park**(详见 §八-12.2)。cdncheck 仍要 `< /dev/null` 兜底,虽然 `pdtm/scanner.sh` 已改走 `./bin/cdnmatch` 离线路径,不再直调 cdncheck 二进制。
+5. **ProjectDiscovery 工具 stdin 防御**:任何 `dnsx / httpx / naabu / subfinder / cdncheck` 的 shell 调用,只要上游是 `pipeline.sh` / `scan.sh` / `scanner.sh` 这类被外部 `bash script.sh` 调用的脚本,就要加 `< /dev/null`。**ProjectDiscovery 工具 best-effort 关闭 stdin,但在子 shell 中实测会永久 park**(详见 已知问题 §12.2)。cdncheck 仍要 `< /dev/null` 兜底,虽然 `pdtm/scanner.sh` 已改走 `./bin/cdnmatch` 离线路径,不再直调 cdncheck 二进制。
 
 ---
 
-## 七、项目总结
+## 项目总结
 
 经过 2026-07-24 起的多轮 dry-run 与 smoke test,这条流水线在 **ExampleCo** 业务上达到可用状态。
 
@@ -372,9 +374,9 @@ scopes            tcp_assets
 |---|---|---|
 | `businesses` | 2 | `ExampleCo` / `DemoCorp`(均已写 scope) |
 | `companies` | 31 | ExampleCo 手工分组(2/4/10/5) + DemoCorp新增 10 |
-| `mapp_records` | 95 | `service_type` 仍 2 个(4/7),§九 列为优先 |
+| `mapp_records` | 95 | `service_type` 仍 2 个(4/7),(后续工作列为优先) |
 | `scopes` | 8 | 可测 6 / 非可测 2,均 `is_wildcard=1`(命中 wildcard 解析) |
-| `web_subdomains` | 74,168 | 持续增长,~215 条单字符噪声(§八-1)待修 |
+| `web_subdomains` | 74,168 | 持续增长,~215 条单字符噪声(已知问题 §1)待修 |
 | `tcp_assets` | 488 | |
 | `permutation_state` | 40,592 | alterx 派生缓存,2026-07-28 后从 172 暴增(数据正常) |
 | `recon.sqlite3` 大小 | 87 MB | WAL 模式 |
@@ -398,7 +400,7 @@ scopes            tcp_assets
 
 ---
 
-## 八、已知问题
+## 已知问题
 
 按"已定位/已缓解/未根治"三档排列:
 
@@ -515,18 +517,18 @@ find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
 
 **对照验证**(`pdtm/cdnmatch` smoke test):老 `cdncheck -i ... -cdn -waf` vs 新 `cdnmatch`,同输入 12 IP 输出 4 个 WAF IP `{104.16.132.229, 104.16.133.229, 104.17.207.5, 104.17.208.5}` 完全相同;4 个 CNAME 老/新都命中 2 个 Cloudflare 后缀(`*.cdn.cloudflare.net`)。
 
-**重新启用 cron**:合入已稳定,按 §六 §5 重新 `./install_cron.sh`(无参,跑 pdtm+icp,业务级开关见 §四 `recon_business_config`)。首次观察次日 03:00 报告:阶段 1+2 应在 ~10 秒内完成(`dnsx JSONL: <N> 行` 后紧跟 `[cdnmatch] records=...` 一行),不再看到 `[+] cdncheck` 字样。
+**重新启用 cron**:合入已稳定,按运维约定第 5 条重新 `./install_cron.sh`(无参,跑 pdtm+icp,业务级开关见共享数据模型 → `recon_business_config` 表)。首次观察次日 03:00 报告:阶段 1+2 应在 ~10 秒内完成(`dnsx JSONL: <N> 行` 后紧跟 `[cdnmatch] records=...` 一行),不再看到 `[+] cdncheck` 字样。
 
 **配套变更**:
 
-- `RESOLVERS` 集中在 `scanner.sh` 顶部声明,各调 `-r "$RESOLVERS"`。详见 §八-11。
+- `RESOLVERS` 集中在 `scanner.sh` 顶部声明,各调 `-r "$RESOLVERS"`。详见 已知问题 §11。
 - `scanner.sh` 移除 `tmp_cdn_ips_detected.txt` 引用(cdnmatch 不再产它)。
 
 **关联风险**:cron 用 `flock -n`,如果新版本再次触发挂起,会是同口径。
 **回滚**(如果出问题):
 1. `cd pdtm/cdnmatch && rm -rf ../bin/cdnmatch`
 2. `git checkout scanner.sh` (回到带 awk + cdncheck 二进制的老版本)
-3. 把 §八-10 老"修复方案"段重新兜回硬化层(`< /dev/null` + `-r` CSV + `timeout 600`)
+3. 把 已知问题 §10 老"修复方案"段重新兜回硬化层(`< /dev/null` + `-r` CSV + `timeout 600`)
 
 ### 11. `-r` 解析器形式跨工具陷阱矩阵 🟡 部分工具静默失效
 
@@ -546,7 +548,7 @@ find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
 
 **结论**:
 
-- cdncheck 是唯一在主流水线里被反向坑的工具(已通过 cdnmatch 间接解决)。**新代码不要再直调 `cdncheck` 二进制**;若要 fallback,见 §八-10 的 `cdncheck -cdn -waf` + CSV + `< /dev/null` 三件套。
+- cdncheck 是唯一在主流水线里被反向坑的工具(已通过 cdnmatch 间接解决)。**新代码不要再直调 `cdncheck` 二进制**;若要 fallback,见 已知问题 §10 的 `cdncheck -cdn -waf` + CSV + `< /dev/null` 三件套。
 - subfinder 是反向坑 —— 它写文档说接受 CSV,但**实测 CSV 路径 0 命中**。所以唯一一次 file 调用在 `scan.sh:70`(subfinder);同文件内 dnsx 改用 CSV。
 - scanner.sh / check_wildcard.sh 不调 subfinder,统一用 CSV 形式,均从 `pdtm/resolvers` 文件派生。
 
@@ -709,7 +711,7 @@ each business runs. This script no longer takes -type",但:
 3. 后果:加新 stage(如未来的 `daily-url2`)必须改 install_cron.sh,配置表加列也带不动;
    头部注释误导后续读者
 
-**缓解(已部分修复)**:README §五半"常见任务命令"已注明"cron 行固定 `-type pdtm,icp`,
+**缓解(已部分修复)**:README 日常运维"常见任务命令"已注明"cron 行固定 `-type pdtm,icp`,
 stages 在配置表 gating",但**脚本头部注释仍未修正**。
 
 **治本**:
@@ -729,7 +731,7 @@ stages 在配置表 gating",但**脚本头部注释仍未修正**。
 
 ---
 
-## 九、后续工作优先级
+## 后续工作
 
 | 优先级 | 项 | 备注 |
 |---|---|---|
@@ -739,12 +741,20 @@ stages 在配置表 gating",但**脚本头部注释仍未修正**。
 | 🟡 中 | `daily/reports` 自动轮转 | cron 入口加一行 `find -mtime +30 -delete` |
 | 🟡 中 | crawler / store 的集成测试 | sqlite in-memory,无 AQC 依赖 |
 | 🟡 中 | 加第 3 个业务做并行验证 | 验证 `flock` 互斥与 AQC 配额争抢 |
-| 🟡 中 | 清理 `web_subdomains` 中 §八-12.3 提到的"目标模式外"的旧条目 | 在 `daily/lib/diff.py` 加 `re.match(targets.regex)` 一次性回扫 |
-| 🟡 中 | check_wildcard.sh 阶段 dnsx 加 `< /dev/null` 防 hang | 见 §八-11 分析 A |
+| 🟡 中 | 清理 `web_subdomains` 中 已知问题 §12.3 提到的"目标模式外"的旧条目 | 在 `daily/lib/diff.py` 加 `re.match(targets.regex)` 一次性回扫 |
+| 🟡 中 | check_wildcard.sh 阶段 dnsx 加 `< /dev/null` 防 hang | 见 已知问题 §11 分析 A |
 | 🟢 低 | cdnmatch 自测脚本入库 | smoke test 跑一遍 cdnmatch + 比对老 cdncheck,挂进 cron 前先跑一次 |
 | 🟢 低 | `daily/README.md` 拆分 user-guide / design-notes | 降低新读者门槛 |
 | 🟢 低 | 把"已知问题"段落迁进 Linear / GitHub Issues | 集中追踪,本文件作为索引 |
 | 🟢 低 | 评估 `recon.sqlite3` 静态加密的必要性 | sqlcipher / SEE |
-| 🟢 低 | target_glob.py 加 `all-glob-bases` 模式 | §八-12.5 wasted subfinder 修复 |
-| 🟢 低 | scope_import.sh 与 scan.sh 阶段 6 合并 | §八-11 跨文件重复 T+U |
-# srcradar
+| 🟢 低 | target_glob.py 加 `all-glob-bases` 模式 | 已知问题 §12.5 wasted subfinder 修复 |
+| 🟢 低 | scope_import.sh 与 scan.sh 阶段 6 合并 | 已知问题 §11 跨文件重复 T+U |
+
+---
+
+## License
+
+srcradar 以 Apache License 2.0 分发,完整条款见 [`LICENSE`](./LICENSE)。
+上游项目与各自 License 详见 `## 上游致谢` 与 [`NOTICE`](./NOTICE)。
+工具使用前提与免责声明见 [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md)。
+
