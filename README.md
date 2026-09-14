@@ -10,6 +10,18 @@
   <img src="https://img.shields.io/badge/information--collection-only-important.svg" alt="Info Collection Only">
 </p>
 
+<br>
+
+<p align="center">
+  <img src="./assets/dashboard-overview.png" alt="srcradar Dashboard 总览" width="900">
+</p>
+
+<p align="center">
+  <em>Dashboard 总览（127.0.0.1:8765，7 个核心 tab：任务状态 / 站点详情 / 端口服务 / 风险等级 / 子公司 / 小程序 / 公众号）</em>
+</p>
+
+<br>
+
 **srcradar** 是一站式 SRC 资产测绘与监控流水线：**业务名 → 法律实体图谱 → 主动测绘 → 每日增量 diff → 本地 dashboard**。其核心组成:
 
 | 角色 | 模块 | 性质 |
@@ -18,7 +30,7 @@
 | **可选 plugin** | `db_align`（enscan，企业图谱，标 LOCKED tag）+ `ymicp`（小程序 / 公众号备案反查） | 自部署、自启用 |
 | **共享数据** | 单 SQLite (`db/recon.sqlite3`) 串联所有产出 |
 
-可选用 plugin 的安装 / 使用 / 运维 详见各自 README：[`db_align/README.md`](./db_align/README.md) · [`ymicp/README.md`](./ymicp/README.md)。**仅供合法授权场景使用**（详见 §零）。本工具**只做信息收集**，不涉及漏洞利用。
+可选用 plugin 的安装 / 使用 / 运维 详见各自 README：[`db_align/README.md`](./modules/public/db_align/README.md) · [`ymicp/README.md`](./modules/public/ymicp/README.md)。**仅供合法授权场景使用**（详见 §零）。本工具**只做信息收集**，不涉及漏洞利用。
 
 ---
 
@@ -34,7 +46,7 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 
 **运营者承担全部合规责任**。包括但不限于：目标单位授权、跨境数据传输合规（个保法 PIPL / 数据出境安全评估）、`爱企查/天眼查/七麦` 等数据源 ToS 遵守。
 
-完整法律条款见 [`LICENSE`](./LICENSE)（Apache-2.0）+ [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md)（附加使用限制与免责声明）+ [`NOTICE`](./NOTICE)（上游致谢）+ [`ymicp/README.md`](./ymicp/README.md) §声明（ymicp 模块专属告知）。
+完整法律条款见 [`LICENSE`](./LICENSE)（Apache-2.0）+ [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md)（附加使用限制与免责声明）+ [`NOTICE`](./NOTICE)（上游致谢）+ [`ymicp/README.md`](./modules/public/ymicp/README.md) §声明（ymicp 模块专属告知）。
 
 > **工具定位**：srcradar 是**信息收集**工具（子域枚举 / DNS 解析 / 端口探测 / HTTP 探测 / URL 资产扫描），**不涉及漏洞利用或 PoC 触发**。如需漏洞验证，请使用专门的漏洞扫描工具。
 
@@ -52,11 +64,11 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 #    db_align (enscan) 与 ymicp 由 install.sh 单独引导,详见各自 README):
 ./install.sh --no-enscan
 
-# 3. (可选) 如需 enscan 插件,详见 [db_align/README.md](./db_align/README.md) §安装
+# 3. (可选) 如需 enscan 插件,详见 [db_align/README.md](./modules/public/db_align/README.md) §安装
 #    (标 LOCKED tag,需人工授权;运行时半自动介入 — cookie 失效自愈 / 缓存清理,
-#     见 [db_align/README.md](./db_align/README.md) §运维)
+#     见 [db_align/README.md](./modules/public/db_align/README.md) §运维)
 
-# 4. (可选) 如需小程序备案反查 plugin,详见 [ymicp/README.md](./ymicp/README.md) §部署
+# 4. (可选) 如需小程序备案反查 plugin,详见 [ymicp/README.md](./modules/public/ymicp/README.md) §部署
 ```
 
 > **入口约定**:`check.sh` 与 `install.sh` 是 2026-09 重构后的入口;老 `init.sh` 仅保留 `--init-db` / `--check-schema` 两个独立工具入口(详见 [§五](#五快速开始))。
@@ -173,16 +185,6 @@ srcradar daily dashboard --host 0.0.0.0
 
 <br>
 
-<p align="center">
-  <img src="./assets/dashboard-overview.png" alt="srcradar Dashboard 总览" width="900">
-</p>
-
-<p align="center">
-  <em>Dashboard 总览（127.0.0.1:8765，7 个核心 tab：任务状态 / 站点详情 / 端口服务 / 风险等级 / 子公司 / 小程序 / 公众号）</em>
-</p>
-
-<br>
-
 **关键不变量**
 
 - 各模块按**业务名**解耦,1:N 的 `businesses.id` → `companies.business_id` 是隔离边界
@@ -196,12 +198,12 @@ srcradar daily dashboard --host 0.0.0.0
 
 | 模块 | 角色 | 详情 |
 |---|---|---|
-| `db_align/` | **enscan plugin（可选用）**：业务名 → 法律图谱 + 资产反查(Go orchestrator) | [README](./db_align/README.md) · [CLAUDE.md](./db_align/CLAUDE.md) |
+| `db_align/` | **enscan plugin（可选用）**：业务名 → 法律图谱 + 资产反查(Go orchestrator) | [README](./modules/public/db_align/README.md) · [CLAUDE.md](./modules/public/db_align/CLAUDE.md) |
 | `internal/resolver` | AQC 多候选打分,严格模式拒绝弱匹配 | `MinAcceptScore=80`,弱匹配需 `-broad` 或 `-pid` 旁路 |
 | `internal/crawler` | 控股树遍历 + 资产 section 反查 | 进程内 `seen[pid]` 环守卫,默认 51% 控股阈值 |
 | `internal/store` | SQLite upsert + schema 增量迁移 | 只增 `service_type_map` / 2 index / `companies.group` |
 | `internal/permute` | 关键词变体生成 + 数字↔汉字转换 | 单测覆盖 |
-| `pdtm/` | 主动测绘 4 阶段编排 | [README](./pdtm/README.md) |
+| `pdtm/` | 主动测绘 4 阶段编排 | [README](./modules/main/pdtm/README.md) |
 | `pipeline.sh` | 顶层编排 + 自动清理 | `flock` 互斥,失败保留现场可选 |
 | `scan.sh` | 子域派生 + 精确/glob 双路 | 无 `*` 走 fast path 直接 dnsx,有 `*` 走 subfinder → alterx → permutation |
 | `scanner.sh` | DNS 解析 + CDN 研判 + 端口扫描 | `cdnmatch` 离线研判替代老 cdncheck 阻塞调用;`httpx` / `dnsx` 加 `< /dev/null` 防 stdin hang |
@@ -210,8 +212,8 @@ srcradar daily dashboard --host 0.0.0.0
 | `bin/` | build 产物目录(cdnmatch 可选) | 不随仓库分发,需要用户自行 build |
 | `target_glob.py` | `target.txt` → ERE + base 提取 | `(^&#124;\.)` POSIX ERE 合规(原 PCRE 静默 0 命中已修) |
 | `import_scan_results.py` | `scan_results/` → 入库 | 按 `response_hash` 去重 |
-| `ymicp/` | **集成层 plugin（可选用）**：小程序/公众号备案批量回查 | [README](./ymicp/README.md) |
-| `daily/` | cron + 快照 diff + dashboard | [README](./daily/README.md) |
+| `ymicp/` | **集成层 plugin（可选用）**：小程序/公众号备案批量回查 | [README](./modules/public/ymicp/README.md) |
+| `daily/` | cron + 快照 diff + dashboard | [README](./modules/main/daily/README.md) |
 | `daily_monitor.sh` | cron 入口 + 多阶段编排 + 按 config 过滤 | `flock` 互斥;阶段固定序:`enscan → pdtm → icp`;每业务按 `recon_business_config` 过滤 |
 | `lib/snapshot.py` | 6 表全量拍快照 JSON | 派生 `host_ip_map` 供 dashboard IP 列回填 |
 | `lib/diff.py` | 快照对比 → 增量报告 | added/reactivated/deactivated/changed/deleted |
@@ -257,7 +259,7 @@ srcradar daily dashboard --host 0.0.0.0
 |---|---|---|---|
 | **ymicp / ICP_Query** | [HG-ha / 一铭](https://github.com/HG-ha/ICP_Query) | ⚠️ **未声明**(GitHub 默认视为 All rights reserved)| **非 srcradar 维护**,原项目 README 声明仅供学习交流 |
 
-ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重新分发服务端、不主动拉镜像、**不**背书其合规性。详见 [`ymicp/README.md`](./ymicp/README.md) §声明。
+ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重新分发服务端、不主动拉镜像、**不**背书其合规性。详见 [`ymicp/README.md`](./modules/public/ymicp/README.md) §声明。
 
 ---
 
@@ -281,66 +283,35 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 
 ---
 
-## 五、快速开始
-
-```bash
-# 1. 准备目录与依赖
-cd /opt/srcradar
-# Go: db_align (enscan plugin,可选)
-# Python: requests
-# Shell 工具: dnsx / subfinder / alterx / naabu / httpx / cdncheck
-
-# 2. 装上游依赖(./check.sh 只查;./install.sh 装 pdtm / PD 工具 / cdnmatch)
-./check.sh
-./install.sh
-
-# 3. (可选) 装 enscan plugin 详见 [db_align/README.md](./db_align/README.md) §安装
-#    (可选) 装 ymicp plugin    详见 [ymicp/README.md](./ymicp/README.md) §部署
-#    (可选) 加新业务到流水线   `./manage/add_business.sh -n <业务名> [-s seeds/<业务>.tsv] [-i <input_dir>]`
-#                              详见 [manage/README.md](./manage/README.md)
-
-# 4. 跑主动测绘
-cd pdtm && ./pipeline.sh -b ExampleCo -i /path/to/input/
-
-# 5. 起 dashboard 看结果
-cd ../daily && python3 lib/dashboard.py 
-# 浏览器经 SSH 隧道访问 http://localhost:8765
-
-# 6. 装 cron(每天 03:00 北京时间,跑 pdtm+icp,业务级开关见 §四 `recon_business_config`)
-./install_cron.sh
-```
-
-详细 flags / 参数见各模块 README。
-
-> **网络代理**:`db_align` 默认**不**走代理(`-proxy` 默认为空)。如需访问受限网络,通过 `-proxy http://...` 显式传入。详见 [`db_align/README.md`](./db_align/README.md) flag 说明。
-
 ## 五半、日常运维跑哪里（命令速查）
 
 > 这一节是**答"装完该怎么用"**。脚本入口级 runbook 见各模块 README,这里只给最常用的几条。
 
 详细文档落在脚本同目录:
 
-- **加业务 / 改业务级开关 / seed TSV** → [`manage/README.md`](./manage/README.md)
-- **装 cron / 卸 cron / 单业务手动跑 / 拍快照 / dashboard** → [`daily/README.md`](./daily/README.md)
-- **入 scope / 跑全流程 pipeline** → [`pdtm/README.md`](./pdtm/README.md)
-- **法律实体反查(db_align) flags** → [`db_align/README.md`](./db_align/README.md)
+- **加业务 / 改业务级开关 / seed TSV** → [`manage/README.md`](./modules/main/manage/README.md)
+- **装 cron / 卸 cron / 单业务手动跑 / 拍快照 / dashboard** → [`daily/README.md`](./modules/main/daily/README.md)
+- **入 scope / 跑全流程 pipeline** → [`pdtm/README.md`](./modules/main/pdtm/README.md)
+- **法律实体反查(db_align) flags** → [`db_align/README.md`](./modules/public/db_align/README.md)
 
 ### 常见任务命令
 
-| 任务 | 命令(从仓库根) |
+> 所有命令从仓库根执行;`./srcradar --list` 看完整脚本列表。
+> stages(`pdtm` / `icp` / `enscan` / `daily-url`)在 `recon_business_config` 表里按业务配 0/1
+> (web/tcp 控 pdtm, icp 控 ymicp, enscan ungated)。见 [`daily/run_one_business.sh`](./modules/main/daily/run_one_business.sh) 头部。
+
+| 任务 | 命令 |
 |---|---|
-| 新建业务 + 灌入 scope | `./manage/add_business.sh -n <业务名> [-s seeds/<业务>.tsv] [-i <input_dir>]` |
-| 仅入库 scope,不扫 | `(cd pdtm && ./scope_import.sh -b <业务> -i <input_dir> [--dry-run])` |
-| 看 / 改业务级开关 | `./manage/set_config.sh -n <业务名> [--enable/--disable/--web 0\|1 --tcp 0\|1 --icp 0\|1]` |
-| 跑全流程(自动入 scope + 主动测绘 + 入库) | `(cd pdtm && ./pipeline.sh -b <业务名> -i <input_dir>)` |
-| 单业务单次跑(已入库后) | `(cd daily && ./run_one_business.sh -type pdtm,icp <业务名>)` |
-| 手动拉控股树 / ICP / 小程序(enscan plugin) | 详见 [`db_align/README.md`](./db_align/README.md) |
-| 跑小程序备案反查(ymicp plugin) | 详见 [`ymicp/README.md`](./ymicp/README.md) |
-| 装 cron(每天 03:00 北京时间) | `(cd daily && ./install_cron.sh)` |
-| 卸 cron | `(cd daily && ./install_cron.sh uninstall)` |
+| 新建业务 + 灌入 scope | `./srcradar manage add_business -n <业务名> -i <input_dir>` |
+| 仅入库 scope 不扫描(回填老 scope 用) | `./srcradar pdtm scope_import -b <业务> -i <input_dir>` |
+| 看 / 改业务级开关 | `./srcradar manage set_config -n <业务名> [--enable/--disable/--web 0\|1 --tcp 0\|1 --icp 0\|1]` |
+| 跑单业务全流程(已入 scope 后,按配置表 gating) | `./srcradar daily run_one_business <业务名>` |
+| 手动拉控股树 / ICP / 小程序(enscan plugin) | 详见 [`modules/public/db_align/README.md`](./modules/public/db_align/README.md) |
+| 跑小程序备案反查(ymicp plugin) | 详见 [`modules/public/ymicp/README.md`](./modules/public/ymicp/README.md) |
+| 装 cron(每天 03:00 北京时间,cron 行固定 `-type pdtm,icp`) | `./srcradar daily install_cron` |
+| 卸 cron | `./srcradar daily install_cron uninstall` |
 | 看 cron 是否装上 | `crontab -l \| grep daily_monitor` |
-| 拍快照(全表导出) | `(cd daily && python3 lib/snapshot.py --out snapshots/db.json)` |
-| 起 dashboard(默认 127.0.0.1:8765) | `(cd daily && python3 lib/dashboard.py)` |
+| 起 dashboard(默认 127.0.0.1:8765) | `./srcradar daily dashboard` |
 
 ### 三个常用 stage 串顺序(pipeline / run_one_business 内部固定)
 
@@ -366,9 +337,9 @@ scopes            tcp_assets
 每个业务有 `recon_business_config.enabled` 开关。`--disable` 后该业务**所有阶段**都被 cron + `run_one_business.sh` 跳过,但**仍会拍快照**(用于 diff 监控"未跑期间"的新增)。
 
 ```bash
-./manage/set_config.sh -n <业务名> --disable        # 暂停
-./manage/set_config.sh -n <业务名> --enable         # 恢复
-./manage/set_config.sh -n <业务名>                  # 查看当前配置
+./srcradar manage set_config -n <业务名> --disable   # 暂停
+./srcradar manage set_config -n <业务名> --enable    # 恢复
+./srcradar manage set_config -n <业务名>             # 查看当前配置
 ```
 
 详细语义见 `daily/README.md` §"跳过不想跑的业务"和 §"安装 / 卸载 cron"。
@@ -377,7 +348,7 @@ scopes            tcp_assets
 
 ## 六、运维硬性约定
 
-源自 `db_align/CLAUDE.md`,所有模块共用:
+源自 [`modules/public/db_align/CLAUDE.md`](./modules/public/db_align/CLAUDE.md),所有模块共用:
 
 1. **`ENScan_GO/config.yaml` 绝对不要读** —— 上游凭据文件,即使 echo 一行字段名也不行;`.claudeignore` + `settings.json` 兜底拦截。Claude 也不要从文件名/列表里推断内容
 2. **数据源 cookie 失效时**:
@@ -723,6 +694,38 @@ pipeline.sh 既有的无条件 trap 语义)。
 **未来 API 演进方向**(待 v0.2.0+):语义明确化命名。`-i` 改名为 `--tmp-dir`
 或加 `--consume-input` / `--no-consume-input` 显式 flag,避免 `cd` 到
 `<dir>/` 再 `./srcradar ... -i ./` 误删当前目录文件。
+
+### 15. `daily/install_cron.sh` 的 `-type pdtm,icp` 数据源与头部注释脱节 ⏳ 未根治
+
+**现象**:`modules/main/daily/install_cron.sh` 头部第 9-15 行注释声称 "The installed entry
+always runs `-type pdtm,icp`. ... the config table is the single source of truth for what
+each business runs. This script no longer takes -type",但:
+
+1. 实际 cron 行(脚本第 14 行 + 写入 crontab 的 awk 块)**写死** `-type pdtm,icp`,
+   并**不**从 `recon_business_config` 读 `-type` 字符串
+2. `recon_business_config` 表存的是 `enabled/web/tcp/icp` 4 个 0/1 位开关,
+   `daily_monitor.sh:141-180` 拿这些位**过滤**已声明的 stages(pdtm / icp),
+   **不**是源头
+3. 后果:加新 stage(如未来的 `daily-url2`)必须改 install_cron.sh,配置表加列也带不动;
+   头部注释误导后续读者
+
+**缓解(已部分修复)**:README §五半"常见任务命令"已注明"cron 行固定 `-type pdtm,icp`,
+stages 在配置表 gating",但**脚本头部注释仍未修正**。
+
+**治本**:
+
+- 方案 1:`install_cron.sh` 头部注释改为"cron 行写死 `-type pdtm,icp`,
+  `recon_business_config` 表按位过滤已声明 stages",与代码行为对齐
+- 方案 2:让 cron 行从配置表读 stages(配置表新增 `stages TEXT` 列),真正实现
+  single-source-of-truth;改动面更大,涉及 `daily_monitor.sh` 入参解析
+
+**判断有没有意义**:
+
+| 用途 | 价值 |
+|---|---|
+| 当前 2 阶段(pdtm+icp) | 🟡 注释与代码脱节,但功能可用 |
+| 加新 stage 接入 cron | 🔴 不修就要改 install_cron.sh,与文档承诺不符 |
+| operator 加 stage | 🔴 同上,配置表加列不会自动生效 |
 
 ---
 
