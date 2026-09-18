@@ -91,8 +91,13 @@ do_init_db() {
         err "modules/main/db/install.sh 缺失"
         return 3
     fi
-    log "init-db (via modules/main/db/install.sh --path)"
-    bash "$db_install" --path || return 3
+    # 把 DB 路径透传给 db/install.sh。优先 $RECON_DB(用户/启动点 export),
+    # 退而求其次用 <repo>/modules/main/db/recon.sqlite3(源码版默认)。
+    local db_path="${RECON_DB:-$SCRIPT_DIR/modules/main/db/recon.sqlite3}"
+    log "init-db (via modules/main/db/install.sh --path $db_path)"
+    bash "$db_install" --path "$db_path" || return 3
+    export RECON_DB="$db_path"
+    export DB="$db_path"
 }
 
 # ---- 自动写 config/db.conf(若不存在) ----
