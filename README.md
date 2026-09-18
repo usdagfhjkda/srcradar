@@ -445,9 +445,19 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 
 **仍保留**:`daily/lib/dashboard.py::_build_sites` 显示层 `if "." in subdomain`(行 831)作为防御性兜底;新增数据经过 HOSTNAME_RE 校验后该过滤实际不再触发。
 
-### 2. ENScan_GO 目录整洁度 ✅ 已清理 (2026-09-06)
+**2026-09 生产实测**:生产库 `web_subdomains` 中无残留单字符条目(0 行 `subdomain` 不含 `.`),`HOSTNAME_RE` 入库前过滤生效。
 
-2026-09-06 layout 迁移(commit `2c13c60`)后,`modules/public/db_align/` 下已不再有 `code.bak.*` 与 `outs/` 目录,只剩 `cmd/ internal/ install.sh/ CLAUDE.md/ README.md/ go.mod/ go.sum`。**风险面已消除**;若未来重新生成 enscan 输出需自建 `.gitignore`(参见 `.gitignore` 已有的 `outs/*.xlsx` 与 `*.bak.*` 规则)。
+### 2. ENScan_GO 目录整洁度 ✅ 公仓已清理 (2026-09-06);生产部署需手动验证
+
+2026-09-06 layout 迁移(commit `2c13c60`)后,**公仓** `modules/public/db_align/` 下已不再有 `code.bak.*` 与 `outs/` 目录,只剩 `cmd/ internal/ install.sh/ CLAUDE.md/ README.md/ go.mod/ go.sum`。**公仓风险面已消除**;若未来重新生成 enscan 输出需自建 `.gitignore`(参见 `.gitignore` 已有的 `outs/*.xlsx` 与 `*.bak.*` 规则)。
+
+**生产部署提示**:在 layout 迁移之前部署的 srcradar 实例,其 `db_align/` 下**可能仍残留**旧 `outs/` 输出(xlsx,文件名含公司名,凭据泄露风险)与 `*.bak.*` 备份目录。升级到 v0.1.0 后建议手动执行:
+
+```bash
+rm -rf db_align/outs db_align/*.bak.*
+```
+
+**风险姿态**:本项在公仓已根治;生产侧需逐场升级时手动验证。
 
 ### 3. service_type_map 残缺 🔴 跨业务对比受限
 
@@ -455,10 +465,10 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 
 ### 4. 单业务单点验证 ⚠️ 规模未验证
 
-`businesses` 表只有 1 行,所有设计只在 21 家公司 / 41 条备案上验证过:
+`businesses` 表只有单业务行,所有设计只在数十家公司 / 数百份备案上验证过:
 
-- 并发跑 N 个业务时的 `flock` 互斥、ENScan 子进程并发、AQC 配额争抢都没经过压力测试
-- snapshot 拍全库 6 表 ~50k 行的耗时与内存峰值未测
+- 并发跑多个业务时的 `flock` 互斥、ENScan 子进程并发、AQC 配额争抢都没经过压力测试
+- snapshot 拍全库 6 表数十万行的耗时与内存峰值未测
 - **建议**:加第 2 个业务(最简单的 `scanme` 类)做并行验证
 
 ### 5. pdtm 已有修复未合入 🟡 部分根治 (2026-09)
@@ -472,7 +482,7 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 
 ### 6. daily/reports 无自动轮转 🟡 长期累积
 
-`daily/reports/` 默认全保留,README 给了手工清理命令但**没装进 cron**。长期跑会无限累积(当前已 7 个目录)。
+`daily/reports/` 默认全保留,README 给了手工清理命令但**没装进 cron**。长期跑会无限累积(生产环境已累计数十份)。
 
 **建议**:在 `daily_monitor.sh` 入口加一行:
 
@@ -489,9 +499,9 @@ find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
 
 ### 8. 数据库敏感数据未加密 ⚠️ 凭据泄露面
 
-`recon.sqlite3` 43 MB,`mapp_records.raw_json` 存全量 API 响应,`web_subdomains.raw_json` 存 HTTP 响应正文。**未经加密落盘**,任何拿到这台机器的人就能 dump 全部备案 + 服务原始 JSON。`.claudeignore` 拦得住 Claude,**拦不住** shell 用户直接 `cat`。
+`recon.sqlite3` 体量数十 MB,`mapp_records.raw_json` 与 `web_subdomains.raw_json` 字段在公开版本已被**脱敏或剥离**(2026-09 生产实测:mapp_records.raw_json 字段空);未加密落盘的备案字段 + 公司主体仍属敏感数据。
 
-**建议**:评估 `recon.sqlite3` 静态加密(sqlite SEE / sqlcipher)的必要性,或至少把 `raw_json` 字段移出主库放归档表。
+**建议**:评估 `recon.sqlite3` 静态加密(sqlite SEE / sqlcipher)的必要性,或把 `raw_json` 字段明确剥离 / 仅在归档表保留抽样。
 
 ### 9. 文档入口分散 🟢 可读性问题
 
