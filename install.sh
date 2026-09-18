@@ -1,41 +1,37 @@
 #!/usr/bin/env bash
 #
-# install.sh — 外部版:遍历 modules/main 全装 + 遍历 modules/public 让用户选。
+# install.sh — 外部版:交互式 checklist 选模块,默认全不勾。
 #
-# 重构后(各模块自管 install.sh):
-#   - 本脚本是统一调度入口
-#   - main 模块必装,不询问
-#   - public 模块询问一次,默认 N(回车=不装)
-#   - 非 TTY(pipe/cron)默认不装 public
+# 行为:
+#   - 先跑 check.sh
+#   - 进入 checklist:每个模块 [ ]/[x] 切换;0 确认;q 退出
+#   - 按 main / public / private 三段字母序排列,段间用 --- 分隔
+#   - daily 默认不勾(避免默默注册 cron)
 #
 # 与 init.sh 的关系:
 #   - init.sh --check-deps 装系统依赖(go/python3/docker/...)
 #   - init.sh --init-db 建空 DB
 #   - install.sh 调模块 install.sh 拉源码 + go build + 装二进制
 #
-# 与 install-internal.sh 的关系:
-#   - install.sh          : 外部版(main + 询问 public)
-#   - install-internal.sh : 内部版(main + public 全装,不询问)
-#
 # 用法:
-#   ./install.sh                  # main 全装 + 询问 public
-#   ./install.sh --no-public      # 只装 main(跳过询问 + 跳过 public)
-#   ./install.sh --public-all     # main + public 全装,不询问(等价 install-internal)
-#   ./install.sh --main-only      # 只跑 main 模块(无 init-db)
-#   ./install.sh --pdtm-only      # 只装 modules/main/pdtm
-#   ./install.sh --db-align-only  # 只装 modules/public/db_align
-#   ./install.sh --ymicp-only     # 只装 modules/public/ymicp
-#   ./install.sh --offline        # 跳过所有网络(假设已 clone)
-#   ./install.sh --init-db        # 末尾:建空 DB(默认全装也跑)
+#   ./install.sh                  # 交互式 checklist(默认)
+#   ./install.sh --check          # 只跑 check.sh(不进入 checklist)
+#   ./install.sh --skip-check     # 跳 check,直接进 checklist(知道环境已达标的用户)
+#   ./install.sh --init-db        # 末尾建空 DB(默认开)
 #   ./install.sh --no-init-db     # 不建 DB
+#   ./install.sh --offline        # 跳过所有网络(假设已 clone)
 #   ./install.sh -h|--help
+#
+# checklist 交互:
+#   输入数字 N  → 切换 N 的状态(选中↔未选)
+#   输入 0      → 确认,进入安装
+#   输入 q      → 退出
 #
 # 退出码:
 #   0   全部成功
-#   1   参数错误
+#   1   参数错误 / 用户 q 退出
 #   2   check.sh 不通过
 #   3   某个模块 install.sh 失败
-#   4   缺 build 产物(模块 install.sh 内部报)
 
 set -euo pipefail
 
@@ -47,7 +43,7 @@ warn() { printf '[install][warn] %s\n' "$*" >&2; }
 err()  { printf '[install][err]  %s\n' "$*" >&2; }
 
 usage() {
-    sed -n '2,32p' "$0"
+    sed -n '2,30p' "$0"
 }
 
 # ---- 前置:跑 ./check.sh ----
@@ -63,20 +59,6 @@ run_check() {
     fi
     log "check.sh OK"
     return 0
-}
-
-# ---- 询问是否装 public 模块(default N) ----
-ask_public() {
-    if [ ! -t 0 ]; then
-        log "non-TTY:默认不装 public 模块 (用 --public-all 强制装)"
-        return 1
-    fi
-    local reply
-    read -r -p "需要装 public 模块 (db_align/ymicp)? [y/N]: " reply
-    case "$reply" in
-        [yY]|[yY][eE][sS]) return 0 ;;
-        *)                  return 1 ;;
-    esac
 }
 
 # ---- 跑单个模块 install.sh ----
@@ -101,38 +83,7 @@ run_module() {
     fi
 }
 
-# ---- 装 main 模块(全部 --yes,不询问) ----
-install_main() {
-    if [ ! -d "$SCRIPT_DIR/modules/main" ]; then
-        warn "modules/main 不存在;跳过"
-        return 0
-    fi
-    for mdir in "$SCRIPT_DIR/modules/main"/*/; do
-        [ -d "$mdir" ] || continue
-        local name; name="$(basename "$mdir")"
-        # db 模块特殊:后续 --init-db 跑,这里只 check
-        if [ "$name" = "db" ]; then
-            run_module main "$name" --check || return 3
-        else
-            run_module main "$name" --yes || return 3
-        fi
-    done
-}
-
-# ---- 装 public 模块(每个 --yes 强制,不询问) ----
-install_public_all() {
-    if [ ! -d "$SCRIPT_DIR/modules/public" ]; then
-        warn "modules/public 不存在;跳过"
-        return 0
-    fi
-    for mdir in "$SCRIPT_DIR/modules/public"/*/; do
-        [ -d "$mdir" ] || continue
-        local name; name="$(basename "$mdir")"
-        run_module public "$name" --yes || return 3
-    done
-}
-
-# ---- init-db(走 modules/main/db/install.sh --path) ----
+# ---- init-db ----
 do_init_db() {
     local db_install="$SCRIPT_DIR/modules/main/db/install.sh"
     if [ ! -x "$db_install" ]; then
@@ -143,64 +94,206 @@ do_init_db() {
     bash "$db_install" --path || return 3
 }
 
+# ---- 收集所有可安装模块(按字母序,分 main / public / private) ----
+# 输出:三段关联数组 AREA[N] / NAME[N] / DESC[N] / N 顺序
+discover_modules() {
+    local -a order=()
+    for area in main public private; do
+        local adir="$SCRIPT_DIR/modules/$area"
+        [ -d "$adir" ] || continue
+        local -a names=()
+        for mdir in "$adir"/*/; do
+            [ -d "$mdir" ] || continue
+            names+=("$(basename "$mdir")")
+        done
+        # 字母序排序(空目录也能跑)
+        local -a sort_names=()
+        mapfile -t sort_names < <(printf '%s\n' "${names[@]:-}" | sort)
+        for n in "${sort_names[@]}"; do
+            [ -z "$n" ] && continue
+            order+=("${area}/${n}")
+        done
+    done
+    printf '%s\n' "${order[@]}"
+}
+
+# ---- checklist 交互 ----
+# 输入:discover_modules 的输出(每行 area/name)
+# 副作用:导出 SELECTED_M[area/name]=1 给后续 install 阶段用
+# 输出:0 = 确认,1 = q 退出
+ask_checklist() {
+    local -a entries=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && entries+=("$line")
+    done < <(discover_modules)
+
+    if [ "${#entries[@]}" -eq 0 ]; then
+        err "无任何可安装模块;modules/ 目录为空"
+        return 1
+    fi
+
+    # 段首分隔符宽度(对齐最长 name + area 前缀)
+    local sep_width=40
+    local last_area=""
+
+    # 默认勾选规则:main/* 除 daily 外默认勾上(确保 ./install.sh 默认装核心);
+    # daily 仍默认不勾(避免默默注册 cron);
+    # public/* / private/* 默认不勾(用户主动选)。
+    declare -A SELECTED
+    for e in "${entries[@]}"; do
+        case "$e" in
+            main/*) [ "$e" != "main/daily" ] && SELECTED["$e"]=1 || SELECTED["$e"]=0 ;;
+            *)      SELECTED["$e"]=0 ;;
+        esac
+    done
+
+    # 模块描述(可读性增强)
+    desc_for() {
+        case "$1" in
+            main/daily)   echo "日度 cron 03:00 + dashboard(默认不勾,免登 crontab)" ;;
+            main/db)      echo "DB schema + 末尾建空 DB" ;;
+            main/lib)     echo "共享 Python 工具库(load_config 等)" ;;
+            main/manage)  echo "业务管理(register target / set_config)" ;;
+            main/pdtm)    echo "主动测绘核心 dnsx+httpx+naabu+cdnmatch" ;;
+            public/db_align) echo "ENScan_GO 集成(Apache-2.0,大依赖)" ;;
+            public/ymicp) echo "小程序备案反查客户端(需自部署服务)" ;;
+            *)            echo "" ;;
+        esac
+    }
+
+    while true; do
+        echo
+        printf 'srcradar installer — 勾选要安装的模块\n'
+        printf '回车切换状态;数字 0 确认开始安装;q 退出\n'
+        echo
+
+        local n=0
+        for e in "${entries[@]}"; do
+            n=$((n+1))
+            local area="${e%%/*}"
+            local name="${e##*/}"
+            # 段头(只在换 area 时打一次)
+            if [ "$area" != "$last_area" ]; then
+                printf '\n%s ' "$area"
+                printf -- '-%.0s' $(seq 1 "$sep_width")
+                echo
+                last_area="$area"
+            fi
+            local mark="○"
+            [ "${SELECTED[$e]:-0}" = "1" ] && mark="●"
+            local d; d=$(desc_for "$e")
+            printf '[%s] %2d. %-12s — %s\n' "$mark" "$n" "$name" "$d"
+        done
+
+        echo
+        printf 'Choice [1-%d 切换 / 0 确认 / q 退出,默认 0 退出]: ' "${#entries[@]}"
+        local reply
+        read -r reply
+        reply="${reply:-q}"
+        case "$reply" in
+            0|"")
+                # 0 或空 = 确认开始安装
+                break
+                ;;
+            q|Q)
+                log "用户退出"
+                return 1
+                ;;
+            *)
+                # 数字 → 切换对应条目状态
+                if [[ "$reply" =~ ^[0-9]+$ ]] && [ "$reply" -ge 1 ] && [ "$reply" -le "${#entries[@]}" ]; then
+                    local idx=$((reply-1))
+                    local target="${entries[$idx]}"
+                    if [ "${SELECTED[$target]}" = "1" ]; then
+                        SELECTED["$target"]=0
+                    else
+                        SELECTED["$target"]=1
+                    fi
+                else
+                    warn "无效输入: '$reply'(期望 1-${#entries[@]} / 0 / q)"
+                fi
+                ;;
+        esac
+    done
+
+    # 把选中的条目 export 给 main 用
+    for e in "${entries[@]}"; do
+        [ "${SELECTED[$e]}" = "1" ] && SELECTED_M["$e"]=1
+    done
+    declare -p SELECTED_M >/dev/null || true
+    export SELECTED_M_PRESENT=1
+    return 0
+}
+
 main() {
-    MODE="all"
+    MODE="interactive"
     DO_INIT_DB=1
+    SKIP_CHECK=0
+    # shellcheck disable=SC2034  # OFFLINE is accepted as a no-op flag for compatibility
     while [ $# -gt 0 ]; do
         case "$1" in
-            --no-public)      MODE="main-only"; shift ;;
-            --public-all)     MODE="all-public"; shift ;;
-            --main-only)      MODE="main-only"; shift ;;
-            --pdtm-only)      MODE="pdtm-only"; shift ;;
-            --db-align-only)  MODE="db-align-only"; shift ;;
-            --ymicp-only)     MODE="ymicp-only"; shift ;;
-            --offline)        # shellcheck disable=SC2034
-                              OFFLINE=1; shift ;;
-            --init-db)        DO_INIT_DB=1; shift ;;
-            --no-init-db)     DO_INIT_DB=0; shift ;;
-            -h|--help)        usage; exit 0 ;;
+            --check)        MODE="check-only"; shift ;;
+            --skip-check)    SKIP_CHECK=1; shift ;;
+            --init-db)      DO_INIT_DB=1; shift ;;
+            --no-init-db)   DO_INIT_DB=0; shift ;;
+            --offline)      OFFLINE=1; shift ;;
+            -h|--help)      usage; exit 0 ;;
             *) err "unknown arg: $1"; usage; exit 1 ;;
         esac
     done
 
-    run_check || { err "check 阶段失败,退出"; exit 2; }
+    if [ "$MODE" = "check-only" ]; then
+        run_check || { err "check 阶段失败,退出"; exit 2; }
+        log "check-only 模式完成;未进入 checklist"
+        exit 0
+    fi
 
-    case "$MODE" in
-        all)
-            install_main || exit $?
-            if ask_public; then
-                install_public_all || exit $?
-            else
-                log "跳过 public 模块 (--public-all 强制装)"
+    if [ "${SKIP_CHECK:-0}" != "1" ]; then
+        run_check || { err "check 阶段失败,退出"; exit 2; }
+    else
+        warn "跳过 check.sh(--skip-check)"
+    fi
+
+    declare -A SELECTED_M=()
+    export SELECTED_M
+    if ! ask_checklist; then
+        exit 1
+    fi
+
+    # 按 main → public → private 顺序执行选中的模块
+    local -a areas=(main public private)
+    local installed=0
+    for area in "${areas[@]}"; do
+        local adir="$SCRIPT_DIR/modules/$area"
+        [ -d "$adir" ] || continue
+        for mdir in "$adir"/*/; do
+            [ -d "$mdir" ] || continue
+            local name; name="$(basename "$mdir")"
+            local key="$area/$name"
+            if [ "${SELECTED_M[$key]:-0}" = "1" ]; then
+                # db 模块特殊:check + 后续 --init-db 触发;其余 --yes
+                if [ "$name" = "db" ]; then
+                    run_module "$area" "$name" --check || exit 3
+                else
+                    run_module "$area" "$name" --yes || exit 3
+                fi
+                installed=$((installed+1))
             fi
-            ;;
-        main-only)
-            install_main || exit $?
-            ;;
-        all-public)
-            install_main || exit $?
-            install_public_all || exit $?
-            ;;
-        pdtm-only)
-            run_module main pdtm --yes || exit $?
-            ;;
-        db-align-only)
-            run_module public db_align --yes || exit $?
-            ;;
-        ymicp-only)
-            run_module public ymicp --yes || exit $?
-            ;;
-        *)
-            err "unknown mode: $MODE"
-            exit 1
-            ;;
-    esac
+        done
+    done
 
-    if [ "$DO_INIT_DB" = 1 ]; then
+    if [ "$installed" -eq 0 ]; then
+        warn "未勾选任何模块;无操作"
+    fi
+
+    if [ "$DO_INIT_DB" = "1" ]; then
         do_init_db || exit $?
     fi
 
-    log "全部装完。PATH 提示: export PATH=\"\$PATH:\$HOME/go/bin:\$HOME/.pdtm/go/bin\""
+    log "全部装完($installed 模块)。PATH 提示: export PATH=\"\$PATH:\$HOME/go/bin:\$HOME/.pdtm/go/bin\""
+    if [ "${SELECTED_M[main/daily]:-0}" != "1" ]; then
+        warn "daily 模块未安装(cron 未注册)。需要监控请手动: ./srcradar daily install_cron"
+    fi
     return 0
 }
 

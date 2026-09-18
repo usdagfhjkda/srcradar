@@ -24,8 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ENScan_GO 上游 tag 锁定(改这里升级)
-ENSCAN_GO_REPO="https://github.com/wgpsec/ENScan_GO.git"
-ENSCAN_GO_TAG="v1.4.0"
+ENSCAN_GO_REPO="https://github.com/usdagfhjkda/wgpsec-ENScan_GO.git"
+ENSCAN_GO_TAG="wgpsec-v1.4.0-fork1"
 
 VENDOR_DIR="$SCRIPT_DIR/ENScan_GO"
 VENDOR_SRC="$VENDOR_DIR/code"
