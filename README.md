@@ -1,4 +1,4 @@
-# recon — SRC 资产测绘与监控流水线
+# srcradar — SRC 资产测绘与监控流水线
 
 > 企业资产采集 → 主动测绘 → 每日增量监控 → 本地可视化的端到端 SRC 工具链
 
@@ -58,7 +58,7 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 
 - **数据契约**:所有产出沉淀在一个共享的 SQLite(`db/recon.sqlite3`),按业务名隔离
 - **运维契约**:每天 03:00 北京时间自动跑一轮,产出增量报告 + 本地可视化 dashboard
-- **协作契约**:不抢上游(`ENScan_GO`)、不抢下游(其它 recon 工具),只做连接与编排
+- **协作契约**:不抢上游(`ENScan_GO`)、不抢下游(其它资产测绘工具),只做连接与编排
 
 ---
 
@@ -73,9 +73,17 @@ cd srcradar
 ./check.sh
 
 # 2. 装所有上游依赖(pdtm -> PD 工具 -> cdnmatch -> 自动 init-db;
-#    默认安装 pdtm + PD 工具 + cdnmatch;
+#    默认勾选 main/{db,lib,manage,pdtm},daily 默认不勾(避免自动注册 cron);
 #    db_align (enscan) 与 ymicp 由 install.sh 单独引导,详见各自 README):
-./install.sh --no-enscan
+./install.sh                       # 交互式 checklist(回车切换 / 0 确认 / q 退出)
+./install.sh --skip-check          # 已知环境达标,跳过 check.sh 直接进 checklist
+
+#    DB 路径优先级(由 ./srcradar 顶部统一处理):
+#      1) CLI --db / $RECON_DB env
+#      2) config/db.conf 的 recon_db_path(./install.sh 末尾自动生成)
+#      3) /opt/srcradar/db/recon.sqlite3(docker image 内固定)
+#      4) /data/recon.sqlite3(兼容老 mount)
+#      5) 模块默认(<repo>/modules/main/db/recon.sqlite3)
 
 # 3. (可选) 如需 enscan 插件,详见 [db_align/README.md](./modules/public/db_align/README.md) §安装
 #    (标 LOCKED tag,需人工授权;运行时半自动介入 — cookie 失效自愈 / 缓存清理,
@@ -164,7 +172,7 @@ srcradar daily run_one_business test
 srcradar daily dashboard --host 0.0.0.0
 ```
 
-> **端口暴露面**:`-p 127.0.0.1:8765:8765` 仅绑定 loopback,公网与内网其他机器都访问不到;要看 dashboard,从同主机 `curl http://127.0.0.1:8765/` 即可,或从远端走 SSH 隧道 (`ssh -L 8765:127.0.0.1:8765 user@recon-host`)。
+> **端口暴露面**:`-p 127.0.0.1:8765:8765` 仅绑定 loopback,公网与内网其他机器都访问不到;要看 dashboard,从同主机 `curl http://127.0.0.1:8765/` 即可,或从远端走 SSH 隧道 (`ssh -L 8765:127.0.0.1:8765 user@<srcradar-host>`)。
 >
 > **DB 持久化**:`srcradar-db` 是 docker named volume,容器被 `docker rm` 后下次 `docker run -v srcradar-db:/opt/srcradar/db` 还能挂回同名 volume,业务数据不丢。需要看 DB 内容:`sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`。
 >
@@ -425,39 +433,39 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 
 按"已定位/已缓解/未根治"三档排列:
 
-### 1. 单字符 subdomain / Wildcard DNS 噪声 ⏳ 治标未治本
+### 1. 单字符 subdomain / Wildcard DNS 噪声 ✅ 已根治 (2026-08-25)
 
-**现象**:`daily/lib/dashboard.py`「站点详情」tab 出现 N 行形如 `http://a/` / `http://j/` / `http://0/` 的条目,URL 无法访问。
+**历史现象**:`daily/lib/dashboard.py`「站点详情」tab 出现 N 行形如 `http://a/` / `http://j/` / `http://0/` 的条目,URL 无法访问。早期根因(httpx 文本输出 + awk 切列 + 无入库前校验)三层叠加:
 
-**根因**(三层):
+1. 单字符 permutation 候选没在 HTTP 探测前被剔除
+2. httpx 探测时 DNS 被 wildcard 收口到 CDN IP,HTTP 请求落到真实域名的服务器
+3. import 时只保留输入前缀 `a` 作为 `subdomain`,没把真实命中域名写到 canonical 字段
 
-1. `pdtm/check_wildcard.sh` 检测到 `*.example.com` 有泛解析,但单字符 permutation 候选没在 HTTP 探测前被剔除
-2. httpx 探测时 DNS 被 wildcard 收口到 CDN IP,HTTP 请求落到真实域名(如 `aliondemandfiles.example.com` )的服务器
-3. `pdtm/import_scan_results.py` 存库时只保留输入前缀 `a` 作为 `subdomain`,没把真实命中域名写到 canonical 字段
+**早期实测**:215 条 → 72 个 hash → 6 个 IP(全是 wildcard CDN 收口)。
 
-**实测**:`215 条 → 72 个 hash → 6 个 IP(全是 wildcard CDN 收口)`,`response_hash` 是占位符 `<status_code>|<content_length>` 不是真指纹。
+**根治(2026-08-25)**:
 
-**当前缓解**:`lib/dashboard.py:_build_sites` 第一行过滤 `if '.' in subdomain` —— 215 条 no-dot 全部从显示剔除;sites-table 从 46,911 行 → 179 行;gzip 后页面 45.8 KB(之前 25 MB)。
+- `pdtm/scanner.sh` 阶段 3.5 / 阶段 8 httpx 调用改 `-json` 输出 JSONL(scanner.sh:328 / 583;`FIX-2026-08-25` 注释)
+- `pdtm/import_scan_results.py::parse_json_web` 用 `urlparse(...).hostname` 从 JSON `url` 字段拿真实 host,不再走文本 awk 切列
+- `import_scan_results.py::HOSTNAME_RE = re.compile(r"^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$")`(行 29)在入库前校验,**单字符 host 直接被 `not HOSTNAME_RE.match(h)` 拒绝**(行 806)
 
-**治本**(待办,`pdtm/README.md` / `daily/README.md` 已给方案但**未合入**):
+三层叠加的根因中,根因 2(httpx 输出 JSON)是关键修复——JSON 路径不再生成"输入前缀 `a`"这种伪 subdomain,单字符条目天然消失。根因 1(permutation 阶段丢单字符)和根因 3(wildcard redirect 改 canonical)仍存在但**已被根因 2 兜底,无实际影响**,保留作为可选优化项,见 `pdtm/README.md` 附录。
 
-- 方案 1(推荐):`pdtm/permutation_cache.py` filter 阶段丢单字符 permutation —— 直接不探测,每天少 200+ 次 httpx 请求(实测单字符扫描耗时几分钟)
-- 方案 2:`pdtm/import_scan_results.py` 检测 wildcard redirect 后写真实命中域名 —— 保留数据但替换为 canonical 名字
+**仍保留**:`daily/lib/dashboard.py::_build_sites` 显示层 `if "." in subdomain`(行 831)作为防御性兜底;新增数据经过 HOSTNAME_RE 校验后该过滤实际不再触发。
 
-**判断有没有意义**:
+**2026-09 生产实测**:生产库 `web_subdomains` 中无残留单字符条目(0 行 `subdomain` 不含 `.`),`HOSTNAME_RE` 入库前过滤生效。
 
-| 用途 | 价值 |
-|---|---|
-| 真实资产盘点 | ❌ 215 条 ≠ 215 站点,真相是 6 个 CDN IP |
-| 监控内容变化 | ❌ 占位符 hash,无 diff 价值 |
-| 检测 wildcard DNS 状态 | ✅ 这些条目本身就是泛解析开启的证据 |
-| 历史趋势 | ❌ 同批次产生,重跑还是同样的 215 条 |
+### 2. ENScan_GO 目录整洁度 ✅ 公仓已清理 (2026-09-06);生产部署需手动验证
 
-### 2. ENScan_GO 目录整洁度 🟡 待清理
+2026-09-06 layout 迁移(commit `2c13c60`)后,**公仓** `modules/public/db_align/` 下已不再有 `code.bak.*` 与 `outs/` 目录,只剩 `cmd/ internal/ install.sh/ CLAUDE.md/ README.md/ go.mod/ go.sum`。**公仓风险面已消除**;若未来重新生成 enscan 输出需自建 `.gitignore`(参见 `.gitignore` 已有的 `outs/*.xlsx` 与 `*.bak.*` 规则)。
 
-- **`code.bak.20260724_140043/`** 与 **`code/`** 并存,旧版本无保留价值,应删
-- **`outs/`** 平铺 50+ xlsx 扫描结果,**无 .gitignore 保护**,文件名字段直接含公司名,潜在凭据泄露风险
-- 建议:`code.bak.*` 删除;`outs/` 按 `<业务>/<日期>/<类型>.xlsx` 重归档;加 `.gitignore` 至少拦下 `outs/*.xlsx` 和 `*.bak.*`
+**生产部署提示**:在 layout 迁移之前部署的 srcradar 实例,其 `db_align/` 下**可能仍残留**旧 `outs/` 输出(xlsx,文件名含公司名,凭据泄露风险)与 `*.bak.*` 备份目录。升级到 v0.1.0 后建议手动执行:
+
+```bash
+rm -rf db_align/outs db_align/*.bak.*
+```
+
+**风险姿态**:本项在公仓已根治;生产侧需逐场升级时手动验证。
 
 ### 3. service_type_map 残缺 🔴 跨业务对比受限
 
@@ -465,24 +473,24 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 
 ### 4. 单业务单点验证 ⚠️ 规模未验证
 
-`businesses` 表只有 1 行,所有设计只在 21 家公司 / 41 条备案上验证过:
+`businesses` 表只有单业务行,所有设计只在数十家公司 / 数百份备案上验证过:
 
-- 并发跑 N 个业务时的 `flock` 互斥、ENScan 子进程并发、AQC 配额争抢都没经过压力测试
-- snapshot 拍全库 6 表 ~50k 行的耗时与内存峰值未测
+- 并发跑多个业务时的 `flock` 互斥、ENScan 子进程并发、AQC 配额争抢都没经过压力测试
+- snapshot 拍全库 6 表数十万行的耗时与内存峰值未测
 - **建议**:加第 2 个业务(最简单的 `scanme` 类)做并行验证
 
-### 5. pdtm 已有修复未合入 🟡 文档在代码不在
+### 5. pdtm 已有修复未合入 🟡 部分根治 (2026-09)
 
-`pdtm/README.md` 附录 A/B/C 给出了三档"每次跑都大概率找到新资产"的方案 + stage 5/6 fusion 链路 bug 修复,均**有验证数据但未合并**:
+`pdtm/README.md` 附录 A/B/C 给出了三档"每次跑都大概率找到新资产"的方案 + stage 5/6 fusion 链路 bug 修复,实施进度:
 
-- 附录 A:alterx 缓存 bug(`cat ALIVE_FILTERED >> ALTERX_OUT` 导致事实子域被永久冻住)
-- 附录 B 方案 A:时间戳词表(必做,改造成本 1 函数 + 1 行调用)
-- 附录 B 方案 B:概率性复活采样(改造成本 ~5 行)
-- 附录 C:阶段 6 mapper 走 JSONL 而非 `cut -d':' -f1` 文本解析(避免阶段 5 加回 `-title -td` 时再次失效)
+- **附录 A**:alterx 缓存 bug — **过滤已加**(2026-09 commit `ba581e6` / `1803252`,`scan.sh:309-326` 用 `comm -23 <(sort -u ALTERX_OUT) <(sort -u ALIVE)` 剔除已 ALIVE 候选)。但 alterx 仍 `cat in_enrich \| alterx >> ALTERX_OUT`(`scan.sh:302-304`),即每次跑仍把已知 ALIVE 候选喂给 alterx 重生成,**未根治**(只过滤输出,未阻止重生成)。
+- **附录 B 方案 A**:时间戳词表 — 未实施
+- **附录 B 方案 B**:概率性复活采样 — 未实施
+- **附录 C**:阶段 6 mapper 走 JSONL — 未实施(`scan.sh` 阶段 6 仍是 mapper 文本解析)
 
 ### 6. daily/reports 无自动轮转 🟡 长期累积
 
-`daily/reports/` 默认全保留,README 给了手工清理命令但**没装进 cron**。长期跑会无限累积(当前已 7 个目录)。
+`daily/reports/` 默认全保留,README 给了手工清理命令但**没装进 cron**。长期跑会无限累积(生产环境已累计数十份)。
 
 **建议**:在 `daily_monitor.sh` 入口加一行:
 
@@ -490,18 +498,18 @@ ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重�
 find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
 ```
 
-### 7. 集成测试缺失 🔴 回归靠运气
+### 7. 集成测试覆盖不完整 🟡 已知
 
-- `go test ./...` 只覆盖 resolver / permute / scope 单测
+- `go test ./...` 覆盖 `db_align/internal/{resolver,permute,scope}`(3 个 `_test.go`,2026-09 layout 迁移后保留)
 - `crawler` 和 `store` 的 upsert 路径只在 smoke test(`-n ExampleCo -all`)里跑过,且依赖 AQC 凭据
-- `pdtm` 完全没有自动化测试,所有 fix 都在 README 附录里叙述
+- `pdtm` 没有自动化测试,所有 fix 都在 README 附录里叙述
 - **建议**:基于 sqlite in-memory 给 store / crawler 写集成测试,无需真实 AQC;pdtm 的 fix 合并时同步加回归用例
 
 ### 8. 数据库敏感数据未加密 ⚠️ 凭据泄露面
 
-`recon.sqlite3` 43 MB,`mapp_records.raw_json` 存全量 API 响应,`web_subdomains.raw_json` 存 HTTP 响应正文。**未经加密落盘**,任何拿到这台机器的人就能 dump 全部备案 + 服务原始 JSON。`.claudeignore` 拦得住 Claude,**拦不住** shell 用户直接 `cat`。
+`recon.sqlite3` 体量数十 MB,`mapp_records.raw_json` 与 `web_subdomains.raw_json` 字段在公开版本已被**脱敏或剥离**(2026-09 生产实测:mapp_records.raw_json 字段空);未加密落盘的备案字段 + 公司主体仍属敏感数据。
 
-**建议**:评估 `recon.sqlite3` 静态加密(sqlite SEE / sqlcipher)的必要性,或至少把 `raw_json` 字段移出主库放归档表。
+**建议**:评估 `recon.sqlite3` 静态加密(sqlite SEE / sqlcipher)的必要性,或把 `raw_json` 字段明确剥离 / 仅在归档表保留抽样。
 
 ### 9. 文档入口分散 🟢 可读性问题
 
@@ -538,7 +546,7 @@ find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
 
 **对照验证**(`pdtm/cdnmatch` smoke test):老 `cdncheck -i ... -cdn -waf` vs 新 `cdnmatch`,同输入 12 IP 输出 4 个 WAF IP `{104.16.132.229, 104.16.133.229, 104.17.207.5, 104.17.208.5}` 完全相同;4 个 CNAME 老/新都命中 2 个 Cloudflare 后缀(`*.cdn.cloudflare.net`)。
 
-**重新启用 cron**:合入已稳定,按运维约定第 5 条重新 `./install_cron.sh`(无参,跑 pdtm+icp,业务级开关见共享数据模型 → `recon_business_config` 表)。首次观察次日 03:00 报告:阶段 1+2 应在 ~10 秒内完成(`dnsx JSONL: <N> 行` 后紧跟 `[cdnmatch] records=...` 一行),不再看到 `[+] cdncheck` 字样。
+**从 v0.0.x 升级到 v0.1.0 的用户**:如果你之前因 cdncheck 挂起事故暂停过 cron,现在可以按"运维硬性约定 §5"重新 `./install_cron.sh`(无参,跑 pdtm+icp,业务级开关见 `recon_business_config` 表)。首次观察次日 03:00 报告:阶段 1+2 应在 ~10 秒内完成(`dnsx JSONL: <N> 行` 后紧跟 `[cdnmatch] records=...` 一行),不再看到 `[+] cdncheck` 字样。**新装 v0.1.0 的用户无需此步骤**——直接 `./install_cron.sh` 即可。
 
 **配套变更**:
 
@@ -570,7 +578,7 @@ find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
 **结论**:
 
 - cdncheck 是唯一在主流水线里被反向坑的工具(已通过 cdnmatch 间接解决)。**新代码不要再直调 `cdncheck` 二进制**;若要 fallback,见 已知问题 §10 的 `cdncheck -cdn -waf` + CSV + `< /dev/null` 三件套。
-- subfinder 是反向坑 —— 它写文档说接受 CSV,但**实测 CSV 路径 0 命中**。所以唯一一次 file 调用在 `scan.sh:70`(subfinder);同文件内 dnsx 改用 CSV。
+- subfinder 是反向坑 —— 它写文档说接受 CSV,但**实测 CSV 路径 0 命中**。所以唯一一次 file 调用在 `scan.sh:182/378`(subfinder);同文件内 dnsx 改用 CSV。
 - scanner.sh / check_wildcard.sh 不调 subfinder,统一用 CSV 形式,均从 `pdtm/resolvers` 文件派生。
 
 **统一约定(2026-08-01 起)**:
@@ -718,36 +726,39 @@ pipeline.sh 既有的无条件 trap 语义)。
 或加 `--consume-input` / `--no-consume-input` 显式 flag,避免 `cd` 到
 `<dir>/` 再 `./srcradar ... -i ./` 误删当前目录文件。
 
-### 15. `daily/install_cron.sh` 的 `-type pdtm,icp` 数据源与头部注释脱节 ⏳ 未根治
+### 15. `daily/install_cron.sh` 的 `-type` 数据源与头部注释脱节 ⏳ 部分修
 
 **现象**:`modules/main/daily/install_cron.sh` 头部第 9-15 行注释声称 "The installed entry
 always runs `-type pdtm,icp`. ... the config table is the single source of truth for what
 each business runs. This script no longer takes -type",但:
 
-1. 实际 cron 行(脚本第 14 行 + 写入 crontab 的 awk 块)**写死** `-type pdtm,icp`,
-   并**不**从 `recon_business_config` 读 `-type` 字符串
+1. 实际 cron 行(`install_cron.sh:42`)通过 `TYPES` 环境变量传入:
+   `exec $SCRIPT -type $(echo $TYPES \| tr ' ' ',')`(已参数化,2026-09 commit 之后);
+   但脚本**默认行为**仍写死 `TYPES="pdtm icp"`,故 "always runs `-type pdtm,icp`"
+   在默认调用下成立,头部措辞存在歧义
 2. `recon_business_config` 表存的是 `enabled/web/tcp/icp` 4 个 0/1 位开关,
    `daily_monitor.sh:141-180` 拿这些位**过滤**已声明的 stages(pdtm / icp),
    **不**是源头
-3. 后果:加新 stage(如未来的 `daily-url2`)必须改 install_cron.sh,配置表加列也带不动;
-   头部注释误导后续读者
+3. 后果:加新 stage(如未来的 `daily-url2`)必须改 install_cron.sh 默认 `TYPES`,
+   配置表加列也带不动;头部注释与"参数化已实现"的事实不符
 
-**缓解(已部分修复)**:README 日常运维"常见任务命令"已注明"cron 行固定 `-type pdtm,icp`,
-stages 在配置表 gating",但**脚本头部注释仍未修正**。
+**缓解(已部分修)**:`install_cron.sh:42` 改为 `TYPES` env 变量传入(2026-09 commit),
+README 日常运维已注明"cron 行固定 `-type pdtm,icp`,stages 在配置表 gating",但
+**头部注释 + 默认 TYPES 仍未与"配置表 single-source-of-truth"对齐**。
 
 **治本**:
 
-- 方案 1:`install_cron.sh` 头部注释改为"cron 行写死 `-type pdtm,icp`,
+- 方案 1:头部注释改为"默认 cron 行固定 `-type pdtm,icp`(可通过 `TYPES` env 覆写),
   `recon_business_config` 表按位过滤已声明 stages",与代码行为对齐
-- 方案 2:让 cron 行从配置表读 stages(配置表新增 `stages TEXT` 列),真正实现
+- 方案 2:让默认 `TYPES` 从配置表读 stages(配置表新增 `stages TEXT` 列),真正实现
   single-source-of-truth;改动面更大,涉及 `daily_monitor.sh` 入参解析
 
 **判断有没有意义**:
 
 | 用途 | 价值 |
 |---|---|
-| 当前 2 阶段(pdtm+icp) | 🟡 注释与代码脱节,但功能可用 |
-| 加新 stage 接入 cron | 🔴 不修就要改 install_cron.sh,与文档承诺不符 |
+| 当前 2 阶段(pdtm+icp) | 🟡 注释与代码部分脱节,默认调用仍工作 |
+| 加新 stage 接入 cron | 🔴 不修就要改 install_cron.sh 默认 TYPES,与文档承诺不符 |
 | operator 加 stage | 🔴 同上,配置表加列不会自动生效 |
 
 ---

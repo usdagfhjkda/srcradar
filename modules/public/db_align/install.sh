@@ -24,11 +24,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ENScan_GO 上游 tag 锁定(改这里升级)
-ENSCAN_GO_REPO="https://github.com/wgpsec/ENScan_GO.git"
-ENSCAN_GO_TAG="v1.4.0"
+ENSCAN_GO_REPO="https://github.com/usdagfhjkda/wgpsec-ENScan_GO.git"
+ENSCAN_GO_TAG="wgpsec-v1.4.0-fork1"
 
 VENDOR_DIR="$SCRIPT_DIR/ENScan_GO"
-VENDOR_SRC="$VENDOR_DIR/code"
+VENDOR_SRC="$VENDOR_DIR"   # wgpsec-ENScan_GO fork: 源码在 root,无 code/ 子目录
 ENScan_BIN="$VENDOR_DIR/ENScan"
 DBALIGN_BIN="$SCRIPT_DIR/bin/db_align"
 
@@ -52,7 +52,7 @@ check_deps() {
 
 # ---- 拉/更新 ENScan_GO vendor ----
 ensure_enscan_go() {
-    if [ -d "$VENDOR_SRC" ]; then
+    if [ -d "$VENDOR_SRC" ] && [ -f "$VENDOR_SRC/go.mod" ]; then
         log "ENScan_GO/ 已存在,跳过 clone (用 --update 重 fetch)"
         return 0
     fi
@@ -84,13 +84,13 @@ build_enscan_go() {
         log "ENScan 已 build: $ENScan_BIN (跳过)"
         return 0
     fi
-    if [ ! -d "$VENDOR_SRC" ]; then
-        err "ENScan_GO/code 不存在,先 ensure_enscan_go"
+    if [ ! -d "$VENDOR_SRC" ] || [ ! -f "$VENDOR_SRC/go.mod" ]; then
+        err "ENScan_GO/vendor 缺失或 go.mod 不在,先 ensure_enscan_go"
         return 3
     fi
-    log "go build ENScan_GO/code -> $ENScan_BIN"
+    log "go build ENScan_GO (root) -> $ENScan_BIN"
     (
-        cd "$VENDOR_SRC"
+        cd "$VENDOR_DIR"
         go build -o "$ENScan_BIN" .
     )
     [ -x "$ENScan_BIN" ] || { err "ENScan build 完但 $ENScan_BIN 缺失"; return 4; }
@@ -133,7 +133,7 @@ verify() {
     local rc=0
     [ -x "$DBALIGN_BIN" ] && printf "  OK db_align\n" || { warn "db_align 未 build"; rc=1; }
     [ -x "$ENScan_BIN" ] && printf "  OK ENScan\n" || { warn "ENScan 未 build"; rc=1; }
-    [ -d "$VENDOR_SRC" ] && printf "  OK ENScan_GO/vendor\n" || { warn "ENScan_GO/vendor 缺失"; rc=1; }
+    [ -d "$VENDOR_DIR" ] && [ -f "$VENDOR_DIR/go.mod" ] && printf "  OK ENScan_GO/vendor\n" || { warn "ENScan_GO/vendor 缺失"; rc=1; }
     return $rc
 }
 
