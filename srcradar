@@ -137,15 +137,23 @@ fi
 # Dispatch: exec replaces this process so argv / $0 stays correct
 # for the target script (its ${BASH_SOURCE[0]} resolves to itself,
 # not back to this dispatcher).
-# 默认 DB 路径:docker entrypoint 把 DB 写到 /data/recon.sqlite3;
-# 若用户没显式 RECON_DB / DB,且 /data/recon.sqlite3 存在,用之;
-# 否则让子脚本用自己的 default (RECON_ROOT/main/db/...).
-# DB 路径自动推断(用户不需指定):
-#   1) /opt/srcradar/db/recon.sqlite3(image 内固定,entrypoint init-db 写的)
-#   2) /data/recon.sqlite3(兼容老 mount)
-#   3) 用户显式 RECON_DB / DB 优先
+# DB 路径解析(由 ./srcradar 顶部统一,免子脚本各自拼路径):
+#   1) env: $RECON_DB / $DB(用户显式 export)
+#   2) config/db.conf 的 recon_db_path(走 modules/main/lib/load_config.sh
+#      跟 config/pdtm.conf 同一套机制;load_config_set 在文件不存在时
+#      静默返回 0,不阻塞 docker / 干净 clone 等场景)
+#   3) 硬编码 image 路径 /opt/srcradar/db/recon.sqlite3(docker entrypoint
+#      init-db 默认落点)
+#   4) 兼容老 mount /data/recon.sqlite3(早期 srcradar-data volume)
+#   5) 都不命中 -> 子脚本走各自默认(<repo>/modules/main/db/...)
 if [ -z "${RECON_DB:-}" ] && [ -z "${DB:-}" ]; then
-    if [ -f /opt/srcradar/db/recon.sqlite3 ]; then
+    # shellcheck disable=SC1091
+    source "${ROOT_DIR}/modules/main/lib/load_config.sh"
+    load_config_set "${ROOT_DIR}/config/db.conf" "${ROOT_DIR}/modules/main/lib" || true
+    if [ -n "${recon_db_path:-}" ]; then
+        export RECON_DB="${recon_db_path}"
+        export DB="${recon_db_path}"
+    elif [ -f /opt/srcradar/db/recon.sqlite3 ]; then
         export RECON_DB=/opt/srcradar/db/recon.sqlite3
         export DB=/opt/srcradar/db/recon.sqlite3
     elif [ -f /data/recon.sqlite3 ]; then

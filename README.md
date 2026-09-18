@@ -73,9 +73,17 @@ cd srcradar
 ./check.sh
 
 # 2. 装所有上游依赖(pdtm -> PD 工具 -> cdnmatch -> 自动 init-db;
-#    默认安装 pdtm + PD 工具 + cdnmatch;
+#    默认勾选 main/{db,lib,manage,pdtm},daily 默认不勾(避免自动注册 cron);
 #    db_align (enscan) 与 ymicp 由 install.sh 单独引导,详见各自 README):
-./install.sh --no-enscan
+./install.sh                       # 交互式 checklist(回车切换 / 0 确认 / q 退出)
+./install.sh --skip-check          # 已知环境达标,跳过 check.sh 直接进 checklist
+
+#    DB 路径优先级(由 ./srcradar 顶部统一处理):
+#      1) CLI --db / $RECON_DB env
+#      2) config/db.conf 的 recon_db_path(./install.sh 末尾自动生成)
+#      3) /opt/srcradar/db/recon.sqlite3(docker image 内固定)
+#      4) /data/recon.sqlite3(兼容老 mount)
+#      5) 模块默认(<repo>/modules/main/db/recon.sqlite3)
 
 # 3. (可选) 如需 enscan 插件,详见 [db_align/README.md](./modules/public/db_align/README.md) §安装
 #    (标 LOCKED tag,需人工授权;运行时半自动介入 — cookie 失效自愈 / 缓存清理,
