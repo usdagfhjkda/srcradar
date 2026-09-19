@@ -80,10 +80,9 @@ run_server() {
         return 2
     fi
     if [ ! -f "$SCRIPT_DIR/docker-compose.yml" ]; then
-        # docker-compose.yml 是用户自管(见 README §文件说明);
-        # ymicp 是 client + self-hosted-server 分离,服务端 compose 由
-        # operator 自己放,公仓不提供。降到 warn 避免 stderr 误报为 bug。
-        warn "docker-compose.yml 缺失(用户自管,见 README §文件说明)"
+        # 公仓当前自带了一份占位 compose(绑 loopback / 双端口 / 资源限制
+        # / 健康检查)。如果用户在安装前删掉了,这里视为跳过 — 不视为失败。
+        warn "docker-compose.yml 缺失,跳过 docker compose up(见 README §三)"
         return 0
     fi
     log "docker compose -f $SCRIPT_DIR/docker-compose.yml up -d"

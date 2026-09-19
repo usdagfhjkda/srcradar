@@ -1,0 +1,37 @@
+services:
+  ymicp:
+    image: yiminger/ymicp:latest
+    container_name: ymicp
+    restart: always
+    # Bind to loopback only; srcradar clients call --base http://127.0.0.1:16181
+    # by default. Expose via SSH tunnel / reverse proxy for remote access.
+    ports:
+      - "127.0.0.1:16181:16181"
+      - "127.0.0.1:16182:16182"
+    # Optional volumes (uncomment and adjust before `docker compose up -d`):
+    #   ./config.yml:/app/config.yml:ro    -- server-side config (read-only)
+    #   ./data:/app/data                   -- persist query cache / history
+    environment:
+      - TZ=Asia/Shanghai
+    # Soft resource caps; tune to host capacity.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    # Cap log size so a runaway container can't fill the disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    # Liveness probe against the loopback HTTP listener.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:16181/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
