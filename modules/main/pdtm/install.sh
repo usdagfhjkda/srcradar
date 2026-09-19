@@ -65,13 +65,16 @@ install_pdtm_bin() {
     return 0
 }
 
-# ---- 跑 pdtm -ia 装 PD 工具链 ----
+# ---- 跑 pdtm 装 PD 工具链(主线 5 工具 + cdncheck) ----
+# 显式列 6 个工具,避免 `pdtm -ia` 自动装 pdtm 默认的全量 PD 工具集
+# (Dockerfile:48 注释:约 25 个)。与 Dockerfile:50 口径一致。
+# cdnmatch 的 `replace ../cdncheck` 由 install_cdnmatch() 自己 git clone vendor 满足。
 install_pdtm_tools() {
     local pdtm_bin="$HOME/go/bin/pdtm"
     [ -x "$pdtm_bin" ] || pdtm_bin="$(command -v pdtm || true)"
     [ -n "$pdtm_bin" ] || { err "pdtm 未装;run install_pdtm_bin first"; return 3; }
-    log "pdtm -ia (dnsx httpx subfinder alterx naabu cdncheck...)"
-    "$pdtm_bin" -ia
+    log "pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck"
+    "$pdtm_bin" -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck
     # shellcheck disable=SC2034 # miss counts missing tools; used in summary below
     local miss=0
     for t in dnsx httpx subfinder alterx naabu; do

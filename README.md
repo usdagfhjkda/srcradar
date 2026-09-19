@@ -77,7 +77,8 @@ cd srcradar
 # 2. 检查环境(只查不装):需要 go>=1.25, python3>=3.12, git>=2.0
 ./check.sh
 
-# 3. 装所有上游依赖(pdtm -> PD 工具 -> cdnmatch -> 自动 init-db;
+# 3. 装所有上游依赖(pdtm 装 dnsx/httpx/subfinder/alterx/naabu/cdncheck
+#    -> cdnmatch -> 自动 init-db;
 #    默认勾选 main/{db,lib,manage,pdtm},daily 默认不勾(避免自动注册 cron);
 #    db_align (enscan) 与 ymicp 由 install.sh 单独引导,详见各自 README):
 ./install.sh                       # 交互式 checklist(回车切换 / 0 确认 / q 退出)
@@ -119,7 +120,7 @@ echo www.scanme.sh > ~/scope/target.txt
 
 > **新 shell 必跑**:`pdtm` 与 PD 工具装到 `~/go/bin/` 与 `~/.pdtm/go/bin/`,**不会**自动进当前 shell 的 PATH;新开的 shell 需要手动 `source ~/.bashrc` 或 `source ~/.zshrc`(按你的 shell 选),或者在脚本里 `export PATH="$PATH:$HOME/go/bin:$HOME/.pdtm/go/bin"` 才能直接 `pdtm` / `dnsx` 不报 not found。
 
-> **装到哪**:pdtm 装到 `~/go/bin/`;PD 工具链(dnsx/httpx/subfinder/alterx/naabu/cdncheck 等)由 pdtm 管理在 `~/.pdtm/go/bin/`;cdnmatch 在 `pdtm/bin/`;空 DB `db/recon.sqlite3` 由 install.sh 末尾自动建。详见 [`install.sh`](install.sh) 头部注释。
+> **装到哪**:pdtm 装到 `~/go/bin/`;PD 工具链(dnsx/httpx/subfinder/alterx/naabu/cdncheck)由 pdtm 管理在 `~/.pdtm/go/bin/`;cdnmatch 在 `pdtm/bin/`;空 DB `db/recon.sqlite3` 由 install.sh 末尾自动建。详见 [`install.sh`](install.sh) 头部注释。
 
 > **运行要求**:srcradar 的主动扫描能力依赖 `install.sh` 自动装的外部工具(`httpx`、`dnsx`、`naabu`、`subfinder`、`alterx`、`cdncheck`)。这些工具不随仓库分发,需要先跑 `./check.sh` + `./install.sh`。详见 上游致谢。
 
@@ -370,7 +371,7 @@ scopes            tcp_assets
 
 > **集成模式**:本节列出的工具均通过 `pdtm/scan_urls.py` 等脚本以 `subprocess.run()` 调用,**非源码 fork / import**。`pdtm` 是包管理器,**不是**这些工具的代码上游。
 >
-> **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -ia` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
+> **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
 
 ### 第三方服务声明(用户自部署)
 
