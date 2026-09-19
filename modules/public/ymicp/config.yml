@@ -1,0 +1,28 @@
+server:
+  host: 0.0.0.0
+  port: 16181
+
+# auth is recommended when the listener is reachable beyond loopback
+# (e.g. behind a reverse proxy on a shared host). Set enable: true and
+# replace the placeholder secret before exposing the port publicly.
+auth:
+  enable: false
+  secret: REPLACE_WITH_OPENSSL_RAND_HEX_32
+  session_hours: 72
+mcp:
+  enable: true
+  port: 16182
+
+proxy:
+  enable: false
+  # url: socks5://127.0.0.1:40000        # 走 WARP
+  # pool:                                # 走代理池
+  #   - http://user:pass@cn1:8080
+  #   - http://user:pass@cn2:8080
+  # rotate_on_fail: true
+  # timeout: 15
+
+# 监控场景限速（按需调）
+query:
+  qps: 0.5
+  jitter_ms: 1500

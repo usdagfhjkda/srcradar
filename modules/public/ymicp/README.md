@@ -67,6 +67,13 @@ srcradar **不提供** ymicp 服务端的自动化部署。请按以下方式之
 docker run -d -p 127.0.0.1:16181:16181 --name ymicp yiminger/ymicp
 ```
 
+或使用本目录自带的占位模板(绑 127.0.0.1 / 双端口 / 资源限制 / 健康检查):
+
+```bash
+cd modules/public/ymicp
+docker compose up -d
+```
+
 镜像默认监听 `127.0.0.1:16181`(仅本机)。`srcradar/icp_mapp_query.py` 的 `--base` 默认就是这个地址。
 
 ### 方案 B:从源码自行 build
@@ -142,9 +149,9 @@ ymicp 是**集成层 plugin**,自己只编写客户端 (`icp_mapp_query.py`),服
 
 | 文件 | 说明 |
 |---|---|
-| `icp_mapp_query.py` | srcradar 客户端(Apache-2.0),本目录唯一保留的文件 |
-| ~~`docker-compose.yml`~~ | ❌ 已移除(由用户自行部署) |
-| ~~`config.yml`~~ | ❌ 已移除(ymicp 服务端配置由用户维护) |
+| `icp_mapp_query.py` | srcradar 客户端(Apache-2.0) |
+| `docker-compose.yml` | ymicp 服务端编排占位模板,绑 127.0.0.1 / 16181+16182 / 资源限制 / 健康检查;operator 按需调整后再 `docker compose up -d` |
+| `config.yml` | ymicp 服务端配置占位模板,所有敏感字段都是空值/占位符;operator 部署前自行覆写 |
 | `ymicp.sqlite3` | 历史遗留,新结构已迁到 `../db/recon.sqlite3` |
 
 ---
