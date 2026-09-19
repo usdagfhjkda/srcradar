@@ -65,16 +65,13 @@ install_pdtm_bin() {
     return 0
 }
 
-# ---- 跑 pdtm 装 PD 工具链(主线 5 工具;cdncheck 由 cdnmatch build 时 vendor) ----
-# cdncheck 不再通过 pdtm -ia 装 —— srcradar 主流水线走 cdnmatch 离线匹配
-# (scanner.sh 阶段 1+2),详见 README §已知问题 §10。cdnmatch 编译需要 cdncheck
-# vendor 目录,由 install_cdnmatch() 自己 git clone。
+# ---- 跑 pdtm -ia 装 PD 工具链 ----
 install_pdtm_tools() {
     local pdtm_bin="$HOME/go/bin/pdtm"
     [ -x "$pdtm_bin" ] || pdtm_bin="$(command -v pdtm || true)"
     [ -n "$pdtm_bin" ] || { err "pdtm 未装;run install_pdtm_bin first"; return 3; }
-    log "pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu (主线 5 工具)"
-    "$pdtm_bin" -duc -i dnsx,httpx,subfinder,alterx,naabu
+    log "pdtm -ia (dnsx httpx subfinder alterx naabu cdncheck...)"
+    "$pdtm_bin" -ia
     # shellcheck disable=SC2034 # miss counts missing tools; used in summary below
     local miss=0
     for t in dnsx httpx subfinder alterx naabu; do
