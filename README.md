@@ -65,14 +65,21 @@ srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何
 ## 快速开始
 
 ```bash
-# 0. 拉代码(public 镜像)
+# 0. 装系统依赖(Ubuntu/Debian):sqlite3 给 daily DB / cron 给定时跑;
+#    go/python3/git 等由 ./check.sh 引导
+sudo apt update
+sudo apt install sqlite3 cron -y
+
+# 1. 拉代码(public 镜像)
 git clone https://github.com/usdagfhjkda/srcradar.git
 cd srcradar
 
-# 1. 检查环境(只查不装):需要 go>=1.25, python3>=3.12, git>=2.0
+# 2. 检查环境(只查不装):需要 go>=1.25, python3>=3.12, git>=2.0
 ./check.sh
 
-# 2. 装所有上游依赖(pdtm -> PD 工具 -> cdnmatch -> 自动 init-db;
+# 3. 装所有上游依赖(pdtm + 主线 5 工具 dnsx/httpx/subfinder/alterx/naabu
+#    -> cdnmatch -> 自动 init-db;cdncheck 不再由 pdtm -ia 装,改由 cdnmatch
+#    build 时 vendor;
 #    默认勾选 main/{db,lib,manage,pdtm},daily 默认不勾(避免自动注册 cron);
 #    db_align (enscan) 与 ymicp 由 install.sh 单独引导,详见各自 README):
 ./install.sh                       # 交互式 checklist(回车切换 / 0 确认 / q 退出)
@@ -85,28 +92,28 @@ cd srcradar
 #      4) /data/recon.sqlite3(兼容老 mount)
 #      5) 模块默认(<repo>/modules/main/db/recon.sqlite3)
 
-# 3. (可选) 如需 enscan 插件,详见 [db_align/README.md](./modules/public/db_align/README.md) §安装
+# 4. (可选) 如需 enscan 插件,详见 [db_align/README.md](./modules/public/db_align/README.md) §安装
 #    (标 LOCKED tag,需人工授权;运行时半自动介入 — cookie 失效自愈 / 缓存清理,
 #     见 [db_align/README.md](./modules/public/db_align/README.md) §运维)
 
-# 4. (可选) 如需小程序备案反查 plugin,详见 [ymicp/README.md](./modules/public/ymicp/README.md) §部署
+# 5. (可选) 如需小程序备案反查 plugin,详见 [ymicp/README.md](./modules/public/ymicp/README.md) §部署
 
 # 装完先看一眼 dispatcher 能干啥(列出全部 module/script 对,常用 cheat sheet)
 ./srcradar --list
 
-# 5. 喂入一个精确单子域 + 注册业务
+# 6. 喂入一个精确单子域 + 注册业务
 #    add_business -i <dir> 要求目录下有 target.txt;
 #    成功后会自动清理 target.txt(详见 已知问题 §14)
 mkdir -p ~/scope
 echo www.scanme.sh > ~/scope/target.txt
 ./srcradar manage add_business -n test -i ~/scope
 
-# 6. 跑该业务的 pdtm 流水线(dnsx + scanner.sh + import)
+# 7. 跑该业务的 pdtm 流水线(dnsx + scanner.sh + import)
 #    stages 由 recon_business_config 表按位 gating(详见 日常运维):
 #    -n test 业务用默认值 web=1 / tcp=0 / icp=1,实际跑 pdtm + icp
 ./srcradar daily run_one_business test
 
-# 7. 起 dashboard(默认 127.0.0.1:8765,仅本机可访问;docker / 远程访问见 §Docker 启动)
+# 8. 起 dashboard(默认 127.0.0.1:8765,仅本机可访问;docker / 远程访问见 §Docker 启动)
 ./srcradar daily dashboard
 ```
 
@@ -114,9 +121,9 @@ echo www.scanme.sh > ~/scope/target.txt
 
 > **新 shell 必跑**:`pdtm` 与 PD 工具装到 `~/go/bin/` 与 `~/.pdtm/go/bin/`,**不会**自动进当前 shell 的 PATH;新开的 shell 需要手动 `source ~/.bashrc` 或 `source ~/.zshrc`(按你的 shell 选),或者在脚本里 `export PATH="$PATH:$HOME/go/bin:$HOME/.pdtm/go/bin"` 才能直接 `pdtm` / `dnsx` 不报 not found。
 
-> **装到哪**:pdtm 装到 `~/go/bin/`;PD 工具链(dnsx/httpx/subfinder/alterx/naabu/cdncheck 等)由 pdtm 管理在 `~/.pdtm/go/bin/`;cdnmatch 在 `pdtm/bin/`;空 DB `db/recon.sqlite3` 由 install.sh 末尾自动建。详见 [`install.sh`](install.sh) 头部注释。
+> **装到哪**:pdtm 装到 `~/go/bin/`;PD 工具链(dnsx/httpx/subfinder/alterx/naabu)由 pdtm 管理在 `~/.pdtm/go/bin/`;cdnmatch 在 `pdtm/bin/`;空 DB `db/recon.sqlite3` 由 install.sh 末尾自动建。详见 [`install.sh`](install.sh) 头部注释。
 
-> **运行要求**:srcradar 的主动扫描能力依赖 `install.sh` 自动装的外部工具(`httpx`、`dnsx`、`naabu`、`subfinder`、`alterx`、`cdncheck`)。这些工具不随仓库分发,需要先跑 `./check.sh` + `./install.sh`。详见 上游致谢。
+> **运行要求**:srcradar 的主动扫描能力依赖 `install.sh` 自动装的外部工具(`httpx`、`dnsx`、`naabu`、`subfinder`、`alterx`);`cdncheck` 由 `pdtm/cdnmatch` build 时 vendor。这些工具不随仓库分发,需要先跑 `./check.sh` + `./install.sh`。详见 上游致谢。
 
 ### Quick reference (`./srcradar` dispatcher)
 
@@ -365,7 +372,7 @@ scopes            tcp_assets
 
 > **集成模式**:本节列出的工具均通过 `pdtm/scan_urls.py` 等脚本以 `subprocess.run()` 调用,**非源码 fork / import**。`pdtm` 是包管理器,**不是**这些工具的代码上游。
 >
-> **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -ia` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
+> **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）;`cdncheck` 不在此列 —— 由 `pdtm/cdnmatch` build 时 vendor。
 
 ### 第三方服务声明(用户自部署)
 
