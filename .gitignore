@@ -99,6 +99,12 @@ modules/private/*
 # ---- 4. 上游依赖管理 ----
 .vendor/
 
+# ---- srcradar-mcp-server(独立 repo,只在工作树留目录占位,不进 git) ----
+# 仓库: usdagfhjkda/srcradar-mcp-server
+# 单目录模式(非 modules/public/srcradar-mcp-server/*): 防止目录下任何
+# stray 文件被误 add。
+modules/public/srcradar-mcp-server/
+
 # ---- 5. 内部使用脚本(不进 OSS) ----
 # install-internal.sh 是内部部署用脚本,public 版本用 install.sh 即可。
 # 保留本地副本(用于内部机器部署),但不入仓。
