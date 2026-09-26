@@ -133,13 +133,31 @@ DBEOF
 # 输出:三段关联数组 AREA[N] / NAME[N] / DESC[N] / N 顺序
 discover_modules() {
     local -a order=()
+    # 虚条目:public/srcradar-mcp-server
+    #   该模块是独立 repo (https://github.com/usdagfhjkda/srcradar-mcp-server),
+    #   默认情况下 modules/public/srcradar-mcp-server/ 不存在。
+    #   为保证 checklist 视觉布局(段内字母序),在扫到 modules/public/ 时即使
+    #   目录不存在也补一条 "srcradar-mcp-server" 到 names;install 阶段由
+    #   main() 检测目录不存在再触发 git clone。
+    # 虚条目:遇到时按其 "area/虚名" 形式插入到对应段的字母序位置
+    #   (而不是硬塞到 order 最前面,否则会破坏 "main/public/private
+    #   三段 + 段内字母序" 的视觉布局)
+    local -A VIRTUAL_NAMES=([srcradar-mcp-server]=public)
+
     for area in main public private; do
         local adir="$SCRIPT_DIR/modules/$area"
         [ -d "$adir" ] || continue
         local -a names=()
         for mdir in "$adir"/*/; do
+            local bname; bname="$(basename "$mdir")"
+            # 虚条目:在它"应该出现"的 area 段补一条(目录不存在也算);
+            # 其它 area 段扫到同名目录则跳过,避免重复。
+            if [ -n "${VIRTUAL_NAMES[$bname]:-}" ]; then
+                [ "${VIRTUAL_NAMES[$bname]}" = "$area" ] && names+=("$bname")
+                continue
+            fi
             [ -d "$mdir" ] || continue
-            names+=("$(basename "$mdir")")
+            names+=("$bname")
         done
         # 字母序排序(空目录也能跑)
         local -a sort_names=()
@@ -191,6 +209,7 @@ ask_checklist() {
             main/manage)  echo "业务管理(register target / set_config)" ;;
             main/pdtm)    echo "主动测绘核心 dnsx+httpx+naabu+cdnmatch" ;;
             public/db_align) echo "ENScan_GO 集成(Apache-2.0,大依赖)" ;;
+            public/srcradar-mcp-server) echo "独立 MCP server 子模块(独立 repo,默认不勾,勾选后自动 clone + ./install.sh --yes)" ;;
             public/ymicp) echo "小程序备案反查客户端(需自部署服务)" ;;
             *)            echo "" ;;
         esac
@@ -306,6 +325,26 @@ main() {
             local name; name="$(basename "$mdir")"
             local key="$area/$name"
             if [ "${SELECTED_M[$key]:-0}" = "1" ]; then
+                # mcp-server 特殊:目录不存在则先 clone(独立 repo)
+                if [ "$key" = "public/srcradar-mcp-server" ]; then
+                    if [ ! -d "$mdir" ]; then
+                        # 先 ls-remote 探测,repo 不存在(404)时 warn 跳过、不阻塞
+                        if git ls-remote --heads https://github.com/usdagfhjkda/srcradar-mcp-server.git \
+                            >/dev/null 2>&1; then
+                            log "[$key] 目录不存在;git clone https://github.com/usdagfhjkda/srcradar-mcp-server.git $mdir"
+                            if ! git clone https://github.com/usdagfhjkda/srcradar-mcp-server.git "$mdir"; then
+                                err "[$key] git clone 失败;中断 install"
+                                exit 3
+                            fi
+                        else
+                            warn "[$key] standalone repo 尚未公开,请先创建 https://github.com/usdagfhjkda/srcradar-mcp-server 后重试;跳过"
+                            continue
+                        fi
+                    fi
+                    run_module "$area" "$name" --yes || exit 3
+                    installed=$((installed+1))
+                    continue
+                fi
                 # db 模块特殊:check + 后续 --init-db 触发;其余 --yes
                 if [ "$name" = "db" ]; then
                     run_module "$area" "$name" --check || exit 3
