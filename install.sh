@@ -129,20 +129,29 @@ DBEOF
     log "已写入 $cfg (recon_db_path 默认 = $SCRIPT_DIR/modules/main/db/recon.sqlite3)"
 }
 
+# ---- 文件级 VIRTUAL_NAMES ----
+# 共享给 discover_modules()(用来在 checklist 中列出虚拟模块)和 main() 的
+# install-stage(用来在磁盘没目录时触发 git clone)。
+# 必须放在文件级(且**在这里直接赋值**,不能在函数里赋值)——
+# 因为 discover_modules() 通过 `< <(discover_modules)` 进程替换被调用,
+# 子 shell 里给 VIRTUAL_NAMES 赋值,父 shell 拿不到,install-stage 会读到空。
+# 注意必须用 `declare -A X=(...)` 语法而不是 `X=(...)`,否则 set -u 下会
+# 把 ["srcradar-mcp-server"] 当成变量名 $srcradar(没引号也不识别为关联数组 key)。
+# 新增虚拟模块:在这里加一行 `["<name>"]=<area>`。
+declare -A VIRTUAL_NAMES=(["srcradar-mcp-server"]=public)
+
 # ---- 收集所有可安装模块(按字母序,分 main / public / private) ----
 # 输出:三段关联数组 AREA[N] / NAME[N] / DESC[N] / N 顺序
 discover_modules() {
     local -a order=()
     # 虚条目:public/srcradar-mcp-server
     #   该模块是独立 repo (https://github.com/usdagfhjkda/srcradar-mcp-server),
-    #   默认情况下 modules/public/srcradar-mcp-server/ 不存在。
-    #   为保证 checklist 视觉布局(段内字母序),在扫到 modules/public/ 时即使
-    #   目录不存在也补一条 "srcradar-mcp-server" 到 names;install 阶段由
-    #   main() 检测目录不存在再触发 git clone。
-    # 虚条目:遇到时按其 "area/虚名" 形式插入到对应段的字母序位置
-    #   (而不是硬塞到 order 最前面,否则会破坏 "main/public/private
-    #   三段 + 段内字母序" 的视觉布局)
-    local -A VIRTUAL_NAMES=([srcradar-mcp-server]=public)
+    #   默认情况下 modules/public/srcradar-mcp-server/ 不存在(.gitignore 屏蔽)。
+    #   为保证 checklist 视觉布局(段内字母序),在字母序插入前无条件追加
+    #   "srcradar-mcp-server" 到 names;install 阶段由 main() 检测目录不存在
+    #   再触发 git clone。
+    # 兜底实现:见 for mdir 循环之后的 virtual-name fallback 段。
+    # (同时保留 for mdir 循环里的虚拟名检测,用于"目录真实存在"时去重)
 
     for area in main public private; do
         local adir="$SCRIPT_DIR/modules/$area"
@@ -158,6 +167,19 @@ discover_modules() {
             fi
             [ -d "$mdir" ] || continue
             names+=("$bname")
+        done
+        # virtual-name 兜底:无论磁盘目录在不在,checklist 都要列出 virtual 名。
+        # for mdir 循环只在 $adir/*/ 能迭代到虚名时才生效(目录存在场景);
+        # 本段补上"目录被 .gitignore 屏蔽 / 还没 clone"的场景。
+        for vname in "${!VIRTUAL_NAMES[@]}"; do
+            [ "${VIRTUAL_NAMES[$vname]}" = "$area" ] || continue
+            # 已在 names 里就不重复(避免目录存在时双倍添加)
+            local _v_dup=0
+            local _v_existing
+            for _v_existing in "${names[@]:-}"; do
+                [ "$_v_existing" = "$vname" ] && { _v_dup=1; break; }
+            done
+            [ "$_v_dup" = "0" ] && names+=("$vname")
         done
         # 字母序排序(空目录也能跑)
         local -a sort_names=()
@@ -320,31 +342,39 @@ main() {
     for area in "${areas[@]}"; do
         local adir="$SCRIPT_DIR/modules/$area"
         [ -d "$adir" ] || continue
+
+        # 虚拟 module(目录被 .gitignore 屏蔽 / 还没 clone):即使磁盘没有,checklist
+        # 勾了也要 install。for mdir 循环只迭代磁盘真实目录,虚拟 module 在这里处理。
+        # 共享 VIRTUAL_NAMES(discovery 时已注册),URL 拼接约定:
+        #   https://github.com/<owner>/<vname>.git  ← 当前 owner 硬编码 usdagfhjkda,
+        #   后续可改成 per-name 关联数组,目前只支持单一 owner。
+        for vname in "${!VIRTUAL_NAMES[@]}"; do
+            [ "${VIRTUAL_NAMES[$vname]}" = "$area" ] || continue
+            local vkey="$area/$vname"
+            [ "${SELECTED_M[$vkey]:-0}" = "1" ] || continue
+            local vmdir="$SCRIPT_DIR/modules/$area/$vname"
+            local vurl="https://github.com/usdagfhjkda/$vname.git"
+            if [ ! -d "$vmdir" ]; then
+                # 先 ls-remote 探测,repo 不存在(404)时 warn 跳过、不阻塞
+                if git ls-remote --heads "$vurl" >/dev/null 2>&1; then
+                    log "[$vkey] 目录不存在;git clone $vurl $vmdir"
+                    if ! git clone "$vurl" "$vmdir"; then
+                        err "[$vkey] git clone 失败;中断 install"
+                        exit 3
+                    fi
+                else
+                    warn "[$vkey] standalone repo 尚未公开,请先创建 $vurl 后重试;跳过"
+                    continue
+                fi
+            fi
+            run_module "$area" "$vname" --yes || exit 3
+            installed=$((installed+1))
+        done
         for mdir in "$adir"/*/; do
             [ -d "$mdir" ] || continue
             local name; name="$(basename "$mdir")"
             local key="$area/$name"
             if [ "${SELECTED_M[$key]:-0}" = "1" ]; then
-                # mcp-server 特殊:目录不存在则先 clone(独立 repo)
-                if [ "$key" = "public/srcradar-mcp-server" ]; then
-                    if [ ! -d "$mdir" ]; then
-                        # 先 ls-remote 探测,repo 不存在(404)时 warn 跳过、不阻塞
-                        if git ls-remote --heads https://github.com/usdagfhjkda/srcradar-mcp-server.git \
-                            >/dev/null 2>&1; then
-                            log "[$key] 目录不存在;git clone https://github.com/usdagfhjkda/srcradar-mcp-server.git $mdir"
-                            if ! git clone https://github.com/usdagfhjkda/srcradar-mcp-server.git "$mdir"; then
-                                err "[$key] git clone 失败;中断 install"
-                                exit 3
-                            fi
-                        else
-                            warn "[$key] standalone repo 尚未公开,请先创建 https://github.com/usdagfhjkda/srcradar-mcp-server 后重试;跳过"
-                            continue
-                        fi
-                    fi
-                    run_module "$area" "$name" --yes || exit 3
-                    installed=$((installed+1))
-                    continue
-                fi
                 # db 模块特殊:check + 后续 --init-db 触发;其余 --yes
                 if [ "$name" = "db" ]; then
                     run_module "$area" "$name" --check || exit 3
