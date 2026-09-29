@@ -5,6 +5,37 @@ All notable changes to srcradar will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-09-29
+
+Introduces the MCP integration layer and client-side skill for agent-driven
+access to srcradar. No breaking changes: CLI, SQLite schema, daily diff
+pipeline, and `./install.sh` default behavior are unchanged.
+
+### Added
+
+- **MCP integration layer** (`srcradar-mcp-server`, independent repo) —
+  exposes srcradar's 15 subcommands and 2 stage primitives over MCP
+  streamable-http on `127.0.0.1:8764`. See the
+  [`srcradar-mcp-server` README](https://github.com/usdagfhjkda/srcradar-mcp-server).
+  Daemon does not own srcradar's SQLite; remote access requires an SSH
+  tunnel.
+- **Client-side skill** (`srcradar-mcp-skill`, independent repo) —
+  agent-facing conventions for calling the daemon (path staging, args
+  shape, MCP headers). See the
+  [`srcradar-mcp-skill` README](https://github.com/usdagfhjkda/srcradar-mcp-skill)
+  and [`SKILL.md`](https://github.com/usdagfhjkda/srcradar-mcp-skill/blob/main/SKILL.md).
+- **Optional installation via main repo `install.sh`**: when running
+  `./install.sh` on the main repo, the checklist now lists
+  `public/mcp-server`. Selecting it clones `srcradar-mcp-server` into
+  `modules/public/srcradar-mcp-server/` and runs its `./install.sh --yes`.
+
+### Known limitations
+
+- **Docker image not yet adapted.** The new MCP integration is only
+  available for source-tree installs via `./install.sh`. Docker users
+  (`sudo docker load -i srcradar-*.tar`) cannot enable it in this release.
+  Tracking: see [`docker/MODIFICATIONS.txt`](https://github.com/usdagfhjkda/srcradar/blob/main/docker/MODIFICATIONS.txt).
+
 ## [0.1.0] — 2026-09-12
 
 First public release of srcradar — a SRC (Security Response Center) asset
