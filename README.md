@@ -373,6 +373,14 @@ scopes            tcp_assets
 >
 > **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
 
+### 随仓库分发的数据（词表）
+
+| 数据 | 上游 | License | 维护关系 |
+|---|---|---|---|
+| **[danielmiessler/SecLists](https://github.com/danielmiessler/SecLists)** `Discovery/DNS/`（`subdomains-top1million-20000.txt` 原件 + `dns-Jhaddix.txt` 清洗产物）| DNS 子域爆破词表（`pdtm/scan.sh` brute 阶段）| **MIT** | © 2018 Daniel Miessler |
+
+> `docker/wordlists/` 下的词表**随仓库分发**，与上表"运行时由 pdtm 装"的工具不同。其中 `dns-Jhaddix-clean.txt` 是上游文件的清洗衍生作品（过滤 + 去重 + 排序，具体规则见 [`NOTICE`](./NOTICE)），按 MIT 条款再分发。完整声明见 [`NOTICE`](./NOTICE)。
+
 ### 第三方服务声明(用户自部署)
 
 | 服务 | 提供方 | License | 维护关系 |
