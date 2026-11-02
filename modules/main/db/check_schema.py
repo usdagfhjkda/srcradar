@@ -30,13 +30,19 @@ ACCEPTED_ALTER_COLS = {
     "companies":      {"change_type"},
     "mapp_records":   {"change_type"},
     "scopes":         {"change_type"},
+    "businesses":     {"change_type", "scan_count"},
     "web_hashes":     {"change_type", "url_count", "score",
-                       "description", "score_initialized_at"},
-    "web_subdomains": {"change_type"},
+                       "description", "score_initialized_at",
+                       "learned_anchors"},
+    "web_subdomains": {"change_type", "ips", "prev_body", "curr_body",
+                       "content_type", "final_url",
+                       "last_comparison_ratio", "last_comparison_kind",
+                       "last_comparison_at"},
     "tcp_assets":     {"change_type"},
     "web_hash_urls":  {"change_type", "redirect", "link_source",
                        "risk_flag", "is_dangerous", "danger_reason",
-                       "is_static"},
+                       "is_static", "body", "prev_body", "curr_body",
+                       "baseline_at"},
 }
 
 sources = {

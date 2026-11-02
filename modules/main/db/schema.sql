@@ -145,6 +145,9 @@ CREATE TABLE IF NOT EXISTS web_hashes (
     updated_at TEXT NOT NULL,
     fetched_at TEXT NOT NULL,
     change_type INTEGER NOT NULL DEFAULT 0,
+    -- learned anchors: JSON array of [prefix, suffix] pairs marking body
+    -- regions that vary between daily samples (dynamic noise)
+    learned_anchors TEXT NOT NULL DEFAULT '[]',
     UNIQUE (business_id, response_hash)
 );
 
@@ -166,6 +169,13 @@ CREATE TABLE IF NOT EXISTS web_subdomains (
     raw_json TEXT,
     change_type INTEGER NOT NULL DEFAULT 0,
     ips TEXT DEFAULT '[]',
+    prev_body          BLOB,          -- zlib(level=6) compressed previous-cycle body
+    curr_body          BLOB,          -- zlib(level=6) compressed current-cycle body
+    content_type       TEXT,          -- HTTP Content-Type (text/html, application/json, ...)
+    final_url          TEXT,          -- final URL after following redirects
+    last_comparison_ratio REAL,        -- similarity ratio from the last comparison
+    last_comparison_kind  TEXT,        -- verdict kind from the last comparison
+    last_comparison_at    TEXT,        -- ISO 8601 timestamp of the last comparison
     UNIQUE (business_id, subdomain, port)
 );
 
@@ -315,6 +325,7 @@ CREATE TABLE IF NOT EXISTS web_subdomains_pre (
     prev_body          BLOB,
     curr_body          BLOB,
     content_type       TEXT,
+    final_url          TEXT,
     last_comparison_ratio REAL,
     last_comparison_kind  TEXT,
     last_comparison_at    TEXT,
