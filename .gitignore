@@ -105,6 +105,12 @@ modules/private/*
 # stray 文件被误 add。
 modules/public/srcradar-mcp-server/
 
+# ---- srcradar-algo-diff-cpp(独立 repo,只在工作树留目录占位,不进 git) ----
+# 仓库: usdagfhjkda/srcradar-algo-diff-cpp
+# 落盘目录是 modules/public/algo_diff_cpp/(每日流水线按这个路径调用),
+# 仓库名与目录名不同,两种拼写都屏蔽,避免误 add。
+modules/public/algo_diff_cpp/
+modules/public/srcradar-algo-diff-cpp/
 # ---- 5. 内部使用脚本(不进 OSS) ----
 # install-internal.sh 是内部部署用脚本,public 版本用 install.sh 即可。
 # 保留本地副本(用于内部机器部署),但不入仓。

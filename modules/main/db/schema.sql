@@ -432,62 +432,142 @@ CREATE TABLE IF NOT EXISTS recon_business_config (
 --   注意: web_subdomains / tcp_assets 的 AU 触发器被 round2 覆盖 (见 SECTION 9)
 -- ============================================================================
 
-CREATE TRIGGER IF NOT EXISTS trg_bz_ai AFTER INSERT ON businesses
-BEGIN
-  UPDATE businesses SET change_type = 1 WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_bz_ai AFTER INSERT ON businesses
+-- BEGIN
+--   UPDATE businesses SET change_type = 1 WHERE id = NEW.id;
+-- END;
 
-CREATE TRIGGER IF NOT EXISTS trg_sc_ai AFTER INSERT ON scopes
-BEGIN
-  UPDATE scopes SET change_type = 1 WHERE id = NEW.id;
-END;
 
-CREATE TRIGGER IF NOT EXISTS trg_co_ai AFTER INSERT ON companies
-BEGIN
-  UPDATE companies SET change_type = 1 WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_sc_ai AFTER INSERT ON scopes
+-- BEGIN
+--   UPDATE scopes SET change_type = 1 WHERE id = NEW.id;
+-- END;
 
-CREATE TRIGGER IF NOT EXISTS trg_mr_ai AFTER INSERT ON mapp_records
-BEGIN
-  UPDATE mapp_records SET change_type = 1 WHERE id = NEW.id;
-END;
 
-CREATE TRIGGER IF NOT EXISTS trg_wh_ai AFTER INSERT ON web_hashes
-BEGIN
-  UPDATE web_hashes SET change_type = 1 WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_co_ai AFTER INSERT ON companies
+-- BEGIN
+--   UPDATE companies SET change_type = 1 WHERE id = NEW.id;
+-- END;
 
-CREATE TRIGGER IF NOT EXISTS trg_ws_ai AFTER INSERT ON web_subdomains
-BEGIN
-  UPDATE web_subdomains SET change_type = 1 WHERE id = NEW.id;
-END;
 
-CREATE TRIGGER IF NOT EXISTS trg_ta_ai AFTER INSERT ON tcp_assets
-BEGIN
-  UPDATE tcp_assets SET change_type = 1 WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_mr_ai AFTER INSERT ON mapp_records
+-- BEGIN
+--   UPDATE mapp_records SET change_type = 1 WHERE id = NEW.id;
+-- END;
+
+
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_wh_ai AFTER INSERT ON web_hashes
+-- BEGIN
+--   UPDATE web_hashes SET change_type = 1 WHERE id = NEW.id;
+-- END;
+
+
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_ws_ai AFTER INSERT ON web_subdomains
+-- BEGIN
+--   UPDATE web_subdomains SET change_type = 1 WHERE id = NEW.id;
+-- END;
+
+
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_ta_ai AFTER INSERT ON tcp_assets
+-- BEGIN
+--   UPDATE tcp_assets SET change_type = 1 WHERE id = NEW.id;
+-- END;
+
 
 -- change_type AU 触发器 (旧版本 — 不区分 true reactivation vs stayed alive)
 -- 适用于 businesses (无 AU) / scopes / companies / mapp_records / web_hashes (无 AU)
 -- web_subdomains 和 tcp_assets 的 AU 触发器在 SECTION 9 被 round2 覆盖。
 
-CREATE TRIGGER IF NOT EXISTS trg_sc_au AFTER UPDATE OF is_wildcard ON scopes
-WHEN OLD.is_wildcard IS NOT NEW.is_wildcard
-BEGIN
-  UPDATE scopes SET change_type = 2 WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_sc_au AFTER UPDATE OF is_wildcard ON scopes
+-- WHEN OLD.is_wildcard IS NOT NEW.is_wildcard
+-- BEGIN
+--   UPDATE scopes SET change_type = 2 WHERE id = NEW.id;
+-- END;
 
-CREATE TRIGGER IF NOT EXISTS trg_co_au AFTER UPDATE OF updated_at ON companies
-WHEN OLD.updated_at IS NOT NEW.updated_at
-BEGIN
-  UPDATE companies SET change_type = 2 WHERE id = NEW.id;
-END;
 
-CREATE TRIGGER IF NOT EXISTS trg_mr_au AFTER UPDATE OF raw_json ON mapp_records
-WHEN OLD.raw_json IS NOT NEW.raw_json
-BEGIN
-  UPDATE mapp_records SET change_type = 2 WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_co_au AFTER UPDATE OF updated_at ON companies
+-- WHEN OLD.updated_at IS NOT NEW.updated_at
+-- BEGIN
+--   UPDATE companies SET change_type = 2 WHERE id = NEW.id;
+-- END;
+
+
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_mr_au AFTER UPDATE OF raw_json ON mapp_records
+-- WHEN OLD.raw_json IS NOT NEW.raw_json
+-- BEGIN
+--   UPDATE mapp_records SET change_type = 2 WHERE id = NEW.id;
+-- END;
+
 
 -- ============================================================================
 -- SECTION 9: web_subdomains / tcp_assets AU 触发器 (round2 覆盖版本)
@@ -499,65 +579,81 @@ END;
 --     2 = pure content change
 -- ============================================================================
 
-CREATE TRIGGER IF NOT EXISTS trg_ws_au AFTER UPDATE ON web_subdomains
-WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-   OR (OLD.title IS NOT NEW.title)
-   OR (OLD.status_code IS NOT NEW.status_code)
-   OR (OLD.technologies IS NOT NEW.technologies)
-   OR (OLD.url IS NOT NEW.url)
-   OR (OLD.content_length IS NOT NEW.content_length)
-   OR (OLD.hash_id IS NOT NEW.hash_id)
-BEGIN
-  UPDATE web_subdomains
-     SET change_type = CASE
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT started_at FROM run_markers
-                WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
-              OLD.last_seen)
-        AND (OLD.title IS NOT NEW.title OR OLD.status_code IS NOT NEW.status_code
-             OR OLD.technologies IS NOT NEW.technologies OR OLD.url IS NOT NEW.url
-             OR OLD.content_length IS NOT NEW.content_length OR OLD.hash_id IS NOT NEW.hash_id)
-         THEN 6
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT started_at FROM run_markers
-                WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
-              OLD.last_seen)
-         THEN 4
-       WHEN OLD.is_active = 0 AND NEW.is_active = 1
-         THEN 0
-       ELSE 2
-     END
-   WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_ws_au AFTER UPDATE ON web_subdomains
+-- WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--    OR (OLD.title IS NOT NEW.title)
+--    OR (OLD.status_code IS NOT NEW.status_code)
+--    OR (OLD.technologies IS NOT NEW.technologies)
+--    OR (OLD.url IS NOT NEW.url)
+--    OR (OLD.content_length IS NOT NEW.content_length)
+--    OR (OLD.hash_id IS NOT NEW.hash_id)
+-- BEGIN
+--   UPDATE web_subdomains
+--      SET change_type = CASE
+--        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--         AND OLD.last_seen < COALESCE(
+--               (SELECT started_at FROM run_markers
+--                 WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
+--               OLD.last_seen)
+--         AND (OLD.title IS NOT NEW.title OR OLD.status_code IS NOT NEW.status_code
+--              OR OLD.technologies IS NOT NEW.technologies OR OLD.url IS NOT NEW.url
+--              OR OLD.content_length IS NOT NEW.content_length OR OLD.hash_id IS NOT NEW.hash_id)
+--          THEN 6
+--        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--         AND OLD.last_seen < COALESCE(
+--               (SELECT started_at FROM run_markers
+--                 WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
+--               OLD.last_seen)
+--          THEN 4
+--        WHEN OLD.is_active = 0 AND NEW.is_active = 1
+--          THEN 0
+--        ELSE 2
+--      END
+--    WHERE id = NEW.id;
+-- END;
 
-CREATE TRIGGER IF NOT EXISTS trg_ta_au AFTER UPDATE ON tcp_assets
-WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-   OR (OLD.hosts IS NOT NEW.hosts)
-   OR (OLD.raw_value IS NOT NEW.raw_value)
-BEGIN
-  UPDATE tcp_assets
-     SET change_type = CASE
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT started_at FROM run_markers
-                WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
-              OLD.last_seen)
-        AND (OLD.hosts IS NOT NEW.hosts OR OLD.raw_value IS NOT NEW.raw_value)
-         THEN 6
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT started_at FROM run_markers
-                WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
-              OLD.last_seen)
-         THEN 4
-       WHEN OLD.is_active = 0 AND NEW.is_active = 1
-         THEN 0
-       ELSE 2
-     END
-   WHERE id = NEW.id;
-END;
+
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_ta_au AFTER UPDATE ON tcp_assets
+-- WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--    OR (OLD.hosts IS NOT NEW.hosts)
+--    OR (OLD.raw_value IS NOT NEW.raw_value)
+-- BEGIN
+--   UPDATE tcp_assets
+--      SET change_type = CASE
+--        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--         AND OLD.last_seen < COALESCE(
+--               (SELECT started_at FROM run_markers
+--                 WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
+--               OLD.last_seen)
+--         AND (OLD.hosts IS NOT NEW.hosts OR OLD.raw_value IS NOT NEW.raw_value)
+--          THEN 6
+--        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--         AND OLD.last_seen < COALESCE(
+--               (SELECT started_at FROM run_markers
+--                 WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1),
+--               OLD.last_seen)
+--          THEN 4
+--        WHEN OLD.is_active = 0 AND NEW.is_active = 1
+--          THEN 0
+--        ELSE 2
+--      END
+--    WHERE id = NEW.id;
+-- END;
+
 
 -- ============================================================================
 -- SECTION 10: web_hash_urls change_type 触发器
@@ -566,58 +662,74 @@ END;
 --   复活基线: web_subdomain_scan_schedule.last_run_at (同 subdom + enabled=1)
 -- ============================================================================
 
-CREATE TRIGGER IF NOT EXISTS trg_whu_ai AFTER INSERT ON web_hash_urls
-BEGIN
-  UPDATE web_hash_urls SET change_type = 1 WHERE id = NEW.id;
-END;
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_whu_ai AFTER INSERT ON web_hash_urls
+-- BEGIN
+--   UPDATE web_hash_urls SET change_type = 1 WHERE id = NEW.id;
+-- END;
 
-CREATE TRIGGER IF NOT EXISTS trg_whu_au AFTER UPDATE ON web_hash_urls
-WHEN NEW.is_static = 0
-   AND (
-     (OLD.is_active = 0 AND NEW.is_active = 1)
-     OR (OLD.status_code    IS NOT NEW.status_code)
-     OR (OLD.content_length IS NOT NEW.content_length)
-     OR (OLD.word_count     IS NOT NEW.word_count)
-     OR (OLD.title          IS NOT NEW.title)
-     OR (OLD.redirect       IS NOT NEW.redirect)
-     OR (OLD.link_source    IS NOT NEW.link_source)
-     OR (OLD.risk_flag      IS NOT NEW.risk_flag)
-     OR (OLD.is_dangerous   IS NOT NEW.is_dangerous)
-     OR (OLD.content_type   IS NOT NEW.content_type)
-   )
-BEGIN
-  UPDATE web_hash_urls
-     SET change_type = CASE
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT last_run_at FROM web_subdomain_scan_schedule
-                WHERE business_id = NEW.business_id
-                  AND subdomain   = NEW.subdomain
-                  AND enabled     = 1
-                LIMIT 1),
-              OLD.last_seen)
-        AND (OLD.status_code IS NOT NEW.status_code
-             OR OLD.content_length IS NOT NEW.content_length
-             OR OLD.word_count     IS NOT NEW.word_count
-             OR OLD.title          IS NOT NEW.title
-             OR OLD.redirect       IS NOT NEW.redirect
-             OR OLD.link_source    IS NOT NEW.link_source
-             OR OLD.risk_flag      IS NOT NEW.risk_flag
-             OR OLD.is_dangerous   IS NOT NEW.is_dangerous
-             OR OLD.content_type   IS NOT NEW.content_type)
-         THEN 6
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT last_run_at FROM web_subdomain_scan_schedule
-                WHERE business_id = NEW.business_id
-                  AND subdomain   = NEW.subdomain
-                  AND enabled     = 1
-                LIMIT 1),
-              OLD.last_seen)
-         THEN 4
-       WHEN OLD.is_active = 0 AND NEW.is_active = 1
-         THEN 0
-       ELSE 2
-     END
-   WHERE id = NEW.id;
-END;
+
+-- DEPRECATED: change_type is written by the comparison engine
+-- (an optional plugin in its own repository). The engine selects
+-- its input by change_type = 0, so a trigger that marks new rows
+-- as 1 would hide them from it. With the trigger retired, the
+-- column is written only by the engine; when the plugin is not
+-- installed nothing writes it and no change is reported.
+-- To restore: remove the comment markers and re-run init_db.py.
+-- CREATE TRIGGER IF NOT EXISTS trg_whu_au AFTER UPDATE ON web_hash_urls
+-- WHEN NEW.is_static = 0
+--    AND (
+--      (OLD.is_active = 0 AND NEW.is_active = 1)
+--      OR (OLD.status_code    IS NOT NEW.status_code)
+--      OR (OLD.content_length IS NOT NEW.content_length)
+--      OR (OLD.word_count     IS NOT NEW.word_count)
+--      OR (OLD.title          IS NOT NEW.title)
+--      OR (OLD.redirect       IS NOT NEW.redirect)
+--      OR (OLD.link_source    IS NOT NEW.link_source)
+--      OR (OLD.risk_flag      IS NOT NEW.risk_flag)
+--      OR (OLD.is_dangerous   IS NOT NEW.is_dangerous)
+--      OR (OLD.content_type   IS NOT NEW.content_type)
+--    )
+-- BEGIN
+--   UPDATE web_hash_urls
+--      SET change_type = CASE
+--        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--         AND OLD.last_seen < COALESCE(
+--               (SELECT last_run_at FROM web_subdomain_scan_schedule
+--                 WHERE business_id = NEW.business_id
+--                   AND subdomain   = NEW.subdomain
+--                   AND enabled     = 1
+--                 LIMIT 1),
+--               OLD.last_seen)
+--         AND (OLD.status_code IS NOT NEW.status_code
+--              OR OLD.content_length IS NOT NEW.content_length
+--              OR OLD.word_count     IS NOT NEW.word_count
+--              OR OLD.title          IS NOT NEW.title
+--              OR OLD.redirect       IS NOT NEW.redirect
+--              OR OLD.link_source    IS NOT NEW.link_source
+--              OR OLD.risk_flag      IS NOT NEW.risk_flag
+--              OR OLD.is_dangerous   IS NOT NEW.is_dangerous
+--              OR OLD.content_type   IS NOT NEW.content_type)
+--          THEN 6
+--        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+--         AND OLD.last_seen < COALESCE(
+--               (SELECT last_run_at FROM web_subdomain_scan_schedule
+--                 WHERE business_id = NEW.business_id
+--                   AND subdomain   = NEW.subdomain
+--                   AND enabled     = 1
+--                 LIMIT 1),
+--               OLD.last_seen)
+--          THEN 4
+--        WHEN OLD.is_active = 0 AND NEW.is_active = 1
+--          THEN 0
+--        ELSE 2
+--      END
+--    WHERE id = NEW.id;
+-- END;
+
