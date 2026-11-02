@@ -1,0 +1,34 @@
+# katana 模块配置占位模板
+#
+# 真值请复制本文件为 config/katana.conf(同目录)再编辑。
+# config/katana.conf 在 .gitignore 内,不入仓。
+#
+# 字段:
+#   KATANA_BIN            二进制绝对路径;留空走 PATH 探测(默认)
+#   KATANA_TIMEOUT        单 host 超时秒数(默认 600;大字典场景用户拍板)
+#   KATANA_EXTRA_RISKS    追加风险词(逗号分隔),默认: remove,delete,insert,update,logout
+#                         例: KATANA_EXTRA_RISKS=signout,drop,truncate
+#   KATANA_OMIT_BODY      1=不存 body(节省存储,response_hash 退化为 status|length)
+#                         0=存 body(默认;algo_diff 需要)
+#   KATANA_EXTRA_FLAGS    追加 katana flags(空格分隔),例: --no-sandbox
+#
+# 鉴权面:
+#   - katana 自身无鉴权;本模块通过 subprocess 调,不 link Go 源码(MIT 边界)
+#   - 5 词风险黑名单沿用 URLFinder(URLFinder/config/config.go:19),双重保险:
+#     (1) katana -crawl-out-scope regex 源头拦截
+#     (2) lib/risks.py 入库前再过一遍
+KATANA_BIN=
+KATANA_TIMEOUT=600
+KATANA_EXTRA_RISKS=remove,delete,insert,update,logout
+KATANA_OMIT_BODY=0
+KATANA_EXTRA_FLAGS=
+
+# ---- 速率 / 线程控制(对齐 httpx srcradar scanner.sh:328: -rate-limit 50)----
+# 全 0 = 走 katana 默认;有值 = 用该值
+KATANA_RATE_LIMIT=50            # 全局 req/s;与 httpx -rate-limit 50 同款
+KATANA_RATE_LIMIT_MIN=0         # 全局 req/min(0=不限)
+KATANA_CONCURRENCY=10           # 并发 fetchers 数
+KATANA_PARALLELISM=10           # 并发 input 数
+KATANA_HOST_RATE_LIMIT=0        # 单 host req/s(0=不限)
+KATANA_DELAY=0                  # 请求间隔秒数(防 WAF 可设 1)
+KATANA_REQUEST_TIMEOUT=10       # 单请求超时(httpx 是 5,katana 给 10 更稳)

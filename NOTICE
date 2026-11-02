@@ -19,6 +19,9 @@ licensed under the MIT License (© 2021-2025 ProjectDiscovery, Inc.):
   - cdncheck    (https://github.com/projectdiscovery/cdncheck)   — MIT
                 (consumed indirectly via srcradar's pdtm/cdnmatch wrapper;
                  no source modifications are made)
+  - katana      (https://github.com/projectdiscovery/katana)     — MIT
+                (consumed via modules/public/katana/ subprocess wrapper;
+                 no source modifications are made)
 
 ================================================================================
 ENScan_GO (https://github.com/mssky9527/ENScan_GO)
