@@ -234,14 +234,71 @@ PY
 
         log "daily-url batch: $((batch_idx+1))-$end / $n_subs, sources=$batch_sources"
 
-        # 跑 scan_urls.py
-        (cd "$PDTM" && python3 scan_urls.py scan-urls \
-            --business "$BIZ" \
-            --hosts-file "$tmp_hosts" \
-            --db "$DB" \
-            --sources "$batch_sources") 2>&1
-        local batch_rc=$?
-        rm -f "$tmp_hosts"
+        # 引擎路由:DAILY_URL_ENGINE = katana(默认) | urlfinder | auto
+        #   - katana  : 走 modules/public/katana/katana_enrich.sh(字段对齐 httpx,body 落库)
+        #   - urlfinder: 走 scan_urls.py 老行为(URLFinder + ffuf + gau,中文敏感信息专用)
+        #   - auto    : katana 失败时 fallback urlfinder(best-effort)
+        # katana 模块不存在 / 二进制没装 / install.sh 没跑 → best-effort 跳过该 batch
+        local engine="${DAILY_URL_ENGINE:-katana}"
+        local batch_rc=0
+        local KATANA_ENRICH="$RECON_ROOT/public/katana/katana_enrich.sh"
+        case "$engine" in
+            katana)
+                log "daily-url engine=katana (default)"
+                if [ -x "$KATANA_ENRICH" ]; then
+                    bash "$KATANA_ENRICH" \
+                        --db "$DB" \
+                        --business "$BIZ" \
+                        --hosts-file "$tmp_hosts" 2>&1 \
+                        || batch_rc=$?
+                else
+                    log "daily-url: katana_enrich.sh not found ($KATANA_ENRICH); skipping batch"
+                    batch_rc=0
+                fi
+                rm -f "$tmp_hosts"
+                ;;
+            urlfinder)
+                log "daily-url engine=urlfinder (legacy)"
+                (cd "$PDTM" && python3 scan_urls.py scan-urls \
+                    --business "$BIZ" \
+                    --hosts-file "$tmp_hosts" \
+                    --db "$DB" \
+                    --sources "$batch_sources") 2>&1 \
+                    || batch_rc=$?
+                rm -f "$tmp_hosts"
+                ;;
+            auto)
+                if [ -x "$KATANA_ENRICH" ]; then
+                    log "daily-url engine=auto -> katana first"
+                    bash "$KATANA_ENRICH" \
+                        --db "$DB" \
+                        --business "$BIZ" \
+                        --hosts-file "$tmp_hosts" 2>&1
+                    batch_rc=$?
+                fi
+                if [ "$batch_rc" -ne 0 ] || [ ! -x "$KATANA_ENRICH" ]; then
+                    log "daily-url engine=auto -> fallback urlfinder (katana rc=$batch_rc)"
+                    (cd "$PDTM" && python3 scan_urls.py scan-urls \
+                        --business "$BIZ" \
+                        --hosts-file "$tmp_hosts" \
+                        --db "$DB" \
+                        --sources "$batch_sources") 2>&1 \
+                        || batch_rc=$?
+                fi
+                rm -f "$tmp_hosts"
+                ;;
+            *)
+                log "daily-url: unknown DAILY_URL_ENGINE='$engine'; falling back to katana"
+                if [ -x "$KATANA_ENRICH" ]; then
+                    bash "$KATANA_ENRICH" \
+                        --db "$DB" \
+                        --business "$BIZ" \
+                        --hosts-file "$tmp_hosts" 2>&1 \
+                        || batch_rc=$?
+                fi
+                rm -f "$tmp_hosts"
+                ;;
+        esac
 
         if [ "$batch_rc" -ne 0 ]; then
             log "daily-url batch $((batch_idx+1))-$end FAILED (rc=$batch_rc)"
@@ -278,6 +335,11 @@ PY
         return 1
     fi
     log "daily-url ok: $n_subs sub(s) scanned"
+
+    # The URL-grain diff stage that used to run here has been removed
+    # together with the module it invoked. It was best-effort by design:
+    # a failure logged a warning and the surrounding pipeline carried on.
+
     return 0
 }
 
@@ -430,4 +492,26 @@ RC=0
 [ "$ENS_RC"  -ne 0 ] && RC=$((RC | 2))
 [ "$ICP_RC"  -ne 0 ] && RC=$((RC | 4))
 [ "${URL_RC:-0}" -ne 0 ] && RC=$((RC | 8))
+
+# 2026-10-01: scan_count +1 (冷启动期守护).
+# 只在所有阶段都成功 (RC=0) 时 +1. 失败保留原值,下次 cron 重试时再算.
+# 触发时机: 业务 pipeline 全跑完, BIZ 已经在 DB 里. daily_monitor.sh 不会
+# 再 +1 (已撤回到此处单点),所以 operator 手动 ./srcradar daily run_one_business
+# 也算"一次扫描" -- 与设计目标一致.
+if [ "$RC" -eq 0 ] && [ -n "${BIZ:-}" ] && [ -n "${DB:-}" ] && [ -f "$DB" ]; then
+    python3 - "$DB" "$BIZ" >>"${LOG_FILE:-/dev/null}" 2>&1 <<'PYINCR' || log "scan_count +1 失败 (非致命)"
+import sqlite3, sys
+db, biz = sys.argv[1], sys.argv[2]
+con = sqlite3.connect(db)
+row = con.execute("SELECT id FROM businesses WHERE business_name = ?", (biz,)).fetchone()
+if row is None:
+    print("[scan_count] biz not found:", biz)
+else:
+    bid = row[0]
+    cur = con.execute("UPDATE businesses SET scan_count = scan_count + 1 WHERE id = ?", (bid,))
+    con.commit()
+    print("[scan_count] +1 for", biz, "(id={})".format(bid), "new count =", cur.rowcount and (con.execute("SELECT scan_count FROM businesses WHERE id=?", (bid,)).fetchone()[0]))
+PYINCR
+fi
+
 exit "$RC"
