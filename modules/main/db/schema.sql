@@ -2,7 +2,7 @@
 -- db/schema.sql — srcradar 完整 SQLite schema 快照
 --
 -- 用途: ./init.sh --init-db  用 sqlite3 喂这份文件,生成一个空的
---        db/recon.sqlite3 (含 14 张表 + 索引 + 触发器)。
+--        db/recon.sqlite3 (含 17 张表 + 索引 + 触发器)。
 --
 -- 维护原则 (A1 方案):
 --   本文件是 srcradar 主仓里 schema 的权威快照。源文件的 CREATE TABLE / INDEX
@@ -53,7 +53,9 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS businesses (
     id INTEGER PRIMARY KEY,
     business_name TEXT NOT NULL UNIQUE,
-    change_type INTEGER NOT NULL DEFAULT 0
+    change_type INTEGER NOT NULL DEFAULT 0,
+    -- 扫描次数:前几次扫描不产生变更报告,达到稳态后才纳入对比
+    scan_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS companies (
@@ -82,6 +84,8 @@ CREATE TABLE IF NOT EXISTS mapp_records (
     change_type INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE INDEX IF NOT EXISTS idx_businesses_scan_count_cold
+  ON businesses(id) WHERE scan_count <= 3;
 CREATE INDEX IF NOT EXISTS idx_companies_business_id
     ON companies(business_id);
 
@@ -161,6 +165,7 @@ CREATE TABLE IF NOT EXISTS web_subdomains (
     is_active INTEGER NOT NULL DEFAULT 1,
     raw_json TEXT,
     change_type INTEGER NOT NULL DEFAULT 0,
+    ips TEXT DEFAULT '[]',
     UNIQUE (business_id, subdomain, port)
 );
 
@@ -246,6 +251,11 @@ CREATE TABLE IF NOT EXISTS web_hash_urls (
     first_seen      TEXT    NOT NULL,
     last_seen       TEXT    NOT NULL,
     fetched_at      TEXT    NOT NULL,
+    -- body storage (see modules/main/db/migrate_url_diff.sql)
+    body            BLOB,                  -- zlib(level=6) compressed current body
+    prev_body       BLOB,                  -- zlib(level=6) compressed previous-cycle body
+    curr_body       BLOB,                  -- zlib(level=6) compressed current-cycle snapshot
+    baseline_at     TEXT,                  -- ISO 8601 of last successful comparison
     is_active       INTEGER NOT NULL DEFAULT 1,
     change_type     INTEGER NOT NULL DEFAULT 0,
     UNIQUE (hash_id, subdomain, url, source)
@@ -276,6 +286,66 @@ CREATE INDEX IF NOT EXISTS idx_web_hash_urls_is_static
     ON web_hash_urls(is_static) WHERE is_static IS NOT NULL;
 
 -- ============================================================================
+-- ============================================================================
+-- Previous-cycle snapshot of web_subdomains.
+--   The daily run copies the current web_subdomains into this table before
+--   the scan stage, so the comparison has a previous-cycle view to read.
+--   The copy is a truncate + INSERT; only the most recent snapshot is kept.
+--   Body / comparison columns are added by
+--   modules/main/daily/lib/migrate_body_columns.sql.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS web_subdomains_pre (
+    id INTEGER PRIMARY KEY,
+    business_id INTEGER NOT NULL,
+    hash_id INTEGER NOT NULL,
+    subdomain TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    url TEXT,
+    status_code INTEGER,
+    content_length INTEGER,
+    title TEXT,
+    technologies TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    raw_json TEXT,
+    change_type INTEGER NOT NULL DEFAULT 0,
+    ips TEXT DEFAULT '[]',
+    prev_body          BLOB,
+    curr_body          BLOB,
+    content_type       TEXT,
+    last_comparison_ratio REAL,
+    last_comparison_kind  TEXT,
+    last_comparison_at    TEXT,
+    _snapshot_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (business_id, subdomain, port)
+);
+
+-- ============================================================================
+-- Per-subdomain similarity baseline.
+--   The first successful ratio becomes the baseline for that subdomain;
+--   later ratios are compared against it with a fixed tolerance.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS web_subdomain_baseline (
+    subdomain_id   INTEGER PRIMARY KEY REFERENCES web_subdomains(id),
+    baseline_ratio REAL NOT NULL,
+    sample_count   INTEGER NOT NULL DEFAULT 1,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+
+-- ============================================================================
+-- Content-similarity hash map.
+--   Maps a body similarity hash to the rows that produced it, so near
+--   neighbours can be found without a full pairwise comparison.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS hash_simhash_map (
+    response_hash TEXT    NOT NULL,
+    body_simhash  INTEGER NOT NULL,
+    PRIMARY KEY (response_hash)
+);
+
 -- SECTION 5: web_subdomain_scan_schedule
 --   来源: daily/lib/migrate_schedule.py:54
 --   拥有者: daily
