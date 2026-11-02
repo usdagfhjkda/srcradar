@@ -2,7 +2,7 @@
 -- db/schema.sql — srcradar 完整 SQLite schema 快照
 --
 -- 用途: ./init.sh --init-db  用 sqlite3 喂这份文件,生成一个空的
---        db/recon.sqlite3 (含 17 张表 + 索引 + 触发器)。
+--        db/recon.sqlite3 (含 18 张表 + 索引 + 触发器)。
 --
 -- 维护原则 (A1 方案):
 --   本文件是 srcradar 主仓里 schema 的权威快照。源文件的 CREATE TABLE / INDEX
@@ -344,6 +344,19 @@ CREATE TABLE IF NOT EXISTS hash_simhash_map (
     response_hash TEXT    NOT NULL,
     body_simhash  INTEGER NOT NULL,
     PRIMARY KEY (response_hash)
+);
+
+-- ============================================================================
+-- brute_runs: brute-force stage cadence per business.
+--   Tracks when each business was last brute-forced and which wordlist was
+--   used, so the stage can decide whether it is due to run again.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS brute_runs (
+    business_id    INTEGER PRIMARY KEY REFERENCES businesses(id),
+    last_ran_at    TEXT NOT NULL,
+    wordlist_hash  TEXT NOT NULL,
+    candidates     INTEGER,
+    resolved       INTEGER
 );
 
 -- SECTION 5: web_subdomain_scan_schedule

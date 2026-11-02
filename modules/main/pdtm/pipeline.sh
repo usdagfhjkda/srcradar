@@ -19,9 +19,13 @@
 # STAGES:
 #       --tcp                     启用 TCP 端口扫描(透传 scanner.sh -all,naabu 被动+主动)
 #       --skip-check-wildcard     跳过 check_wildcard.sh
-#       --skip-scan               跳过 scan.sh
+#       --skip-scan               跳过 scan.sh(同时跳过内嵌 brute 阶段)
+#       --skip-brute              仅跳过 scan.sh 内嵌 brute 阶段(alterx 不受影响)
+#       --force-brute             强制本轮跑 brute,忽略 30 天 cadence(FORCE_BRUTE=1)
+#       --brute-mode top|rolling  brute 模式: top=SecLists 2w(默认),rolling=Jhaddix-clean
 #       --skip-scanner            跳过 scanner.sh
 #       --skip-import             跳过 import_scan_results.py
+#       --skip-reverify           跳过 reverify 阶段(默认开)
 #       --dry-run-import          import 阶段 dry-run,不写 DB
 #
 # DEBUG:
@@ -41,6 +45,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# 2026-10-03: source load_config.sh + resolve_tools.sh —
+# httpx/dnsx 路径从 config/pdtm.conf 自动读取(env 覆盖 > conf 注入 > 默认 fallback)。
+source "$SCRIPT_DIR/../lib/load_config.sh"
+load_config_set "$SCRIPT_DIR/../../../config/pdtm.conf" "$SCRIPT_DIR/../lib"
+source "$SCRIPT_DIR/lib/resolve_tools.sh"
+
 # ===== 默认 =====
 TARGET_FILE=target.txt
 EXCLUDE_FILE=exclude.txt
@@ -55,8 +65,12 @@ DRY_RUN_IMPORT=
 ENABLE_TCP=
 SKIP_WILDCARD=
 SKIP_SCAN=
+SKIP_BRUTE=        # 仅跳过 brute,alterx + subfinder 仍跑
 SKIP_SCANNER=
 SKIP_IMPORT=
+SKIP_REVERIFY=     # 跳过 reverify 阶段(默认跑)
+FORCE_BRUTE=       # 强制跑 brute,忽略 30 天 cadence
+BRUTE_MODE=        # brute 模式,空=默认 top
 KEEP_ON_FAIL=
 KEEP_OUTPUT=1   # 默认保留 -- 防止 import 阶段异常时数据被销毁。--debug 0 关闭。
 
@@ -74,8 +88,12 @@ while [ $# -gt 0 ]; do
         -o|--scan-dir)         SCAN_DIR="$2"; shift 2 ;;
         --skip-check-wildcard) SKIP_WILDCARD=1; shift ;;
         --skip-scan)           SKIP_SCAN=1; shift ;;
+        --skip-brute)          SKIP_BRUTE=1; shift ;;
+        --force-brute)         FORCE_BRUTE=1; shift ;;
+        --brute-mode)          BRUTE_MODE="$2"; shift 2 ;;
         --skip-scanner)        SKIP_SCANNER=1; shift ;;
         --skip-import)         SKIP_IMPORT=1; shift ;;
+        --skip-reverify)       SKIP_REVERIFY=1; shift ;;
         --dry-run-import)      DRY_RUN_IMPORT=1; shift ;;
         --tcp)                  ENABLE_TCP=1; shift ;;
         --keep-on-fail)        KEEP_ON_FAIL=1; shift ;;
@@ -109,6 +127,33 @@ if [ -d "$SCAN_DIR" ] && [ -n "$(ls -A "$SCAN_DIR" 2>/dev/null)" ]; then
     exit 2
 fi
 mkdir -p "$DB_DIR"
+
+# ===== 防御: pdtm CWD 跨 run 运行时文件残留检测 =====
+# 防上一次 run(尤其 KEEP_OUTPUT=1 / ctrl-c / 中途失败)在 pdtm CWD
+# 留下 scan.sh 中间产物,本次 scanner.sh 把它们当输入读到错误业务的
+# 子域。
+#
+# 不放 filter.regex / targets.regex / excludes.regex / *.bak ---
+# 这些是 scan.sh 阶段每跑必建的内部 state,KEEP_OUTPUT=1 模式下正常
+# 保留;放进本检测会"自拦"。
+POLLUTED=()
+for f in dnsx_output.txt dnsx_output.txt.try alive.txt alterx.txt \
+         brute.txt resume.cfg no_wildcard.txt wildcard.txt \
+         dnsx_output.txt.bak; do
+    [ -e "$f" ] && POLLUTED+=("$f")
+done
+if [ "${#POLLUTED[@]}" -gt 0 ]; then
+    echo "[-] 检测到 pdtm CWD 跨 run 运行时文件残留(下个 run 会被 scanner 当输入):" >&2
+    for f in "${POLLUTED[@]}"; do
+        echo "    $f" >&2
+    done
+    echo "" >&2
+    echo "    这通常是上一次 pipeline KEEP_OUTPUT=1 / ctrl-c / 中途失败留下的," >&2
+    echo "    或上一次跑的不是本业务的内容。如果直接跑,scanner 会把别业务的" >&2
+    echo "    子域当成本业务的扫描输入。处理方式:" >&2
+    echo "      rm -f ${POLLUTED[*]}" >&2
+    exit 2
+fi
 
 # ===== 准备 target.txt / exclude.txt =====
 # 优先级: -i 指定 > 从 DB 读 > 报错
@@ -221,7 +266,8 @@ cleanup_input() {
         "$WILDCARD_OUT" no_wildcard.txt \
         alive.txt alterx.txt dnsx_output.txt \
         filter.regex dnsx_output.txt.tmp \
-        wildcard.txt.bak no_wildcard.txt.bak dnsx_output.txt.bak
+        wildcard.txt.bak no_wildcard.txt.bak dnsx_output.txt.bak \
+        dnsx_output.txt.try brute.txt resume.cfg
     do
         [ -e "$f" ] && rm -f "$f"
     done
@@ -289,9 +335,13 @@ check_wildcard() { ./check_wildcard.sh "$TARGET_FILE"; }
 scan() {
     # scan.sh 依赖 DB/BUSINESS_ID/RESOLVERS/WORDLIST/HASH 等 env
     export DB BUSINESS_ID RESOLVERS WORDLIST WORDLIST_HASH
+    # brute 阶段控制
+    [ -n "$SKIP_BRUTE" ]   && export SKIP_BRUTE=1
+    [ -n "$FORCE_BRUTE" ]  && export FORCE_BRUTE=1
+    [ -n "$BRUTE_MODE" ]   && export BRUTE_MODE
     ./scan.sh
 }
-scanner()        { [ -n "$ENABLE_TCP" ] && ./scanner.sh -all || ./scanner.sh; }
+scanner()        { [ -n "$ENABLE_TCP" ] && ./scanner.sh -all ${SCANNER_PORTS:+-p "$SCANNER_PORTS"} || ./scanner.sh ${SCANNER_PORTS:+-p "$SCANNER_PORTS"}; }
 import() {
     python3 import_scan_results.py \
         --business      "$BUSINESS" \
@@ -356,6 +406,234 @@ print(f"[finalize_scope] {biz}: targets={len(targets)} excludes={len(excludes)} 
 PY
 }
 
+# -----------------------------------------------------------------------
+# reverify (2026-10-03 移位重构)
+#
+# 原位置: scanner.sh 阶段 3.6 (行 380-489),在 scanner 内部跑。
+#   缺陷: scanner 阶段仍在写新数据,DB 里 is_active=0 同时含"昨天失活"
+#   和"今天扫描后真正失活",reverify 读到的是混合状态,语义错。
+#
+# 新位置: import 完成之后、finalize_scope 之前。
+#   此时 DB 里 is_active=0 = 今天扫描后真正失活的资产(import 的
+#   "全清场 + 重新激活" 已经处理了大部分漏激活),reverify 只兜剩下的
+#   少数漏激活。语义清晰,与 cron 日报对齐。
+#
+# 流程:
+#   1) 从 DB 读本业务失活候选 (is_active=0 AND last_seen>=7d AND ips!='[]')
+#      用 web_subdomains.ips 字段(2026-10-03 schema 演进,从 httpx JSONL 写)
+#   2) 写 targets.lst (subdomain:port 每行),反向索引 target→sid
+#   3) 一次 httpx -l 批喂(对齐 stage 3.5 CDN+LB 参数,-rate-limit 50 -timeout 5)
+#   4) JSONL 流式解析 → 命中(200-299 + cl>1000 + 非 WAF + not failed) → UPDATE is_active=1
+#   5) 失败 try/except 隔离,不致命;落 reverify_hits.tsv 给人工审计
+#
+# 失败模式: DB 无候选 / httpx 不存在 / httpx 探测全失败 → 静默退出 0
+# -----------------------------------------------------------------------
+reverify() {
+    python3 - "$DB" "$BUSINESS" "$SCAN_DIR" <<'PYREVERIFY'
+import json, os, sqlite3, subprocess, sys
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+db_path, biz, scan_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# 2026-10-03: httpx 路径(env > default)。
+HTTPX_BIN = os.environ.get("HTTPX_BIN") or str(Path.home() / ".pdtm/go/bin/httpx")
+if not Path(HTTPX_BIN).exists():
+    print(f"[reverify] 跳过: httpx 不存在 ({HTTPX_BIN})", file=sys.stderr)
+    sys.exit(0)
+
+# 读候选: 失活 (is_active=0)。
+# 按 spec (用户 2026-10-04), 失活唯一充要条件 = is_active=0, 跟 last_seen 无关。
+conn = sqlite3.connect(db_path)
+conn.row_factory = sqlite3.Row
+try:
+    rows = conn.execute("""
+        SELECT ws.id, ws.subdomain, ws.port, ws.ips,
+               wh.business_id, b.business_name
+          FROM web_subdomains ws
+          JOIN web_hashes wh ON wh.id = ws.hash_id
+          JOIN businesses b  ON b.id = wh.business_id
+         WHERE ws.is_active = 0
+         ORDER BY ws.id
+    """).fetchall()
+except sqlite3.OperationalError as exc:
+    print(f"[reverify] DB 读失败(可能 schema 未演进): {exc}", file=sys.stderr)
+    sys.exit(0)
+
+if not rows:
+    print(f"[reverify] biz={biz}: 候选 0 行,跳过")
+    sys.exit(0)
+
+print(f"[reverify] biz={biz}: 候选 {len(rows)} 行")
+
+scan_dir_p = Path(scan_dir)
+scan_dir_p.mkdir(parents=True, exist_ok=True)
+hits_path = scan_dir_p / "reverify_hits.tsv"
+
+WAF_KW = ("waf", "firewall", "web应用防火墙", "blocked", "denied")
+
+def is_hit(j: dict) -> bool:
+    sc = j.get("status_code") or 0
+    cl = j.get("content_length") or 0
+    title_l = (j.get("title") or "").lower()
+    is_waf = any(k in title_l for k in WAF_KW)
+    return (200 <= sc < 300) and cl > 1000 and not is_waf and not j.get("failed")
+
+def run_httpx(input_path: Path, host_header: str | None) -> list[dict]:
+    args = [str(HTTPX_BIN),
+            "-sc", "-cl", "-title", "-random-agent",
+            "-follow-redirects", "-max-redirects", "3",
+            "-rate-limit", "50", "-timeout", "5",
+            "-silent", "-no-color", "-json"]
+    if host_header:
+        args += ["-H", f"Host: {host_header}"]
+    args += ["-l", str(input_path)]
+    try:
+        proc = subprocess.run(args, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired as exc:
+        print(f"[reverify][warn] httpx timeout after 600s on {input_path.name}", file=sys.stderr)
+        return []
+    except Exception as exc:
+        print(f"[reverify] httpx 启动失败: {exc}", file=sys.stderr)
+        return []
+    out = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+# ---------- pass 1: 复用 cached IPs (绕过 DNS) ----------
+# 利用 httpx input 格式 `<custom_host>,<target>` (runner.go:1827-1829):
+#   - 一个 input file 装所有 (subdomain, ip, port) 三元组, 1 次 httpx 调起
+#   - 每行格式 = "<subdomain>,<ip>:<port>"  (无 http:// 前缀, 见 httpx
+#     case `!HasPrefixAny(http://, https://) && ContainsAny(",")`)
+#   - httpx 内部把 <subdomain> 当 CustomHost 写到 req.Host, TCP 连 <ip:port>
+#   - 不传 -H, 不需要 per-sub 拆分
+# 命中判断: httpx JSONL 输出 host 字段 = <ip> (Runner.analyze line 2704
+#   `Host: parsed.Hostname()`), 用 (ip, port) lookup 反查回 sid.
+pass1_hits: set[int] = set()
+ipport_to_sids: dict[tuple[str, int], list[int]] = defaultdict(list)
+p1_input_lines: list[str] = []
+
+for r in rows:
+    ips_field = r["ips"]
+    if not ips_field or ips_field in ("[]", "null"):
+        continue
+    try:
+        ips = json.loads(ips_field)
+    except (ValueError, TypeError):
+        continue
+    if not isinstance(ips, list) or not ips:
+        continue
+    valid_ips = [ip for ip in ips if isinstance(ip, str) and ip]
+    if not valid_ips:
+        continue
+    for ip in valid_ips:
+        # httpx input 格式: <custom_host>,<target>  (target 不带 scheme)
+        p1_input_lines.append(f"{r['subdomain']},{ip}:{r['port']}\n")
+        ipport_to_sids[(ip, r["port"])].append(r["id"])
+
+p1_workdir = scan_dir_p / "reverify_pass1"
+p1_workdir.mkdir(exist_ok=True)
+f = p1_workdir / "all_targets.txt"
+f.write_text("".join(p1_input_lines), encoding="utf-8")
+results = run_httpx(f, host_header=None)
+f.unlink(missing_ok=True)
+p1_workdir.rmdir()
+
+for j in results:
+    if not is_hit(j):
+        continue
+    ip = j.get("host", "")
+    port = j.get("port", 0)
+    sids = ipport_to_sids.get((ip, port), [])
+    pass1_hits.update(sids)
+
+print(f"[reverify] pass1 (复用 IP, batch) 命中 {len(pass1_hits)} 行")
+
+# ---------- pass 2: 默认 DNS (独立查询) ----------
+pass2_candidates = [r for r in rows if r["id"] not in pass1_hits]
+pass2_hits: set[int] = set()
+if pass2_candidates:
+    p2_path = scan_dir_p / "reverify_pass2.txt"
+    target_to_sid = {(r["subdomain"], r["port"]): r["id"] for r in pass2_candidates}
+    with p2_path.open("w", encoding="utf-8") as f:
+        for r in pass2_candidates:
+            f.write(f"{r['subdomain']}:{r['port']}\n")
+    results = run_httpx(p2_path, host_header=None)
+    p2_path.unlink(missing_ok=True)
+    for j in results:
+        if not is_hit(j):
+            continue
+        host = j.get("host", "")
+        port = j.get("port", 0)
+        sid = target_to_sid.get((host, port))
+        if sid is not None:
+            pass2_hits.add(sid)
+
+print(f"[reverify] pass2 (默认 DNS) 命中 {len(pass2_hits)} 行")
+
+# ---------- 汇总: 复活 + 标记永久失活 ----------
+all_hits = pass1_hits | pass2_hits
+all_misses = [r["id"] for r in rows if r["id"] not in all_hits]
+
+now = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+
+with hits_path.open("w", encoding="utf-8") as out:
+    out.write("sid\tpass\thit_miss\n")
+    for sid in pass1_hits:
+        out.write(f"{sid}\t1\thit\n")
+    for sid in pass2_hits:
+        out.write(f"{sid}\t2\thit\n")
+    for sid in all_misses:
+        out.write(f"{sid}\t2\tmiss\n")
+
+if all_hits:
+    placeholders = ",".join("?" for _ in all_hits)
+    # 2026-10-07 refactor: DEPRECATED change_type = 0 写入 (commit 1 后续).
+    # 原因: import 阶段不应写 change_type=0,按分工 "diff 写 0/2"。
+    # 原 SQL (回滚时把 if False: 改成 if True: 并去掉 -- 注释):
+    #   UPDATE web_subdomains SET is_active = 1, change_type = 0, last_seen = ?
+    #   WHERE id IN (...) AND is_active = 0
+    # 现在的行为: 仍然 UPDATE is_active=1 + last_seen, 但不写 change_type (留给 diff 阶段)。
+    if False:  # DEPRECATED 2026-10-07 — see commit message
+        conn.execute(
+            f"UPDATE web_subdomains SET is_active = 1, change_type = 0, last_seen = ? "
+            f"WHERE id IN ({placeholders}) AND is_active = 0",
+            [now, *all_hits],
+        )
+    n_reactivated = conn.execute(
+        f"UPDATE web_subdomains SET is_active = 1, last_seen = ? "
+        f"WHERE id IN ({placeholders}) AND is_active = 0",
+        [now, *all_hits],
+    ).rowcount
+else:
+    n_reactivated = 0
+
+# 2026-10-15 refactor: 删 reverify 直接写 change_type=8.
+# 原因: ct=8 唯一来源应该是 diff.py, 条件 = pre.is_active=1 AND current.is_active=0
+#        AND reverify pass1+pass2 都 miss. pipeline.sh 只负责 is_active 切换,
+#        写 ct 是 diff 阶段.
+# n_deactivated 保留 = 0 占位 (print 引用, 实际写 ct 在 diff.py).
+n_deactivated = 0
+
+conn.commit()
+print(f"[reverify] biz={biz}: 复活 {n_reactivated} / 候选 {len(rows)} 行 "
+      f"(pass1_hit={len(pass1_hits)}, pass2_hit={len(pass2_hits)}, miss=ct8 留给 diff 阶段)")
+
+conn.close()
+
+
+PYREVERIFY
+}
+
 # ===== 执行 =====
 prepare_input
 echo "[*] target: $(wc -l < "$TARGET_FILE") 条 | exclude: $(wc -l < "$EXCLUDE_FILE") 条"
@@ -363,6 +641,9 @@ bootstrap_db
 
 echo "[1/4] check_wildcard"; [ -z "$SKIP_WILDCARD" ] && check_wildcard || echo "  跳过"
 echo "[2/4] scan";           [ -z "$SKIP_SCAN" ]      && scan           || echo "  跳过"
+if [ -z "$SKIP_SCAN" ] && [ -n "$SKIP_BRUTE" ]; then
+    echo "    (brute 阶段: --skip-brute,alterx 仍跑)"
+fi
 echo "[3/4] scanner";        [ -z "$SKIP_SCANNER" ]   && scanner        || echo "  跳过"
 if [ -z "$SKIP_IMPORT" ]; then
     echo "[4/5] import"
@@ -370,6 +651,20 @@ if [ -z "$SKIP_IMPORT" ]; then
     IMPORT_RAN=1
 else
     echo "[4/5] import  跳过 (--skip-import,数据未入库,不清理临时输入)"
+fi
+
+# 复核今天扫描后真正失活的资产,兜 import 的少数漏激活
+# 默认开, --skip-reverify 跳过。失败 try/except 隔离,不致命。
+if [ -z "$SKIP_REVERIFY" ] && [ "$IMPORT_RAN" = 1 ]; then
+    echo "[4.5/5] reverify"
+    # 2026-10-03: 解析 httpx 路径(env > conf > 默认),export 给 Python subprocess。
+    HTTPX_BIN=$(resolve_tool httpx "$HOME/.pdtm/go/bin/httpx")
+    export HTTPX_BIN
+    if ! reverify; then
+        echo "[!] reverify 失败 (非致命,继续 finalize_scope)"
+    fi
+else
+    echo "[4.5/5] reverify  跳过"
 fi
 
 # 最后一步:再次 upsert scope 提交,确保删输入文件前 scope 已落库

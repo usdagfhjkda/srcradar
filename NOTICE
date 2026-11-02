@@ -31,6 +31,37 @@ Apache License, Version 2.0 (© 2023-2026 keac @ wgpsec).
 srcradar pins to upstream tag ENScan_GO_TAG=v1.4.0 (see install.sh).
 
 ================================================================================
+shuffledns + massdns (GPL-3.0)
+================================================================================
+srcradar's pdtm brute stage (see modules/main/pdtm/scan.sh) shells out to the
+following GPL-3.0-licensed binaries as independent, dynamically-invoked
+processes:
+
+  - shuffledns   (https://github.com/projectdiscovery/shuffledns)
+                  Copyright (c) 2022 ProjectDiscovery, Inc.
+                  Licensed under GPL-3.0
+  - massdns      (https://github.com/blechschmidt/massdns)
+                  Copyright (c) 2017 Marc Blechschmidt
+                  Licensed under GPL-3.0
+
+Per GPL-3.0 section 5 (Conveying Modified Source Versions) and section 6
+(Conveying Non-Source Forms): srcradar invokes these as separate executable
+processes, does NOT statically or dynamically link against their code, does
+NOT include their source, and does NOT modify their source. This is an
+"aggregate" distribution, so the GPL-3.0 infection clause does NOT extend to
+srcradar's Apache-2.0 codebase.
+
+Compliance actions taken by srcradar:
+
+  1. The full GPL-3.0 LICENSE text for both projects is shipped inside the
+     container image at /usr/share/doc/srcradar/licenses/ (see Dockerfile),
+     alongside the binaries that are derived from them.
+  2. Both projects are open source; the corresponding source is obtainable
+     at the URLs above:
+       - shuffledns: go install
+                     github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest
+       - massdns:    git clone https://github.com/blechschmidt/massdns.git
+================================================================================
 ffuf / gau
 ================================================================================
 This product references the following MIT-licensed utilities (consumed as

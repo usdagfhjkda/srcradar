@@ -645,7 +645,7 @@ def _resolve_hash_id(conn: sqlite3.Connection, business_id: int, subdomain: str)
     - 原因:URL 资产扫描的语义是"对子域",与 web_subdomains.is_active 维度独立;
       实际场景里 is_active=0 的子域往往仍有大量 web_hash_urls 历史数据(本次
       large-assets.example.com 即典型:web_subdomains is_active=0,web_hash_urls 3017 条)。
-    - 副作用:scan_urls 写入会触发 trg_ws_au 把 is_active=0 的子域通过 is_active
+    - 副作用 (DEPRECATED 2026-10-07): scan_urls 写入原本会触发 trg_ws_au 把 is_active=0 的子域通过 is_active
       0→1 复活(写 change_type=4 / 6)。这是用户想要的"toggle 看复活"语义。
     - web_hash_urls 自身 is_active 不受此影响(一直由 persist() 决定)。
     """

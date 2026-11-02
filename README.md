@@ -149,7 +149,7 @@ echo www.scanme.sh > ~/scope/target.txt
 
 ```bash
 # 1. 加载本地镜像(从 srcradar-0.1.0.tar)
-sudo docker load -i /home/ubuntu/srcradar-0.1.0.tar
+sudo docker load -i ~/srcradar-0.1.0.tar
 
 # 2. 启动容器
 #    -v ~/scope:/scope             target.txt / exclude.txt 输入目录
@@ -368,8 +368,11 @@ scopes            tcp_assets
 | **[ffuf](https://github.com/ffuf/ffuf)** | URL 字典爆破（`pdtm/scan_urls.py`）| **MIT** | © 2021 Joona Hoikkala |
 | **[gau](https://github.com/lc/gau)** | wayback / 历史 URL（`pdtm/scan_urls.py`）| **MIT** | © 2025 Corben Leo |
 | **[URLFinder](https://github.com/pingc0y/URLFinder)**（中文社区版 by pingc0y）| 主动爬虫（`pdtm/scan_urls.py`）| **MIT** | © 2022 pingc0y |
+| **[massdns](https://github.com/blechschmidt/massdns)** | 高性能 DNS 批量解析（暴力爆破阶段，shuffledns 的硬依赖）| ⚠️ **GPL-3.0** | © 2017 Marc Blechschmidt |
+| **[shuffledns](https://github.com/projectdiscovery/shuffledns)** | DNS 解析（暴力爆破阶段）| ⚠️ **GPL-3.0** | © 2022 ProjectDiscovery, Inc. |
 
-> **集成模式**:本节列出的工具均通过 `pdtm/scan_urls.py` 等脚本以 `subprocess.run()` 调用,**非源码 fork / import**。`pdtm` 是包管理器,**不是**这些工具的代码上游。
+> **集成模式**:本节列出的工具均通过 `pdtm/scan_urls.py` 等脚本以 `subprocess.run()` 调用,**非源码 fork / import**。
+> `massdns` 与 `shuffledns` 是其中仅有的两个 **GPL-3.0** 工具:它们以独立进程调用,不与本仓代码链接;许可证全文随镜像分发于 `/usr/share/doc/srcradar/licenses/`,完整声明见 [`NOTICE`](./NOTICE)。`pdtm` 是包管理器,**不是**这些工具的代码上游。
 >
 > **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
 
