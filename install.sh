@@ -377,7 +377,11 @@ main() {
                     continue
                 fi
             fi
-            run_module "$area" "$vname" --yes || exit 3
+            # 用落盘目录名而不是虚拟名: clone 落在 $vmdir (VIRTUAL_DIRS 映射),
+            # run_module 按 $SCRIPT_DIR/modules/$area/$name 找 install.sh, 传虚拟名
+            # 会去找一个从未创建的目录, 导致 clone 成功但安装被跳过。
+            # 无 VIRTUAL_DIRS 映射的虚拟模块两者同名, 行为不变。
+            run_module "$area" "$vdirname" --yes || exit 3
             installed=$((installed+1))
         done
         for mdir in "$adir"/*/; do
