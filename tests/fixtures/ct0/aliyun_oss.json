@@ -1,0 +1,7 @@
+{
+  "title": "AccessDenied",
+  "status_code": 403,
+  "redirect_to": "http://www.localtest.me:8888/",
+  "technologies": ["AliyunOSS"],
+  "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error>\n  <Code>AccessDenied</Code>\n  <Message>Access denied by bucket policy.</Message>\n  <RequestId>{{ random:28,hex }}</RequestId>\n  <HostId>127.0.0.1</HostId>\n  <Bucket>examplebucket</Bucket>\n  <User>nosuchuser</User>\n  <EC>0003-00000101</EC>\n  <RecommendDoc>https://api.aliyun.com/troubleshoot?q=0003-00000101</RecommendDoc>\n</Error>\n"
+}

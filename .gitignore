@@ -129,3 +129,7 @@ modules/public/notify/config/notify.conf.bak
 modules/public/health/config/health.conf
 modules/public/health/.lock
 modules/public/http/config/http.conf
+
+# ---- 8. CI fixture 原始备份 ----
+# smoke_e2e 的 fixture 镜像备份,跟 tests/fixtures/ 下同名文件内容重复。
+tests/fixtures/.ci-originals/

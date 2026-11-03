@@ -1,0 +1,7 @@
+{
+  "title": "Fixture Title",
+  "status_code": 200,
+  "redirect_to": "http://www.localtest.me:9000/",
+  "technologies": ["nginx"],
+  "body": "<html><body><h1>Service</h1><p>version 2.0 released at {{ timestamp }}</p><section><h2>Recent updates</h2><ul><li>Added multi-tenant support and isolated per-tenant data stores</li><li>Improved observability with per-request tracing and structured logging</li><li>Refactored authentication flow to support OIDC + SAML bridge</li><li>Added rate-limiting middleware with per-endpoint configurable quotas</li><li>Hardened TLS configuration: only TLS 1.3 enabled, weak ciphers removed</li><li>Added comprehensive audit log for admin operations</li><li>Improved database connection pooling and query timeout enforcement</li><li>Added new API endpoint /v2/assets/bulk for batch asset ingestion</li><li>Migrated legacy session storage from Redis to SQLite-backed file store</li><li>Added webhooks for asset change notifications</li><li>Improved error responses with structured problem+json format</li><li>Added admin UI for whitelisting source IP ranges</li></ul></section><p>For migration notes see the operator handbook chapter 7.</p></body></html>"
+}
