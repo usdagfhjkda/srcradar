@@ -124,3 +124,7 @@ config/*
 # example 模板(入仓) vs 真值(屏蔽)。顶层 config/* 只匹配 modules 外的 config/,
 # 插件自带 config/ 在子目录,不会被它盖住,需逐条显式屏蔽。
 modules/public/katana/config/katana.conf
+modules/public/notify/config/notify.conf
+modules/public/notify/config/notify.conf.bak
+modules/public/health/config/health.conf
+modules/public/http/config/http.conf

@@ -141,6 +141,17 @@ declared a license; srcradar recommends users self-host or replace with a
 public ICP query API before any production use.
 
 ================================================================================
+Third-party service: Resend (email delivery)
+================================================================================
+The notify/ directory of srcradar contains ONLY a shell integration layer that
+delivers the daily diff summary through the Resend HTTP API. The Resend
+service itself is NOT redistributed, NOT endorsed, and NOT affiliated with
+srcradar. See notify/README.md for details.
+
+The GnuPG (gpg) binary and the curl client used by the integration are OS
+packages, not redistributed source; encryption follows OpenPGP (RFC 4880).
+
+================================================================================
 Trademarks
 ================================================================================
 "ProjectDiscovery" is a trademark of ProjectDiscovery, Inc.
