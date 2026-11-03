@@ -84,7 +84,15 @@ COPY modules/public/db_align ./db_align-src
 WORKDIR /build/db_align-src
 RUN go build -o /out/db_align ./cmd/run
 
-# ---- 4) ENScan(cloned from archival mirror,Apache-2.0)----
+# ---- 4) massdns (GPL-3.0,shuffledns 的硬依赖)----
+# massdns 是 C 写的,需要 gcc + make;从 GitHub 官方仓库 shallow clone
+RUN git clone --depth 1 https://github.com/blechschmidt/massdns.git /tmp/massdns && \
+    cd /tmp/massdns && make && \
+    cp bin/massdns /out-bin/massdns && \
+    chmod +x /out-bin/massdns && \
+    rm -rf /tmp/massdns
+
+# ---- 5) ENScan(cloned from archival mirror,Apache-2.0)----
 # Source: usdagfhjkda/wgpsec-ENScan_GO, an archival mirror of the
 # deleted upstream wgpsec/ENScan_GO (commit 9969d51 by keac).
 # We pin the tag wgpsec-v1.4.0-fork1 instead of a branch or SHA so
@@ -174,6 +182,17 @@ COPY NOTICE            /opt/srcradar/NOTICE
 COPY TERMS_ADDENDUM.md /opt/srcradar/TERMS_ADDENDUM.md
 COPY VERSION           /opt/srcradar/VERSION
 COPY modules           /opt/srcradar/modules
+
+# ---- wordlists (build 时 COPY,运行时直接用,不再拉取)----
+# 暴力爆破阶段用的两份 DNS 子域词表,随镜像分发,启动即用。
+# 两者均为 MIT 许可(SecLists),出处与清洗规则见 NOTICE。
+COPY docker/wordlists/ /opt/srcradar/wordlists/
+
+# ---- 第三方二进制的许可证全文 (GPL-3.0 section 6)----
+# massdns 是镜像里唯一由 GPL-3.0 源码构建的二进制,许可证须随其分发。
+RUN mkdir -p /usr/share/doc/srcradar/licenses && \
+    curl -fsSL https://www.gnu.org/licenses/gpl-3.0.txt \
+         -o /usr/share/doc/srcradar/licenses/GPL-3.0.txt
 
 # ---- 4) entrypoint + 元数据 ----
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -1,0 +1,32 @@
+# health 模块配置占位模板
+#
+# 真值请复制本文件为 config/health.conf(同目录)再编辑。
+# config/health.conf 在 .gitignore 内,不入仓。
+#
+# 字段语义:
+#   DISK_WARN_PCT       磁盘占用百分比 >= 该值记 warn     (默认 80)
+#   DISK_ALERT_PCT      磁盘占用百分比 >= 该值记 alert    (默认 90)
+#   CPU_LOAD5_PER_NPROC 5min load average / nproc 上限     (默认 2.0)
+#   CPU_PCT_ALERT       top -bn1 瞬时 CPU 占用百分数告警    (默认 95)
+#   MEM_ALERT_PCT       内存占用百分比 >= 该值记 alert    (默认 90)
+#   CRON_MAX_AGE_HOURS  cron 任务日志 mtime 超过该小时数告警 (默认 25)
+#   WATCHED_LOGS        空格分隔的日志路径列表(每个都会被 stat 看 mtime)
+#
+# 注意:
+#   - 任何字段留空 / 注释都会回退到 lib/thresholds.py 的 DEFAULT_THRESHOLDS
+#   - 路径可以是绝对路径,也可以是相对路径(以 srcradar 项目根为基准)
+#   - 凭据(RESEND_API_KEY / FROM_ADDR / TO_ADDR / SUBJECT / GPG_RECIPIENT)
+#     **不**在本文件;统一在 modules/public/notify/config/notify.conf,
+#     health 模块直接复用,不让 operator 填第二遍
+#
+DISK_WARN_PCT=80
+DISK_ALERT_PCT=90
+CPU_LOAD5_PER_NPROC=2.0
+CPU_PCT_ALERT=95
+MEM_ALERT_PCT=90
+CRON_MAX_AGE_HOURS=25
+# WATCHED_LOGS 留空 = 不监控任何 cron 日志(check_cron 不产生该类 finding)
+# operator 自填:空格分隔的日志路径列表,例如:
+#   WATCHED_LOGS=modules/main/daily/logs/cron.log modules/main/daily/logs/dashboard_watchdog.log
+#   WATCHED_LOGS=/var/log/myapp/cron.log
+WATCHED_LOGS=

@@ -21,10 +21,18 @@
 export PATH="$PATH:$HOME/.pdtm/go/bin"
 source "$(cd "$(dirname "$0")" && pwd)/../lib/load_config.sh"
 load_config_set "$(cd "$(dirname "$0")" && pwd)/../../../config/pdtm.conf" "$(cd "$(dirname "$0")" && pwd)/../lib"
+# 2026-10-03: source resolve_tools.sh — httpx/dnsx 路径从 config/pdtm.conf
+# 自动读取(env 覆盖 > conf 注入 > 默认 fallback),不再硬编码 ~/.pdtm/go/bin/。
+source "$(cd "$(dirname "$0")" && pwd)/lib/resolve_tools.sh"
 
 
 
 set -e
+
+# TCP 开关; -all 时翻 true, 见 line 84 (case) + line 379 (consume).
+ENABLE_TCP=false
+# shellcheck disable=SC2034  # ENABLE_TCP consumed at line 381 (if block)
+: "${ENABLE_TCP:="\${ENABLE_TCP}"}"
 
 # ==============================================================================
 # 统一解析器 — 见 README §六 §八-10 §八-11
@@ -50,7 +58,13 @@ RESOLVERS="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
 OUTPUT_DIR="./scan_results"
 DNSX_INPUT_RAW="./dnsx_output.txt"
 
-COMMON_WEB_PORTS="80,443,8000,8080,8081,8443,8888,9000,9090"
+# 2026-10-07: read from env SRCDAR_PORTS (smoke fixture uses 28080/28443/28488/28500/28504).
+#   -p flag is not viable because scanner is wrapped under pipeline.sh -> run_one_business
+#   -> daily_monitor, and the CLI args do not propagate.
+#   Fallback to legacy common ports if SRCDAR_PORTS is unset.
+COMMON_WEB_PORTS="${SRCDAR_PORTS:-80,443,8000,8080,8081,8443,8888,9000,9090}"
+# shellcheck disable=SC2034  # COMMON_WEB_PORTS consumed by awk (line 487)
+: "${COMMON_WEB_PORTS:="$COMMON_WEB_PORTS"}"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -67,18 +81,23 @@ ENABLE_TCP=false
 
 usage() {
     cat <<EOF
-用法: $0 [-all]
-  (默认)   仅做 Web 资产发现，跳过 TCP 端口扫描
-  -all     启用 TCP 端口信息收集（naabu 被动 + 主动）
-  -h       显示本帮助
+用法: $0 [-all] [-p PORTS]
+  (默认)              仅做 Web 资产发现，跳过 TCP 端口扫描
+  -all                启用 TCP 端口信息收集（naabu 被动 + 主动）
+  -p PORTS            覆盖默认 9 个常用 Web 端口（逗号分隔，例如 28000,28001,28002）
+                      默认: 80,443,8000,8080,8081,8443,8888,9000,9090
+                      CI/smoke fixture 用此 flag 切到高端口避开本地端口占用
+  -h                  显示本帮助
 EOF
 }
 
-for arg in "$@"; do
-    case "$arg" in
-        -all)      ENABLE_TCP=true ;;
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -all)      ENABLE_TCP=true; shift ;;
+        -p)        COMMON_WEB_PORTS="$2"; shift 2 ;;
+        -p=*)      COMMON_WEB_PORTS="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
-        *)         usage; log "[-] 未知参数: $arg"; exit 1 ;;
+        *)         usage; log "[-] 未知参数: $1"; exit 1 ;;
     esac
 done
 
@@ -172,8 +191,8 @@ fi
 # ==============================================================================
 log "[*] 阶段 1: DNS 解析 (jsonl, 含 CNAME) ..."
 
-# dnsx 路径:硬编码默认 ~/.pdtm/go/bin/dnsx,可用环境变量 DNSX_BIN 覆盖
-DNSX_BIN="${DNSX_BIN:-$HOME/.pdtm/go/bin/dnsx}"
+# 2026-10-03: dnsx 路径经 resolve_tools.sh 解析(env 覆盖 > conf 注入 > 默认)
+DNSX_BIN=$(resolve_tool dnsx "$HOME/.pdtm/go/bin/dnsx")
 [ -x "$DNSX_BIN" ] || { log "[-] 缺少 dnsx: $DNSX_BIN"; exit 1; }
 
 DNSX_RAW_FILE="$OUTPUT_DIR/dnsx_raw_output.txt"
@@ -272,8 +291,8 @@ log "[+] 剩余 $SCAN_IP_COUNT 个IP进入扫描"
 log "[*] 阶段 3.5: CDN+LB IP 合并带Host头探测..."
 
 # 阶段 3.5/5/8 都用,放 stage 3.5 入口处一次性检查+赋值
-# httpx 路径:硬编码默认 ~/.pdtm/go/bin/httpx,可用环境变量 HTTPX_BIN 覆盖
-HTTPX_BIN="${HTTPX_BIN:-$HOME/.pdtm/go/bin/httpx}"
+# 2026-10-03: httpx 路径经 resolve_tools.sh 解析(env 覆盖 > conf 注入 > 默认)
+HTTPX_BIN=$(resolve_tool httpx "$HOME/.pdtm/go/bin/httpx")
 [ -x "$HTTPX_BIN" ] || { log "[-] 缺少 httpx: $HTTPX_BIN"; exit 1; }
 
 cat "$OUTPUT_DIR/cdn_ips.txt" \
@@ -289,20 +308,27 @@ log "[+] CDN+LB合并IP总数: $CDN_LB_TOTAL 个"
 : > "$OUTPUT_DIR/pure_domains.txt"
 CDN_LB_WEB_COUNT=0
 
-if [ "$CDN_LB_TOTAL" -gt 0 ]; then
+# === 阶段 3.5 探测逻辑已 disabled (commit e8157ba follow-up) ===
+# if 块 (line 311..line 360) 整体注释, 保留 stage 7 summary log 用的变量
+# CDN_LB_TOTAL 已在 if 之前赋值, CDN_LB_WEB_COUNT=0 (line 309), cdn_lb_web_summary.json 留空
+# (CDN_LB_WEB_COUNT=0 让 stage 7 融合 'CDN+LB 端口数' = 0)
+: > "$OUTPUT_DIR/cdn_lb_web_summary.json"
+: > "$OUTPUT_DIR/cdn_lb_mapped_ports.txt"
+# (恢复: 把以下 # 去掉即可)
+# if [ "$CDN_LB_TOTAL" -gt 0 ]; then
 
-    while read -r ip; do
-        [ -z "$ip" ] && continue
-        grep "^$ip " "$FILE_IP" \
-        | awk '{print $2":80"; print $2":443"}'
-    done < "$OUTPUT_DIR/cdn_lb_combined_ips.txt" \
-    | sort -u \
-    > "$OUTPUT_DIR/cdn_lb_domain_ports.txt"
+#     # while read -r ip; do
+        # [ -z "$ip" ] && continue
+        # grep "^$ip " "$FILE_IP" \
+        # | awk '{print $2":80"; print $2":443"}'
+    # done < "$OUTPUT_DIR/cdn_lb_combined_ips.txt" \
+    # | sort -u \
+    # > "$OUTPUT_DIR/cdn_lb_domain_ports.txt"
 
-    CDN_LB_DOMAIN_PORT_COUNT=$(wc -l < "$OUTPUT_DIR/cdn_lb_domain_ports.txt" | tr -d ' ')
-    log "[+] CDN+LB 域名:端口组合数: $CDN_LB_DOMAIN_PORT_COUNT"
+#     # CDN_LB_DOMAIN_PORT_COUNT=$(wc -l < "$OUTPUT_DIR/cdn_lb_domain_ports.txt" | tr -d ' ')
+    # log "[+] CDN+LB 域名:端口组合数: $CDN_LB_DOMAIN_PORT_COUNT"
 
-    if [ "$CDN_LB_DOMAIN_PORT_COUNT" -gt 0 ]; then
+#     # if [ "$CDN_LB_DOMAIN_PORT_COUNT" -gt 0 ]; then
         # httpx -l "$OUTPUT_DIR/cdn_lb_domain_ports.txt" \
         #       -sc \                         # [状态] 显示状态码 (200, 404, etc.)
         #       -cl \                         # [长度] 显示响应长度，用于区分相同状态码下的不同页面
@@ -325,20 +351,21 @@ if [ "$CDN_LB_TOTAL" -gt 0 ]; then
         # 之前 .txt 输出走 import_scan_results 的 parse_text_web,其中 URL_RE 非贪婪
         # 正则会把 http://host.tld 切成 http://<首字符>,导致 web_subdomains.subdomain
         # 被截断成 1 个字符。(DB business_id=1~7, first_seen=2026-07-26~08-21 共 352 条)
-        "$HTTPX_BIN" -l "$OUTPUT_DIR/cdn_lb_domain_ports.txt" -sc -cl -title -td -hash -random-agent -follow-redirects -max-redirects 3  -rate-limit 50 -timeout 5 -silent -no-color -json < /dev/null 2>/dev/null > "$OUTPUT_DIR/cdn_lb_web_summary.json"
+        # "$HTTPX_BIN" -l "$OUTPUT_DIR/cdn_lb_domain_ports.txt" -sc -cl -title -td -hash mmh3,simhash -random-agent -follow-redirects -max-redirects 3  -rate-limit 50 -timeout 5 -silent -no-color -json -irr < /dev/null 2>/dev/null > "$OUTPUT_DIR/cdn_lb_web_summary.json"
 
-        CDN_LB_WEB_COUNT=$(wc -l < "$OUTPUT_DIR/cdn_lb_web_summary.json" | tr -d ' ')
-        log "[+] CDN+LB Web存活数: $CDN_LB_WEB_COUNT"
+#         # CDN_LB_WEB_COUNT=$(wc -l < "$OUTPUT_DIR/cdn_lb_web_summary.json" | tr -d ' ')
+        # log "[+] CDN+LB Web存活数: $CDN_LB_WEB_COUNT"
 
-    else
-        log "[!] 无域名映射，跳过探测"
-        : > "$OUTPUT_DIR/cdn_lb_web_summary.json"
-    fi
+#     # else
+        # log "[!] 无域名映射，跳过探测"
+        # : > "$OUTPUT_DIR/cdn_lb_web_summary.json"
+    # fi
 
-else
-    log "[!] 无CDN/LB IP，跳过探测"
-    : > "$OUTPUT_DIR/cdn_lb_web_summary.json"
-fi
+# # else
+    # log "[!] 无CDN/LB IP，跳过探测"
+    # : > "$OUTPUT_DIR/cdn_lb_web_summary.json"
+# fi
+# === end disabled ===
 
 # FIX-2026-08-25: 上游已改为 -json 输出 JSONL,这里必须用 Python 解析,
 # 否则 awk $1 会读到 "{",输出错乱。提取每行 JSONL 的 host:port 即可
@@ -474,21 +501,27 @@ fi
 # ==============================================================================
 log "[*] 阶段 5: httpx 主动探测..."
 
-# 构造 domain:port 输入（带 Host 头，避免共享 IP 默认页 404）
-# 每个 non-CDN IP 取所有绑定域名 × 9 端口 = Host 自动对 + 端口全覆盖
-: > "$OUTPUT_DIR/pure_domains.txt"
+# 构造 <sub>,<ip>:<port> 输入（用 cached IP 直连 + per-target Host 头）
+# 走 httpx runner.go:1827-1829 的 input 格式 "<custom_host>,<target>":
+#   - <sub> 来自 FILE_IP ($2), <ip> 是当前循环的 IP
+#   - httpx 内部把 <sub> 当 CustomHost 写到 req.Host, TCP 直连 <ip>:<port>
+#   - 不依赖 httpx DNS 重查, 1 file 1 次 httpx, 不用 -H
+# 风险: cached IP 可能 stale (FILE_IP 来自本轮 dnsx 解析, 时效 ~minutes)
+# 保留 stage 6/7 不变: httpx -o output 仍是 http://<ip>:<port>, 阶段 6 mapper
+#   用 sed 's|https\?://||g' 切 host:port 跟 before 一致.
+: > "$OUTPUT_DIR/non_cdn_domain_ports.txt"
 while read -r ip; do
     [ -z "$ip" ] && continue
     grep "^$ip " "$FILE_IP" \
     | awk -v ports="$COMMON_WEB_PORTS" '
         BEGIN { n = split(ports, a, ","); for (i = 1; i <= n; i++) p[i] = a[i] }
-        { for (i in p) print $2 ":" p[i] }' \
+        { for (i in p) print $2 "," $1 ":" p[i] }' \
     >> "$OUTPUT_DIR/non_cdn_domain_ports.txt"
 done < "$OUTPUT_DIR/pure_ips_to_scan.txt"
 sort -u "$OUTPUT_DIR/non_cdn_domain_ports.txt" -o "$OUTPUT_DIR/non_cdn_domain_ports.txt"
 
 DOMAIN_PORT_COUNT=$(wc -l < "$OUTPUT_DIR/non_cdn_domain_ports.txt" | tr -d ' ')
-log "[+] domain:port 组合数: $DOMAIN_PORT_COUNT"
+log "[+] <sub>,<ip>:<port> 组合数: $DOMAIN_PORT_COUNT"
 
 # 注: 不传 -p — 输入已经带端口,-p 会再次展开覆盖 URL 端口(runner.go UpdatePort)
 # 加 < /dev/null:httpx 行为对 stdin 有依赖(即使 -l 已指定输入文件),
@@ -580,7 +613,31 @@ log "[*] 阶段 8: Web存活确认..."
 #       -no-color \
 #       2>/dev/null \
 # > "$OUTPUT_DIR/non_cdn_web_summary.txt"
-"$HTTPX_BIN" -l "$OUTPUT_DIR/non_cdn_all_ports.txt" -sc -cl -title -hash mmh3 -random-agent -follow-redirects -max-redirects 3  -td -rate-limit 50 -timeout 5 -silent -no-color -json < /dev/null 2>/dev/null > "$OUTPUT_DIR/non_cdn_web_summary.json"
+# stage 8 input: <sub>,<ip>:<port> 格式 (用 cached IP 直连 + per-target Host 头)
+# non_cdn_all_ports.txt 里 <ip>:<port> 反查 FILE_IP 拿 sub
+# FILE_IP 没覆盖的 (naabu 单独发现) 走 fallback <ip>:<port> (无 CustomHost, Host=IP)
+: > "$OUTPUT_DIR/non_cdn_web_inputs.txt"
+while read -r hp; do
+    [ -z "$hp" ] && continue
+    ip="${hp%:*}"
+    port="${hp#*:}"
+    subs=$(grep "^$ip " "$FILE_IP" 2>/dev/null | awk "{print \$2}")
+    if [ -n "$subs" ]; then
+        while read -r sub; do
+            [ -z "$sub" ] && continue
+            echo "$sub,$ip:$port" >> "$OUTPUT_DIR/non_cdn_web_inputs.txt"
+        done <<< "$subs"
+    else
+        # fallback: 没 sub 映射, 走 IP-only 探测
+        echo "$ip:$port" >> "$OUTPUT_DIR/non_cdn_web_inputs.txt"
+    fi
+done < "$OUTPUT_DIR/non_cdn_all_ports.txt"
+sort -u "$OUTPUT_DIR/non_cdn_web_inputs.txt" -o "$OUTPUT_DIR/non_cdn_web_inputs.txt"
+
+INPUT_COUNT=$(wc -l < "$OUTPUT_DIR/non_cdn_web_inputs.txt" | tr -d ' ')
+log "[+] stage 8 <sub>,<ip>:<port> 组合数: $INPUT_COUNT"
+
+"$HTTPX_BIN" -l "$OUTPUT_DIR/non_cdn_web_inputs.txt" -sc -cl -title -hash mmh3,simhash -random-agent -follow-redirects -max-redirects 3  -td -rate-limit 50 -timeout 5 -silent -no-color -json -irr < /dev/null 2>/dev/null > "$OUTPUT_DIR/non_cdn_web_summary.json"
 WEB_COUNT=$(grep -c . "$OUTPUT_DIR/non_cdn_web_summary.json" || true)
 
 log "[+] Web资产数: $WEB_COUNT"

@@ -29,7 +29,7 @@ DEFAULT_DB = REPO / "db" / "recon.sqlite3"
 DEFAULT_SCHEMA = REPO / "db" / "schema.sql"
 
 NEED_TABLES = {
-    "alterx_runs", "businesses", "companies", "mapp_records",
+    "alterx_runs", "brute_runs", "businesses", "companies", "mapp_records",
     "permutation_state", "recon_business_config", "run_markers",
     "scopes", "service_type_map", "tcp_assets", "web_hash_urls",
     "web_hashes", "web_subdomain_scan_schedule", "web_subdomains",

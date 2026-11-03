@@ -1,0 +1,7 @@
+{
+  "title": "403 Forbidden",
+  "status_code": 403,
+  "redirect_to": "http://www.localtest.me:9090/",
+  "technologies": ["Tengine"],
+  "body": "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n<html>\n<head><title>403 Forbidden</title></head>\n<body>\n<h1>403 Forbidden</h1>\n<p>You don't have permission to access the URL on this server.<hr/>Powered by Tengine</body>\n</html>\n"
+}

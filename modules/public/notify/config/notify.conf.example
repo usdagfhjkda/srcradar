@@ -1,0 +1,31 @@
+# notify 模块配置占位模板
+#
+# 真值请复制本文件为 config/notify.conf(同目录)再编辑。
+# config/notify.conf 在 .gitignore 内,不入仓。
+#
+# 字段:
+#   RESEND_API_KEY  Resend HTTP API key(在 https://resend.com/api-keys
+#                   生成,以 re_ 开头,至少 20 字符;绑一个发件域)
+#   FROM_ADDR       发件人地址(FROM_ADDR 必须在 Resend 后台已验证的发件域下;
+#                  占位 noreply@your-domain.example 请替换为真实地址)
+#   TO_ADDR         收件人邮箱(操作员)
+#   SUBJECT         邮件主题前缀(默认 "[srcradar] daily diff")
+#   GPG_RECIPIENT   GPG 收件人邮箱(== TO_ADDR;给 gpg -r 用)
+#
+# 鉴权面:
+#   - Resend API key 是单 token,比 Outlook SMTP 的 user + app password(占两凭据)
+#     鉴权面更窄;OAuth refresh_token / Azure App Registration 都已弃用。
+#   - 真值(API key / 邮箱)只在 config/notify.conf 出现,config/notify.conf
+#     在 .gitignore 内,不入仓。
+#
+# 发件域验证(只描述,不写真实 DNS 操作):
+#   - 在 Cloudflare 的发件域 DNS 区里加 5 条记录(SPF / DKIM / DMARC / MX 可选
+#   / 返回验证),具体值由 Resend 后台在 "Domains" 页面给出。
+#   - 本脚本不调 Cloudflare API;DNS 录入由 operator 在 Cloudflare 控制台完成。
+#
+# 任何字段留空 / REPLACE_WITH_* 都会让 notify_send.sh 拒绝发并打印配置缺失。
+RESEND_API_KEY=REPLACE_WITH_RESEND_API_KEY
+FROM_ADDR=noreply@your-domain.example
+TO_ADDR=REPLACE_WITH_RECIPIENT_EMAIL
+SUBJECT=[srcradar] daily diff
+GPG_RECIPIENT=REPLACE_WITH_RECIPIENT_EMAIL

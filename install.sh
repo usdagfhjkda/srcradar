@@ -138,7 +138,14 @@ DBEOF
 # 注意必须用 `declare -A X=(...)` 语法而不是 `X=(...)`,否则 set -u 下会
 # 把 ["srcradar-mcp-server"] 当成变量名 $srcradar(没引号也不识别为关联数组 key)。
 # 新增虚拟模块:在这里加一行 `["<name>"]=<area>`。
-declare -A VIRTUAL_NAMES=(["srcradar-mcp-server"]=public)
+declare -A VIRTUAL_NAMES=(["srcradar-mcp-server"]=public ["srcradar-algo-diff-cpp"]=public)
+
+# ---- 虚拟模块的落盘目录名 ----
+# 默认落盘目录名 == 虚拟名(与仓库名一致)。这里可以单独指定:
+#   键 = 虚拟名, 值 = 目录名(相对 modules/<area>/)。
+# 比较引擎的仓库名是 srcradar-algo-diff-cpp, 但每日流水线调用的是
+# modules/public/algo_diff_cpp/, 忽略规则也按后者写, 因此这里解耦。
+declare -A VIRTUAL_DIRS=(["srcradar-algo-diff-cpp"]="algo_diff_cpp")
 
 # ---- 收集所有可安装模块(按字母序,分 main / public / private) ----
 # 输出:三段关联数组 AREA[N] / NAME[N] / DESC[N] / N 顺序
@@ -232,6 +239,7 @@ ask_checklist() {
             main/pdtm)    echo "主动测绘核心 dnsx+httpx+naabu+cdnmatch" ;;
             public/db_align) echo "ENScan_GO 集成(Apache-2.0,大依赖)" ;;
             public/srcradar-mcp-server) echo "独立 MCP server 子模块(独立 repo,默认不勾,勾选后自动 clone + ./install.sh --yes)" ;;
+            public/srcradar-algo-diff-cpp) echo "内容相似度判定引擎(独立 repo,GPL-2.0;落盘 modules/public/algo_diff_cpp;不装则不做变更判定)" ;;
             public/ymicp) echo "小程序备案反查客户端(需自部署服务)" ;;
             *)            echo "" ;;
         esac
@@ -352,7 +360,9 @@ main() {
             [ "${VIRTUAL_NAMES[$vname]}" = "$area" ] || continue
             local vkey="$area/$vname"
             [ "${SELECTED_M[$vkey]:-0}" = "1" ] || continue
-            local vmdir="$SCRIPT_DIR/modules/$area/$vname"
+            # 落盘目录名默认与虚拟名一致;VIRTUAL_DIRS 可单独指定
+            local vdirname="${VIRTUAL_DIRS[$vname]:-$vname}"
+            local vmdir="$SCRIPT_DIR/modules/$area/$vdirname"
             local vurl="https://github.com/usdagfhjkda/$vname.git"
             if [ ! -d "$vmdir" ]; then
                 # 先 ls-remote 探测,repo 不存在(404)时 warn 跳过、不阻塞
@@ -367,7 +377,11 @@ main() {
                     continue
                 fi
             fi
-            run_module "$area" "$vname" --yes || exit 3
+            # 用落盘目录名而不是虚拟名: clone 落在 $vmdir (VIRTUAL_DIRS 映射),
+            # run_module 按 $SCRIPT_DIR/modules/$area/$name 找 install.sh, 传虚拟名
+            # 会去找一个从未创建的目录, 导致 clone 成功但安装被跳过。
+            # 无 VIRTUAL_DIRS 映射的虚拟模块两者同名, 行为不变。
+            run_module "$area" "$vdirname" --yes || exit 3
             installed=$((installed+1))
         done
         for mdir in "$adir"/*/; do

@@ -8,6 +8,11 @@
 target-version = "py310"
 line-length = 120
 
+# scratch/ 是 dev-only 探针脚本目录 (ad-hoc 调试 + 算法验证),不入主流程,
+# ruff 不 lint (scratch 内容通常是 F401/PLW1510 等小毛病 + 大段中文注释)。
+# tests/fixtures/.ci-originals/ 是 smoke_e2e 镜像原始备份,跟 fixture 同形。
+extend-exclude = ["scratch", "tests/fixtures/.ci-originals"]
+
 [tool.ruff.lint]
 # pyflakes (F) is the safest base; pycodestyle errors (E) are
 # intentionally NOT included wholesale because E501 (line-too-long)

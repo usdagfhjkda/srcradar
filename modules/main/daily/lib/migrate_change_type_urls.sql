@@ -22,7 +22,11 @@ ALTER TABLE web_hash_urls ADD COLUMN change_type INTEGER NOT NULL DEFAULT 0;
 -- AI 触发器:新行直接置 1
 CREATE TRIGGER IF NOT EXISTS trg_whu_ai AFTER INSERT ON web_hash_urls
 BEGIN
-  UPDATE web_hash_urls SET change_type = 1 WHERE id = NEW.id;
+    -- DEPRECATED: change_type is written by the comparison engine
+    -- (an optional plugin in its own repository). The original
+    -- trigger body is kept below for reference.
+    --   UPDATE web_hash_urls SET change_type = 1 WHERE id = NEW.id;
+    SELECT 1 WHERE 0;
 END;
 
 -- AU 触发器:内容字段差异 / 复活判定
@@ -45,44 +49,48 @@ WHEN NEW.is_static = 0
      OR (OLD.content_type   IS NOT NEW.content_type)
    )
 BEGIN
-  UPDATE web_hash_urls
-     SET change_type = CASE
-       -- True reactivation + content changed
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT last_run_at FROM web_subdomain_scan_schedule
-                WHERE business_id = NEW.business_id
-                  AND subdomain   = NEW.subdomain
-                  AND enabled     = 1
-                LIMIT 1),
-              OLD.last_seen)
-        AND (OLD.status_code    IS NOT NEW.status_code
-             OR OLD.content_length IS NOT NEW.content_length
-             OR OLD.word_count     IS NOT NEW.word_count
-             OR OLD.title          IS NOT NEW.title
-             OR OLD.redirect       IS NOT NEW.redirect
-             OR OLD.link_source    IS NOT NEW.link_source
-             OR OLD.risk_flag      IS NOT NEW.risk_flag
-             OR OLD.is_dangerous   IS NOT NEW.is_dangerous
-             OR OLD.content_type   IS NOT NEW.content_type)
-         THEN 6
-       -- True reactivation (content unchanged)
-       WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
-        AND OLD.last_seen < COALESCE(
-              (SELECT last_run_at FROM web_subdomain_scan_schedule
-                WHERE business_id = NEW.business_id
-                  AND subdomain   = NEW.subdomain
-                  AND enabled     = 1
-                LIMIT 1),
-              OLD.last_seen)
-         THEN 4
-       -- "Stayed alive" (no schedule entry OR same-run upsert)
-       WHEN OLD.is_active = 0 AND NEW.is_active = 1
-         THEN 0
-       -- Pure content change
-       ELSE 2
-     END
-   WHERE id = NEW.id;
+    -- DEPRECATED: change_type is written by the comparison engine
+    -- (an optional plugin in its own repository). The original
+    -- trigger body is kept below for reference.
+    --   UPDATE web_hash_urls
+    --      SET change_type = CASE
+    --        -- True reactivation + content changed
+    --        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+    --         AND OLD.last_seen < COALESCE(
+    --               (SELECT last_run_at FROM web_subdomain_scan_schedule
+    --                 WHERE business_id = NEW.business_id
+    --                   AND subdomain   = NEW.subdomain
+    --                   AND enabled     = 1
+    --                 LIMIT 1),
+    --               OLD.last_seen)
+    --         AND (OLD.status_code    IS NOT NEW.status_code
+    --              OR OLD.content_length IS NOT NEW.content_length
+    --              OR OLD.word_count     IS NOT NEW.word_count
+    --              OR OLD.title          IS NOT NEW.title
+    --              OR OLD.redirect       IS NOT NEW.redirect
+    --              OR OLD.link_source    IS NOT NEW.link_source
+    --              OR OLD.risk_flag      IS NOT NEW.risk_flag
+    --              OR OLD.is_dangerous   IS NOT NEW.is_dangerous
+    --              OR OLD.content_type   IS NOT NEW.content_type)
+    --          THEN 6
+    --        -- True reactivation (content unchanged)
+    --        WHEN (OLD.is_active = 0 AND NEW.is_active = 1)
+    --         AND OLD.last_seen < COALESCE(
+    --               (SELECT last_run_at FROM web_subdomain_scan_schedule
+    --                 WHERE business_id = NEW.business_id
+    --                   AND subdomain   = NEW.subdomain
+    --                   AND enabled     = 1
+    --                 LIMIT 1),
+    --               OLD.last_seen)
+    --          THEN 4
+    --        -- "Stayed alive" (no schedule entry OR same-run upsert)
+    --        WHEN OLD.is_active = 0 AND NEW.is_active = 1
+    --          THEN 0
+    --        -- Pure content change
+    --        ELSE 2
+    --      END
+    --    WHERE id = NEW.id;
+    SELECT 1 WHERE 0;
 END;
 
 COMMIT;

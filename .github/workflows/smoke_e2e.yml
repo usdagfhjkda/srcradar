@@ -1,0 +1,239 @@
+name: smoke_e2e
+
+# End-to-end smoke test for srcradar.
+#
+# One stage:
+#   stage2 (full pipeline)  - manual workflow_dispatch + push to main.
+#                             Slower (~3-5min). Spins up 6 local HTTP servers
+#                             backed by tests/fixtures/{ct0,ct2}/, points a
+#                             fake hostname at 127.0.0.1 via DNS (real A
+#                             record), runs the full daily_monitor pipeline
+#                             twice, asserts algo_diff verdicts in DB, then
+#                             starts the dashboard on 127.0.0.1:8765 and
+#                             curls it to verify the pipeline populated rows
+#                             for the configured target.
+#
+# Why a hostname instead of 127.0.0.1: srcradar code paths assume a domain
+# (cdnmatch, FILE_IP "IP domain" format, web_subdomain regexes, TLS SNI).
+# Using a real domain whose A record is 127.0.0.1 (www.localtest.me)
+# flows through dnsx + cdnmatch + scanner.sh as a real hostname - no
+# /etc/hosts trick needed, exercises the full HTTP pipeline end-to-end.
+#
+# Two-phase run design (stage2):
+#   Round 1 - all 6 fixture servers up; daily_monitor runs once. pdtm httpx
+#             hits each port, writes web_subdomains rows. algo_diff.run
+#             writes prev_body/curr_body, trigger trg_ws_ai sets ct=1.
+#   Middle  - ct2 3 servers swap initial.json -> changed.json; ct0 3 servers
+#             stay on the same fixture (Round 2's rendered body differs
+#             from Round 1 only in {{ timestamp }} / {{ random:N,hex }}).
+#   Round 2 - daily_monitor runs again. trg_ws_au fires, inline algo_diff
+#             block in _upsert_web_records compares prev vs curr and writes
+#             ct=0 (ct0: anchor mask suppresses {{ }} drift) or ct=2
+#             (ct2: status_code / body length / structural diff).
+#   Assert  - the 6-row outcome must be 3 ct=0 (ct0) + 3 ct=2 (ct2).
+#
+# Background processes are cleaned up at the end (even on failure) so
+# the runner stays clean for subsequent jobs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 2 - full pipeline with 6 fixture HTTP servers + dashboard. Triggered
+  # by workflow_dispatch and push to main; PRs skip this stage because it
+  # runs the full scanner/daily pipeline (heavy, several minutes).
+  # ---------------------------------------------------------------------------
+  stage2-pipeline:
+    name: stage2 (full pipeline)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install system deps
+        # algo_diff_cpp apt deps: build-essential / cmake / git / libsqlite3-dev /
+        # zlib1g-dev / libsimdjson-dev (跟 modules/public/algo_diff_cpp/install.sh
+        # 的 apt_install 列表一致, 这里显式列是为了 ubuntu-latest 干净 runner
+        # 在 ./srcradar algo_diff_cpp install --yes 跑前先装好, 避免 install.sh
+        # 自己调 apt 时被 ubuntu-latest 的 apt lock 干扰)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3 cron build-essential cmake git libsqlite3-dev zlib1g-dev libsimdjson-dev
+
+      - name: install srcradar (module-level)
+        # Five module-level installs - bypasses the interactive checklist in
+        # the top-level ./install.sh that CI cannot enter. algo_diff_cpp is
+        # the C++ replacement for daily/lib/algo_diff/{run,rescan}.py; it
+        # hooks into daily_monitor via step 0.5 (snapshot -> algo_diff_cpp
+        # T1/T2/T3/T4 -> step 1 per-business). --yes is forwarded to the
+        # install.sh so apt-get install gets -y (CI non-interactive).
+        run: |
+          ./srcradar db install --yes
+          ./srcradar pdtm install --yes
+          ./srcradar manage install --yes
+          ./srcradar algo_diff_cpp install --yes
+
+      - name: write pdtm.conf for CI (httpx_bin / dnsx_bin / resolvers_file)
+        # pdtm install.sh 只写 wordlists_dir; httpx_bin / dnsx_bin /
+        # resolvers_file 这 3 个 key 在部署侧另行配置, CI runner 拿不到,
+        # 所以这里直接写 pdtm.conf 指向 ~/.pdtm/go/bin/(PD 工具链 pdtm -duc
+        # 的安装位置). 不检测 binary 存在, 信任 install 步骤成功.
+        run: |
+          set -euo pipefail
+          PDTM_BIN_DIR="$HOME/.pdtm/go/bin"
+          STUB_RESOLVERS="$(mktemp)"
+          printf '8.8.8.8\n1.1.1.1\n' > "$STUB_RESOLVERS"
+          PDTM_CONF="config/pdtm.conf"
+          tmp="$(mktemp)"
+          awk '
+            /^dnsx_bin=/      { next }
+            /^httpx_bin=/     { next }
+            /^resolvers_file=/ { next }
+            { print }
+          ' "$PDTM_CONF" > "$tmp"
+          {
+            echo "dnsx_bin=$PDTM_BIN_DIR/dnsx"
+            echo "httpx_bin=$PDTM_BIN_DIR/httpx"
+            echo "resolvers_file=$STUB_RESOLVERS"
+          } >> "$tmp"
+          chmod 600 "$tmp"
+          mv "$tmp" "$PDTM_CONF"
+          echo "pdtm.conf updated:"
+          grep -E '^(dnsx_bin|httpx_bin|resolvers_file)=' "$PDTM_CONF"
+
+      - name: verify dispatcher
+        run: ./srcradar --list | tee /tmp/dispatcher.txt
+
+      - name: seed scope + add_business
+        run: |
+          mkdir -p ~/scope
+          echo "www.localtest.me" > ~/scope/target.txt
+          ./srcradar manage add_business -n smoketest -i ~/scope
+
+      - name: bypass cold-start gate for the smoketest business
+        # schema.sql: businesses.scan_count defaults to 0, and the
+        # _cold_safe_biz subquery in diff.py._recompute_change_type plus
+        # _cold_start_count in algo_diff.run both gate on `scan_count > 3`.
+        # In production this is the right behavior (new businesses stay quiet
+        # for the first 4 scans so the report is not full of fake deltas).
+        # In CI smoke it would make every round an algo_diff cold_start - so
+        # process_subdomain returns None, _write_back is never called,
+        # prev_body stays NULL forever, and the inline algo_diff block in
+        # _upsert_web_records (which only fires when prev_body is not None)
+        # never runs. The 2-phase assert then sees ct=0/0/0 instead of
+        # ct=0/0/2 because diff.py also skips smoketest from the cold-safe
+        # list.
+        #
+        # Setting scan_count=10 here is a CI-test bypass, NOT a production
+        # behavior change. We pin the business to "stable state" so the
+        # algo_diff + diff.py paths run the way they do after a real
+        # business has scanned 4+ times.
+        run: |
+          sqlite3 modules/main/db/recon.sqlite3 \
+            "UPDATE businesses SET scan_count=10 WHERE business_name='smoketest'"
+
+      - name: free up the 11 fixture ports (sudo cross-user SIGKILL)
+        # GitHub-hosted ubuntu-latest runners occasionally have system
+        # services holding high ports (e.g. actions/runner agent,
+        # snapd, systemd-resolved, docker-proxy, leftover child
+        # processes from a previous run that ran past the cleanup).
+        # Plain `fuser -k` only kills processes owned by the runner
+        # user, so we go through `sudo fuser -kn tcp` to SIGKILL the
+        # cross-user holder. We then probe each port with `bash /dev/tcp` (a connect-only probe —
+        # refused = free) instead of python3 -c bind checks. The previous
+        # python heredoc embedded a colon after 127.0.0.1 which broke the
+        # YAML block scalar parser, AND single-line try/except is a
+        # Python SyntaxError. /dev/tcp has no Python and no heredoc.
+        # 3 attempts with backoff
+        # handle TIME_WAIT and child-reaper delays.
+        run: |
+          for P in 28800 28801 28802 28803 28804 28805 28806 28807 28808 28809 28810; do
+            for ATTEMPT in 1 2 3; do
+              # 1) cross-user SIGKILL (sudo NOPASSWD on ubuntu-latest)
+              sudo -n fuser -kn tcp "${P}" 2>/dev/null || true
+              # 2) same-user SIGKILL
+              fuser -k "${P}/tcp" 2>/dev/null || true
+              sleep 1
+              # 3) verify port is now bindable: try `bash /dev/tcp` connect.
+              #    connect refused (= exit nonzero) means port is free.
+              if ! (timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${P}" 2>/dev/null); then
+                echo "[OK] port ${P} free (attempt $ATTEMPT)"
+                break
+              fi
+              echo "[WAIT] port ${P} still busy, attempt $ATTEMPT of 3"
+              sleep 2
+            done
+            # Final probe: connect succeeded after 3 attempts => port still busy.
+            # Fail loud with ss diagnostics so the operator can pick a different range.
+            if (timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${P}" 2>/dev/null); then
+              echo "[FAIL] port ${P} could not be freed after 3 attempts"
+              ss -tlnpH "sport = :${P}" 2>/dev/null || true
+              exit 1
+            fi
+          done
+
+      - name: run 11-port x 3-round smoke wrapper
+        # tests/run_smoke.sh is the local-only wrapper that runs the full
+        # 11-port x 3-round matrix. The wrapper:
+        #   - Round 1: cold-start 3 ports (28804/28805/28810) + daily_monitor
+        #   - Round 2: cold-start 7 ports + daily_monitor
+        #   - Round 3: restart + /change + dead + cold-start 28801 + daily_monitor
+        #   - Assert: 11-port matrix (ct=0/1/2/4/6/8) all match expected
+        # Ports 28800-28810 are local-only.
+        # exit 0 = all 11 ports match expected change_type; non-zero = fail.
+        run: bash tests/run_smoke.sh
+
+      - name: start dashboard + verify smoketest target
+        run: |
+          # Start the dashboard on 127.0.0.1:8765 in the background.
+          ./srcradar daily dashboard &
+          echo $! > /tmp/dashboard.pid
+
+          # Wait until the dashboard actually responds (max 10s).
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -sf http://127.0.0.1:8765 >/dev/null; then
+              echo "[OK] dashboard is up"
+              break
+            fi
+            sleep 1
+          done
+          if ! curl -sf http://127.0.0.1:8765 >/dev/null; then
+            echo "[FAIL] dashboard did not start in 10s"
+            exit 1
+          fi
+
+          # Sanity-check that the dashboard contains the configured target so we
+          # know run_one_business actually wrote rows the dashboard can render.
+          if ! curl -sf http://127.0.0.1:8765 | grep -q www.localtest.me; then
+            echo "[FAIL] dashboard output missing www.localtest.me"
+            exit 1
+          fi
+
+      - name: cleanup background processes
+        if: always()
+        run: |
+          if [ -f /tmp/dashboard.pid ]; then
+            kill "$(cat /tmp/dashboard.pid)" 2>/dev/null || true
+            rm -f /tmp/dashboard.pid
+          fi
+          for f in /tmp/http_server.pids /tmp/http_server_ct2.pids; do
+            if [ -f "$f" ]; then
+              while IFS= read -r pid; do
+                [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+              done < "$f"
+              rm -f "$f"
+            fi
+          done

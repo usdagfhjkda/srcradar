@@ -1,0 +1,7 @@
+{
+  "title": "Fixture Title",
+  "status_code": 200,
+  "redirect_to": "http://www.localtest.me:8888/",
+  "technologies": ["nginx"],
+  "body": "<html><body><h1>System Dashboard</h1><p>Server time: {{ timestamp }}</p><p>Status: <strong>completed</strong></p><p>Expected resume: 2026-10-06 22:00 UTC</p></body></html>"
+}

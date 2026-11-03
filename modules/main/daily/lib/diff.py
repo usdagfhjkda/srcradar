@@ -25,9 +25,10 @@ Classification:
   added        — change_type & 1
   reactivated  — web_subdomains/tcp_assets only; change_type & 4
   changed      — change_type & 2  (other bits don't matter)
-  deactivated  — web_subdomains/tcp_assets only; is_active=0 AND change_type=0
-                 AND last_seen >= before_ts (was active in or after the previous
-                 run, no reactivation in this run)
+  deactivated  — web_subdomains/tcp_assets only; is_active=0 AND
+                 change_type=8. last_seen is intentionally NOT part of the
+                 test — by spec, deactivation is decided solely by
+                 is_active=0, never by the last_seen timestamp.
   deleted      — never emitted (current schema doesn't hard-delete)
 """
 from __future__ import annotations
@@ -35,6 +36,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sqlite3
 import sys
 from collections.abc import Callable
@@ -318,8 +320,9 @@ READ_SQL: dict[str, str] = {
     """,
 }
 
-# Deactivation read: only meaningful for has_active tables. Was active in or
-# after the previous run, now is_active=0, wasn't re-flagged this run.
+# Deactivation read: only meaningful for has_active tables.
+# By spec (用户 2026-10-04), 失活 充要条件 = is_active=0, 跟 last_seen 无关。
+# 这里只多取一个 change_type=8 作事件类型标记, last_seen 不参与过滤。
 DEACTIVATE_SQL: dict[str, str] = {
     "web_subdomains": """
         SELECT ws.id, ws.hash_id, ws.subdomain, ws.port, ws.url,
@@ -330,16 +333,16 @@ DEACTIVATE_SQL: dict[str, str] = {
           FROM web_subdomains ws
           JOIN web_hashes     wh ON wh.id = ws.hash_id
          WHERE ws.is_active = 0
-           AND ws.change_type = 0
-           AND ws.last_seen >= ?
+           AND ws.change_type = 8
+           AND wh.business_id IN (SELECT id FROM businesses WHERE scan_count > 3)
     """,
     "tcp_assets": """
         SELECT id, business_id, ip, port, hosts,
                first_seen, last_seen, fetched_at, is_active, raw_value
           FROM tcp_assets
          WHERE is_active = 0
-           AND change_type = 0
-           AND last_seen >= ?
+           AND change_type = 8
+           AND business_id IN (SELECT id FROM businesses WHERE scan_count > 3)
     """,
     # 用户 2026-08-26:web_hash_urls 接 deactivate。
     #   之前的扫描里 is_active=1,本轮没扫到 → is_active 不会被 persist 翻回 1
@@ -353,8 +356,8 @@ DEACTIVATE_SQL: dict[str, str] = {
                first_seen, last_seen, fetched_at, is_active
           FROM web_hash_urls
          WHERE is_active = 0
-           AND change_type = 0
-           AND last_seen >= ?
+           AND change_type = 8
+           AND business_id IN (SELECT id FROM businesses WHERE scan_count > 3)
     """,
 }
 
@@ -439,6 +442,142 @@ def _deactivate_rows(
 
 # ---------- run_marker helpers ----------
 
+def _recompute_change_type(conn: sqlite3.Connection,
+                              from_ts: str, to_ts: str) -> None:
+    """After reset, recompute change_type from first_seen / last_seen / is_active.
+
+    Bitmask (mirrors migrate_change_type.sql triggers):
+      1 = added       — first_seen / fetched_at / updated_at in [from_ts, to_ts)
+      2 = changed     — last_seen in [from_ts, to_ts), first_seen < from_ts
+      4 = reactivated — is_active=1 AND last_seen in [from_ts, to_ts), first_seen < from_ts
+      8 = deactivated — is_active=0 AND last_seen >= from_ts (was alive in/after prev run)
+
+    Note: businesses has no timestamp column, left at 0.
+
+    Cold-start guard (2026-10-01): businesses with scan_count <= 3
+    are in their initial 4-run noise period. Skip writing ct=1/2/4/8
+    for those businesses — pipeline persist() 全清场 + 重新激活的
+    误报会在前几次扫描里制造假变更,等业务稳定后再正常报告。
+    阈值: <= 3 reset (即 scan_count > 3 才稳态报告)。
+    """
+    # 子查询预算:稳态业务(businesses.scan_count > 3)才能拿到 ct
+    _cold_safe_biz = (
+        "SELECT id FROM businesses WHERE scan_count > 3"
+    )
+    # 注: scopes/companies/mapp_records 没有 business_id 列, 且 INSERT 时通过
+    # 2026-10-07 refactor: trg_co_ai / trg_mp_ai 已 DROP, INSERT 时本函数也不再写 ct=1。
+    #     change_type=1 的写入入口移到 import_scan_results.py (commit 2)。
+    _ADDED_COLS = (
+        ("web_hashes",    "fetched_at"),
+    )
+    # 2026-10-07: skip the "added" SET change_type=1 paths. algo_diff
+    # owns the similar/changed verdict (0/2) and writes it during step 3
+    # of daily_monitor. _recompute_change_type unconditionally overwriting
+    # change_type=1 on every row in the [from_ts, to_ts) window created a
+    # multi-writer race: step 1 inline block wrote 0/2, step 2 diff.py
+    # reset to 1, step 3 algo_diff.run overwrote again to 0/2. With the
+    # inline block also writing ct, the final state at CI assertion time
+    # was either 0/2 (when step 3 ran cleanly) or 1 (when step 3 was
+    # skipped/rollback'd). The fix is to drop the ct=1 overwrites here
+    # and let the INSERT/UPDATE triggers + algo_diff.run be the only
+    # writers. The "added" bitmask (1) is still captured by step 1's
+    # 2026-10-07: trg_ws_ai 已 DROP. 新行 change_type=1 由 import_scan_results.py 写
+    #     (commit 2)。本函数不再扫新行写 ct=1,见 disabled block 上方的 if False 注释。
+    # ORIGINAL-COMMENT-DEPRECATED: trg_ws_ai AFTER INSERT trigger setting change_type=1 on each new
+    # row, so the bitmask semantics are preserved.
+    if False:  # disabled 2026-10-07 — see comment above
+        for t, col in _ADDED_COLS:
+            conn.execute(
+                f"UPDATE {t} SET change_type = 1 "
+                f"WHERE {col} IS NOT NULL AND {col} >= ? AND {col} < ? "
+                f"AND business_id IN ({_cold_safe_biz})",
+                (from_ts, to_ts),
+            )
+        for t in ("web_subdomains", "tcp_assets"):
+            conn.execute(
+                f"UPDATE {t} SET change_type = 1 "
+                f"WHERE first_seen >= ? AND first_seen < ? "
+                f"AND business_id IN ({_cold_safe_biz})",
+                (from_ts, to_ts),
+            )
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def _enabled_biz_subquery(conn: sqlite3.Connection) -> str:
+    """Subquery yielding the ids of enabled businesses ("" if unavailable)."""
+    if not _table_exists(conn, "recon_business_config"):
+        return ""
+    return "SELECT business_id FROM recon_business_config WHERE enabled = 1"
+
+
+def _apply_enabled_filter(conn: sqlite3.Connection, table: str, sql: str) -> str:
+    """Restrict `sql` to rows of enabled businesses.
+
+    2026-10-25: 被关闭的业务 (recon_business_config.enabled = 0) 不再参与
+    扫描与变更判定, 其历史行不应出现在报告 / 通知邮件 / 面板里。
+
+    Each table reaches its business differently:
+      - scopes / companies / web_hashes / tcp_assets / web_hash_urls carry
+        business_id directly.
+      - web_subdomains reaches it through web_hashes, and READ_SQL already
+        JOINs web_hashes under the alias `wh`.
+      - mapp_records only has company_id, so it needs an extra JOIN on
+        companies (aliased `co`).
+
+    Returns the original SQL when the config table is absent (older DBs).
+    """
+    enabled = _enabled_biz_subquery(conn)
+    if not enabled:
+        return sql
+    if table == "web_subdomains":
+        return sql + f" AND wh.business_id IN ({enabled})"
+    if table == "mapp_records":
+        # READ_SQL 里 mapp_records 没有别名, 且 SELECT 用裸列名。
+        # JOIN companies 后 id / business_id 会产生歧义, 所以:
+        #   1) 给 mapp_records 补别名 m
+        #   2) SELECT 列表的裸列名逐个加 m. 前缀
+        #   3) 插 JOIN companies co
+        def _prefix_m(match: re.Match) -> str:
+            return "m." + match.group(0)
+
+        head, sep, tail = sql.partition("FROM mapp_records")
+        assert sep, "mapp_records: FROM clause not found"
+        sep = ("FROM mapp_records m "
+               "JOIN companies co ON co.id = m.company_id")
+        sep = ("FROM mapp_records m "
+               "JOIN companies co ON co.id = m.company_id")
+        sep = ("FROM mapp_records m "
+               "JOIN companies co ON co.id = m.company_id")
+        sep = ("FROM mapp_records m "
+               "JOIN companies co ON co.id = m.company_id")
+        sep = ("FROM mapp_records m "
+               "JOIN companies co ON co.id = m.company_id")
+        sep = ("FROM mapp_records m "
+               "JOIN companies co ON co.id = m.company_id")
+        # SELECT 列表里裸列名 -> m.<col>
+        head = re.sub(
+            r"\b(id|company_id|source_data_id|service_name|service_licence|"
+            r"service_type|content_type_name|domain|record_updated_at|"
+            r"fetched_at|change_type)\b",
+            _prefix_m,
+            head,
+        )
+        # companies 与 mapp_records 都有 change_type 列 -> WHERE 里要限定别名
+        tail = tail.replace(
+            "WHERE change_type > 0",
+            "WHERE m.change_type > 0",
+            1,
+        )
+        return head + sep + tail + f" AND co.business_id IN ({enabled})"
+    return sql + f" AND business_id IN ({enabled})"
+
+
 def _read_before_ts(conn: sqlite3.Connection) -> str | None:
     """started_at of the most-recent FINISHED run_marker (= previous diff boundary)."""
     row = conn.execute(
@@ -484,14 +623,22 @@ def write_report(
     snapshot_dump: dict[str, list[dict]] = {}
 
     for table, spec in TABLE_SPECS.items():
-        rows = [dict(r) for r in conn.execute(READ_SQL[table]).fetchall()]
+        # 用户 2026-09-28:邮件不包含范围变更。scopes 跳过 read / 写 CSV /
+        # 加 grand_total。daemon db.read_diff 仍可单独查 scope 路径(如需)。
+        # 用户 2026-10-04:web_hashes 是内部 bookkeeping 表, 不出现在邮件汇总里。
+        if table in ("scopes", "web_hashes"):
+            continue
+        # 2026-10-25: 只保留 enabled=1 的业务 (被关闭业务不再进报告/邮件)。
+        sql = _apply_enabled_filter(conn, table, READ_SQL[table])
+        rows = [dict(r) for r in conn.execute(sql).fetchall()]
         snapshot_dump[table] = rows
         cls = _classify_table(table, rows, spec, biz_label, co_label)
 
         # Deactivation — separate query, only for has_active tables.
         deactivated: list[dict] = []
         if spec["has_active"] and before_ts is not None and table in DEACTIVATE_SQL:
-            d_rows = [dict(r) for r in conn.execute(DEACTIVATE_SQL[table], (before_ts,)).fetchall()]
+            d_sql = _apply_enabled_filter(conn, table, DEACTIVATE_SQL[table])
+            d_rows = [dict(r) for r in conn.execute(d_sql).fetchall()]
             deactivated = _deactivate_rows(table, d_rows, spec, biz_label, co_label)
 
         # CSVs
@@ -599,14 +746,27 @@ def main() -> int:
     try:
         conn.execute("BEGIN IMMEDIATE")
         try:
+            # 2026-09-29: reset -> recompute -> write_report -> stamp marker.
+            # Old order was write_report -> reset -> recompute, which read
+            # stale change_type>0 residue from the previous run. New order
+            # reads only the change_type set by recompute (→ canonical
+            # source) for this run's report.
+            # Recompute change_type from timestamps so change_type!=0 survives
+            # beyond this run (daemon db.read_diff reads it without
+            # full_snapshot.json). Window: previous finished run's started_at
+            # → current run's RUN_START_AT.
+            # Note: we deliberately do NOT pre-reset change_type=0 here.
+            # _recompute_change_type is the single source of truth, and
+            # pre-resetting would just lose the atomicity guarantee that
+            # "this run's change_type reflects only this run's events".
+            before_ts = _read_before_ts(conn)
+            if before_ts is not None:
+                current_started = os.environ.get("RUN_START_AT") or _now_iso()
+                _recompute_change_type(conn, before_ts, current_started)
             rc = write_report(conn, report_dir, run_id, per_business_warnings)
             if rc != 0:
                 conn.rollback()
                 return rc
-            # Reset change_type=0 across all 7 tables atomically with the diff.
-            for t in ("businesses", "scopes", "companies", "mapp_records",
-                      "web_hashes", "web_subdomains", "tcp_assets"):
-                conn.execute(f"UPDATE {t} SET change_type = 0")
             # Stamp this run's marker. daily_monitor.sh passes RUN_START_AT
             # (the actual run start, before pipeline) so the subquery in
             # round-2 triggers sees the correct boundary for the next run.

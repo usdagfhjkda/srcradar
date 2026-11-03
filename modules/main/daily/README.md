@@ -772,9 +772,9 @@ diff.py 在每次 `daily_monitor.sh` 末尾把 `change_type > 0` 的行读出来
 
 | 工具 | 路径 | 命令 |
 |---|---|---|
-| ffuf | `/home/ubuntu/go/bin/ffuf` | `ffuf -u https://host/FUZZ -w wordlist ...` |
-| URLFinder(中文版 by pingc0y) | `/home/ubuntu/tools/URLFinder/URLFinder` | `URLFinder -m 3 -s all -o <dir> -u <url>` |
-| gau | `/home/ubuntu/go/bin/gau` | `gau --threads 5 --timeout 30 <domain>` |
+| ffuf | `~/go/bin/ffuf` | `ffuf -u https://host/FUZZ -w wordlist ...` |
+| URLFinder(中文版 by pingc0y) | `~/tools/URLFinder/URLFinder` | `URLFinder -m 3 -s all -o <dir> -u <url>` |
+| gau | `~/go/bin/gau` | `gau --threads 5 --timeout 30 <domain>` |
 
 **注意 gau 的 `--timeout` 是纯数字秒**(不是 `"30s"`)。
 

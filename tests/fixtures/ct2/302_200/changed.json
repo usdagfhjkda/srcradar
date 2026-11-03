@@ -1,0 +1,7 @@
+{
+  "title": "Fixture Title",
+  "status_code": 200,
+  "redirect_to": "http://www.localtest.me:8443/",
+  "technologies": ["nginx"],
+  "body": "<html><body><h1>Service Online</h1><p>Maintenance completed at {{ timestamp }}.</p><p>All systems operational. Welcome back.</p></body></html>"
+}

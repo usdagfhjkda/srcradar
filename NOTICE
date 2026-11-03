@@ -19,6 +19,9 @@ licensed under the MIT License (© 2021-2025 ProjectDiscovery, Inc.):
   - cdncheck    (https://github.com/projectdiscovery/cdncheck)   — MIT
                 (consumed indirectly via srcradar's pdtm/cdnmatch wrapper;
                  no source modifications are made)
+  - katana      (https://github.com/projectdiscovery/katana)     — MIT
+                (consumed via modules/public/katana/ subprocess wrapper;
+                 no source modifications are made)
 
 ================================================================================
 ENScan_GO (https://github.com/mssky9527/ENScan_GO)
@@ -31,6 +34,37 @@ Apache License, Version 2.0 (© 2023-2026 keac @ wgpsec).
 srcradar pins to upstream tag ENScan_GO_TAG=v1.4.0 (see install.sh).
 
 ================================================================================
+shuffledns + massdns (GPL-3.0)
+================================================================================
+srcradar's pdtm brute stage (see modules/main/pdtm/scan.sh) shells out to the
+following GPL-3.0-licensed binaries as independent, dynamically-invoked
+processes:
+
+  - shuffledns   (https://github.com/projectdiscovery/shuffledns)
+                  Copyright (c) 2022 ProjectDiscovery, Inc.
+                  Licensed under GPL-3.0
+  - massdns      (https://github.com/blechschmidt/massdns)
+                  Copyright (c) 2017 Marc Blechschmidt
+                  Licensed under GPL-3.0
+
+Per GPL-3.0 section 5 (Conveying Modified Source Versions) and section 6
+(Conveying Non-Source Forms): srcradar invokes these as separate executable
+processes, does NOT statically or dynamically link against their code, does
+NOT include their source, and does NOT modify their source. This is an
+"aggregate" distribution, so the GPL-3.0 infection clause does NOT extend to
+srcradar's Apache-2.0 codebase.
+
+Compliance actions taken by srcradar:
+
+  1. The full GPL-3.0 LICENSE text for both projects is shipped inside the
+     container image at /usr/share/doc/srcradar/licenses/ (see Dockerfile),
+     alongside the binaries that are derived from them.
+  2. Both projects are open source; the corresponding source is obtainable
+     at the URLs above:
+       - shuffledns: go install
+                     github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest
+       - massdns:    git clone https://github.com/blechschmidt/massdns.git
+================================================================================
 ffuf / gau
 ================================================================================
 This product references the following MIT-licensed utilities (consumed as
@@ -42,6 +76,49 @@ external binaries, no source modifications):
                 Copyright (c) 2025 Corben Leo
   - URLFinder   (https://github.com/pingc0y/URLFinder) — MIT
                 Copyright (c) 2022 pingc0y
+
+================================================================================
+SecLists (https://github.com/danielmiessler/SecLists)
+================================================================================
+srcradar ships two DNS subdomain wordlists under docker/wordlists/, used by the
+pdtm brute stage (modules/main/pdtm/scan.sh). Both originate from SecLists,
+which is licensed under the MIT License:
+
+  Copyright (c) 2018 Daniel Miessler
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
+The full upstream LICENSE text ships at docker/wordlists/SecLists-LICENSE.
+
+  - subdomains-top1million-20000.txt
+    verbatim copy of SecLists Discovery/DNS/subdomains-top1million-20000.txt
+
+  - dns-Jhaddix-clean.txt
+    DERIVED WORK of SecLists Discovery/DNS/dns-Jhaddix.txt. The upstream file
+    is filtered (drop blank lines, lines starting with . @ or *, lines
+    containing a dot, and lines longer than 32 characters) then deduplicated
+    and sorted. The pipeline is described here in full so the artifact can
+    be reproduced byte-for-byte from the upstream file. Because the
+    MIT License permits modification and redistribution provided the copyright
+    notice is retained, this derived work is redistributed under the same
+    MIT terms as the upstream. Users may obtain the unmodified upstream file
+    at the SecLists URL above.
 
 ================================================================================
 modernc.org/sqlite
@@ -62,6 +139,17 @@ ymicp/README.md §"第三方依赖声明" for details.
 The original ICP_Query project (https://github.com/HG-ha/ICP_Query) has not
 declared a license; srcradar recommends users self-host or replace with a
 public ICP query API before any production use.
+
+================================================================================
+Third-party service: Resend (email delivery)
+================================================================================
+The notify/ directory of srcradar contains ONLY a shell integration layer that
+delivers the daily diff summary through the Resend HTTP API. The Resend
+service itself is NOT redistributed, NOT endorsed, and NOT affiliated with
+srcradar. See notify/README.md for details.
+
+The GnuPG (gpg) binary and the curl client used by the integration are OS
+packages, not redistributed source; encryption follows OpenPGP (RFC 4880).
 
 ================================================================================
 Trademarks

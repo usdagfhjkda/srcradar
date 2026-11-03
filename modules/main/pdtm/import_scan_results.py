@@ -11,21 +11,63 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "db" / "recon.sqlite3"
 DEFAULT_SCAN_DIR = Path(__file__).resolve().parent / "scan_results"
 
 # 单点扫描模式 (scan-onesite 子命令) 用的常量。
-# HTTPX_BIN 默认推断: 与本脚本同目录的 bin/httpx(<repo>/pdtm/bin/httpx)。
-# 也可用环境变量 HTTPX_BIN 覆盖。
-HTTPX_BIN = os.environ.get(
-    "HTTPX_BIN",
-    str(Path(__file__).resolve().parent / "bin" / "httpx"),
-)
+# 2026-10-03: HTTPX_BIN 路径解析优先级 — env HTTPX_BIN 覆盖 > config/pdtm.conf httpx_bin > 默认 bin/httpx。
+# 与 pdtm/lib/resolve_tools.sh 的 bash helper 行为对齐(单源 config)。
+
+def _resolve_httpx_bin() -> str:
+    """解析 httpx 二进制路径,优先级:
+    1. 环境变量 HTTPX_BIN (caller 覆盖)
+    2. config/pdtm.conf 的 httpx_bin (由 install.sh / patches/install.sh 写入)
+       — 路径由 SRCRADAR_CONF 环境变量覆盖,默认 <repo>/config/pdtm.conf
+    3. 默认 <script_dir>/bin/httpx (与本脚本同目录)
+
+    返回第一个 Path.exists() 的路径;都不存在时返回默认路径(由 caller 检查).
+    """
+    # 1. 环境变量
+    env_val = os.environ.get("HTTPX_BIN")
+    if env_val and Path(env_val).exists():
+        return env_val
+
+    # 2. config/pdtm.conf
+    cfg_path = _find_pdtm_conf()
+    if cfg_path and cfg_path.exists():
+        for line in cfg_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line_no_comment = line.split("#", 1)[0]
+            if line_no_comment.startswith("httpx_bin="):
+                v = line_no_comment.split("=", 1)[1].strip().strip("'\"")
+                if v and Path(v).exists():
+                    return v
+
+    # 3. 默认
+    return str(Path(__file__).resolve().parent / "bin" / "httpx")
+
+
+def _find_pdtm_conf() -> "Path | None":
+    """定位 config/pdtm.conf 路径。
+    优先级: 环境变量 SRCRADAR_CONF > 相对脚本位置推断 <repo>/config/pdtm.conf.
+    返回 None 当无法推断。
+    """
+    env_val = os.environ.get("SRCRADAR_CONF")
+    if env_val:
+        return Path(env_val)
+    # import_scan_results.py 在 modules/main/pdtm/,上 3 层 = <repo>/
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parents[2]  # pdtm -> main -> <repo>
+    return repo_root / "config" / "pdtm.conf"
+
+
+HTTPX_BIN = _resolve_httpx_bin()
 HOSTNAME_RE = re.compile(r"^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$")
 MAX_HOSTS = 200            # 单次 scan-onesite 上限
 HTTPX_TIMEOUT = 120        # httpx subprocess 超时（秒）
@@ -46,6 +88,34 @@ def _s(v: Any) -> Any:
         return None
     if isinstance(v, (str, int, float)):
         return v
+    return str(v)
+
+
+def _normalize_tech(v: Any) -> Any:
+    """把 technologies 归一化成稳定的字符串形态。
+
+    httpx 的 tech 字段恒为 list[str]。原先它走通用的 _s() 强转, 而 _s() 对
+    list 一律 str(v), 于是 Python 的 list 字面量表示被当成字符串存进库:
+        str(['Alibaba Cloud CDN'])  ->  "['Alibaba Cloud CDN']"
+
+    同一份技术栈, 取决于当次扫描走的是 httpx JSONL 主路径还是 raw text 兜底
+    路径, 落库形态就在 "['X']" / "X" / NULL 之间跳 —— STEP 1 的 technologies
+    快字段比较于是命中, 判成变更, 而 body 其实逐字节相同。
+
+    格式沿用仓库内已有约定:
+        list -> ",".join(str(t) for t in v)      # ["A","B"] -> "A,B"
+        str  -> 原样
+        None -> None
+
+    刻意不复用 _s(): _s 是通用的 bind-safe 强转, 被 title / content_type 等
+    共用, 在那里改行为会波及其他字段。
+    """
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return v
+    if isinstance(v, (list, tuple)):
+        return ",".join(str(x) for x in v)
     return str(v)
 
 
@@ -158,6 +228,71 @@ def response_hash(data: dict[str, Any]) -> str | None:
     return value or None
 
 
+def body_simhash(data: dict[str, Any]) -> int | None:
+    """Extract body_simhash from httpx JSON hash dict.
+
+    httpx outputs hash.body_simhash as a decimal string (64-bit unsigned int).
+    Returns the int value, or None if not present / unparseable.
+
+    Only the structured httpx hash dict path is supported - text fallback
+    paths (parse_text_web) won't carry simhash.
+    """
+    value = data.get("hash")
+    if not isinstance(value, dict):
+        return None
+    raw = value.get("body_simhash")
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+# Hamming distance threshold for "near-duplicate body" classification.
+# When web_subdomains.hash_id changes between runs but the two body_simhash
+# values are within this many bit flips, treat the change as noise
+# ("near-duplicate") and downgrade change_type=2 (real change) to 0.
+# Threshold picked empirically - see deploy notes; tune in
+# modules/main/db/recon_business_config if a business needs stricter/looser.
+SIMHASH_HAMMING_THRESHOLD = 3
+
+
+def hamming_simhash(a: int, b: int) -> int:
+    """Bit-level hamming distance for two 64-bit simhash ints.
+
+    Python 3.10+ int.bit_count() is the standard idiom; works for any width
+    so threshold logic doesn't care whether httpx actually fills all 64 bits
+    (it doesn't - empirically ~60 bits used, see deploy notes).
+    """
+    return (a ^ b).bit_count()
+
+
+def _real_sub_from_input(raw_input: Any) -> str | None:
+    """从 httpx jsonl 的 `input` 字段取真实 subdomain。
+
+    阶段 8 的 input 格式是 "<sub>,<ip>:<port>" (scanner.sh 阶段 8 构造),
+    httpx 连的是 IP, 所以 jsonl 里的 `url` 只有 IP 字面量、不含 subdomain。
+    `input` 保留了构造时的原始字符串, 是唯一可靠的资产身份来源。
+
+    返回规范化后的 subdomain (小写、去尾部点), 无法解析时返回 None,
+    由调用方回退到 IP 反查路径。刻意不接受裸 IP 作为 real_sub —— 那种情况
+    说明 input 不是 stage 8 格式, 交给下游兜底更诚实。
+    """
+    if not isinstance(raw_input, str):
+        return None
+    value = raw_input.strip()
+    if not value or "," not in value:
+        return None
+    candidate = value.split(",", 1)[0].strip().lower().rstrip(".")
+    if not candidate:
+        return None
+    # 裸 IP 不是 subdomain(没有 Host 头的语义), 交给下游 IP 反查
+    if _looks_like_ip(candidate):
+        return None
+    return candidate
+
+
 def parse_json_web(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
@@ -178,14 +313,62 @@ def parse_json_web(path: Path) -> list[dict[str, Any]]:
                 "host": host,
                 "port": int(port),
                 "url": str(url),
+                # 2026-10-21: 真实 subdomain。阶段 8 的 input 格式是
+                # "<sub>,<ip>:<port>", httpx 连的是 IP, 所以上面的 `url` 只有
+                # IP、没有 sub; 而 `input` 保留了原始 "<sub>,<ip>:<port>"。
+                # 下游 load_web_records() 靠这个字段确定资产身份, 不再靠 IP 反查
+                # 猜域名 (见该函数 fanout 注释)。real_sub=None 时下游走兜底。
+                "real_sub": _real_sub_from_input(item.get("input")),
                 "status_code": first_value(item, "status-code", "status_code", "statusCode"),
                 "content_length": first_value(item, "content-length", "content_length", "contentLength"),
                 "title": first_value(item, "title"),
-                "technologies": first_value(item, "tech", "technologies"),
+                # 归一化成稳定形态 (见 _normalize_tech): httpx 的 tech 是
+                # list[str], 直接强转会落成 Python 的 list 字面量表示,
+                # 形态逐日跳变 -> 快字段比较误判成变更。
+                "technologies": _normalize_tech(first_value(item, "tech", "technologies")),
                 "response_hash": response_hash(item),
+                "body_simhash": body_simhash(item),
                 "raw_json": json.dumps(item, ensure_ascii=False, sort_keys=True),
+                # 2026-10-03: 提取 host_ip + a[] → ips 列(下游 _upsert_web_records 写入 DB)。
+                # httpx JSONL 顶层有 host_ip(string) 和 a(list[str]) 字段,
+                # 合并去重保留顺序。raw_json parse 是兜底路径(老数据 / httpx 字段改名)。
+                "ips": _extract_ips_from_item(item),
+                "content_type": first_value(item, "content_type", "contentType") or "",
+                # PATCH-FINAL-URL-2026-10-28: httpx 跟随 -follow-redirects 后的
+                # 最终落点。2xx 响应里该字段不存在 -> 空串 (比较时自动跳过);
+                # 3xx 响应里是稳定的域名形态, 不随扫描阶段连 IP 还是连域名而变。
+                # 不能用 url 列代替: url 的形态逐日会翻转 (域名 <-> IP),
+                # 补进快字段会把"形态抖动"误判成变更。
+                "final_url": first_value(item, "final_url") or "",
+                # inline algo_diff block in _upsert_web_records reads record["body"]
+                # to compare prev vs curr in the same UPSERT transaction; without
+                # this field _curr_body falls back to b"" and change_type stays
+                # at the trigger-set insert=1 instead of upgrading to 0/2.
+                # httpx -json (no -sr-base64) returns body as str; encode to bytes
+                # so the existing isinstance(..., (bytes, bytearray)) guard passes.
+                "body": (item["body"].encode("utf-8", errors="replace")
+                         if isinstance(item.get("body"), str)
+                         else (item["body"] if isinstance(item.get("body"), (bytes, bytearray))
+                               else b"")),
             })
     return records
+
+
+def _extract_ips_from_item(item: dict) -> str:
+    """从 httpx JSONL item 顶层提取 host_ip + a[] 合并去重,JSON 数组字符串。
+
+    返回值固定为 '["ip1","ip2",...]' 或 '[]'。下游 _upsert_web_records 优先用
+    record['ips'];若为空则 fallback parse raw_json。"""
+    ips: list[str] = []
+    host_ip = item.get("host_ip")
+    if isinstance(host_ip, str) and host_ip:
+        ips.append(host_ip)
+    a = item.get("a")
+    if isinstance(a, list):
+        for x in a:
+            if isinstance(x, str) and x and x not in ips:
+                ips.append(x)
+    return json.dumps(ips, ensure_ascii=False) if ips else "[]"
 
 
 URL_RE = re.compile(r"(?:https?://)?(?:\[[^]]+\]|[^\s\[\]]+?)(?::\d+)?(?:/[^\s]*)?")
@@ -297,18 +480,57 @@ def load_web_records(scan_dir: Path, ip_domains: dict[str, list[str]]) -> list[d
         if not path.is_file():
             continue
         raw.extend(parse_json_web(path) if path.suffix == ".json" else parse_text_web(path))
-    records: dict[tuple[str, int, str], dict[str, Any]] = {}
+
+    # 2026-10-21: 删掉 IP -> 多域名 fanout, key 去掉 response_hash。
+    #
+    # 为什么删 fanout:
+    #   阶段 8 每条 input 已经是一个域名一条探测 (scanner.sh 阶段 8 对该 IP 下
+    #   每个 sub 各生成一行 "<sub>,<ip>:<port>"), 每条结果的 Host 头不同、响应
+    #   可以完全不同。之前 _resolve_host() 把 host(IP) 反查成该 IP 下的全部域名,
+    #   再把同一条 record (含 body/status_code/content_length/raw_json) 无差别
+    #   复制给每个域名 —— 共享 CDN 入口的 IP 上有多个 vhost 时, 别的 Host 头的
+    #   响应就被挂到了本域名名下。实测: 一个 IP 上10 个域名, 其中一个的 3 个 port
+    #   拿到的都是另一个站点(跨 Host 跳转终点)的页面, 每天 content_length 抖动
+    #   ~千字节, diff 每天误报 changed。前提已验证: 每域名形态单一(混合 0/N),
+    #   说明每域名本来就有独立探测结果, 删掉复制不丢数据。
+    #
+    # 为什么 key 去掉 response_hash:
+    #   web_subdomains 的唯一键是 (business_id, subdomain, port), 不含 hash。
+    #   hash 在 key 里时, 同一资产在同一轮出现两个 hash 会产生两条 record,
+    #   两条都进 _upsert_web_records 打同一行, 谁最后写谁赢 —— 顺序即真相。
+    #   去掉后一资产一条 record, 裁决权交回数据库唯一键。
+    #
+    # hash 的角色不变: 仍然作为 payload 传给 _upsert_web_records, 由
+    # web_hashes 的 UNIQUE(business_id, response_hash) 内容寻址决定 hash_id 是
+    # 新增还是复用历史簇(hash 内容回退时复用旧簇, 现有代码的 ON CONFLICT +
+    # 二次 SELECT 已覆盖, 不需要在这里判断)。
+    records: dict[tuple[str, int], dict[str, Any]] = {}
+    fallback_ip_count = 0
     for record in raw:
         hash_value = record.get("response_hash") or f"{record['status_code']}|{record['content_length']}"
-        domains = _resolve_host(record["host"], ip_domains)
-        if not domains:
-            domains = [record["host"]]
         record["response_hash"] = hash_value
-        record["domain"] = domains[0]
-        for domain in domains:
-            key = (domain, record["port"], hash_value)
-            if key not in records:
-                records[key] = dict(record, domain=domain)
+
+        # 资产身份优先用 input 里的真实 subdomain; 拿不到才回退 IP 反查。
+        domain = record.get("real_sub")
+        if not domain:
+            domains = _resolve_host(record["host"], ip_domains)
+            domain = domains[0] if domains else record["host"]
+            fallback_ip_count += 1
+        record["domain"] = domain
+
+        # 不做跨域名复制。同一 (domain, port) 后到的覆盖先到的 —— 与
+        # web_subdomains 的 ON CONFLICT(business_id, subdomain, port) 语义一致。
+        records[(domain, record["port"])] = record
+
+    if fallback_ip_count:
+        # 兜底路径的 record 响应字段来自 IP 反查, 可信度低于 input 路径。
+        # 只记计数, 不静默: 上游格式变了这里会显式暴露。
+        print(
+            "[import] WARN: %d/%d 条 web record 的 input 无真实 subdomain, "
+            "已回退 IP 反查确定资产身份"
+            % (fallback_ip_count, len(raw)),
+            file=sys.stderr,
+        )
     return list(records.values())
 
 
@@ -391,6 +613,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_web_subdomains_hash_id ON web_subdomains(hash_id);
         CREATE INDEX idx_web_subdomains_subdomain ON web_subdomains(subdomain);
         """)
+    # web_subdomains 新增 ips 列(2026-10-04):import_scan_results.py:798-813
+    # 写入 httpx JSONL 提取的 host_ip + a[] 数组,schema.sql 已加,
+    # 老库需要 ALTER 升级。
+    if ws_cols and "ips" not in ws_cols:
+        conn.execute("ALTER TABLE web_subdomains ADD COLUMN ips TEXT DEFAULT '[]'")
     conn.executescript("""
     CREATE TABLE IF NOT EXISTS scopes (
         id INTEGER PRIMARY KEY,
@@ -468,6 +695,24 @@ def create_tables(conn: sqlite3.Connection) -> None:
         candidates     INTEGER,
         resolved       INTEGER
     );
+    -- brute_runs: shuffledns 字典爆破节奏表 (对齐 alterx_runs schema)
+    -- 2026-09-15: 新增,与 alterx_runs 同结构,只是 source 不同
+    CREATE TABLE IF NOT EXISTS brute_runs (
+        business_id    INTEGER PRIMARY KEY REFERENCES businesses(id),
+        last_ran_at    TEXT NOT NULL,
+        wordlist_hash  TEXT NOT NULL,
+        candidates     INTEGER,
+        resolved       INTEGER
+    );
+    -- hash_simhash_map: (mmh3 response_hash -> body_simhash) lookup table.
+    -- See modules/main/db/migrate_hash_simhash_map.sql for full rationale.
+    -- Mirrored here so in-process import (cmd_scan_onesite) can build a
+    -- fresh db without depending on init_db having been run first.
+    CREATE TABLE IF NOT EXISTS hash_simhash_map (
+        response_hash TEXT    NOT NULL,
+        body_simhash  INTEGER NOT NULL,
+        PRIMARY KEY (response_hash)
+    );
     """)
     # 旧库迁移:scopes 表加 is_wildcard 列 + permutation_state 表
     cols = {row[1] for row in conn.execute("PRAGMA table_info(scopes)").fetchall()}
@@ -493,6 +738,18 @@ def create_tables(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX idx_perm_due ON permutation_state(next_attempt_at)
             WHERE status IN ('nxdomain', 'timeout');
+        """)
+
+    # brute_runs (2026-09-15 新增):与 alterx_runs 同结构,补齐已有库
+    if "brute_runs" not in tables:
+        conn.executescript("""
+        CREATE TABLE brute_runs (
+            business_id    INTEGER PRIMARY KEY REFERENCES businesses(id),
+            last_ran_at    TEXT NOT NULL,
+            wordlist_hash  TEXT NOT NULL,
+            candidates     INTEGER,
+            resolved       INTEGER
+        );
         """)
 
 
@@ -568,26 +825,180 @@ def _upsert_web_records(conn: sqlite3.Connection, business_id: int,
         if is_new_hash:
             new_hash_ids_list.append(hash_id)
         seen_hash_counts.setdefault(hash_id, set()).add((subdomain, record["port"]))
+        # Persist body_simhash into the (mmh3 -> simhash) lookup table so
+        # future UPSERTs of the same response_hash (across runs / businesses)
+        # can use it for near-duplicate body detection. INSERT OR IGNORE
+        # because the same mmh3 may reappear before simhash changed
+        # (deterministic algorithm => same body => same simhash, so the
+        # existing row is already correct).
+        body_sim_value = record.get("body_simhash")
+        if body_sim_value is not None:
+            # B-fix (2026-09-26, B-skip pre-check): httpx body_simhash is unsigned
+            # 64-bit (range 0..2**64-1). SQLite INTEGER is signed 64-bit
+            # (-2**63..2**63-1). The original `int(...)` + INSERT would raise
+            # OverflowError at sqlite3 binding time when value >= 2**63, aborting
+            # _upsert_web_records mid-transaction and rolling back every web
+            # record of that batch. INSERT OR IGNORE cannot rescue it: the
+            # OverflowError is raised in the Python sqlite3 binding layer, before
+            # SQLite sees the SQL.
+            #
+            # Real fix: range pre-check. Only INSERT when the value fits in
+            # signed 64-bit; otherwise leave hash_simhash_map untouched and
+            # continue with downstream UPSERTs (web_hashes / web_subdomains),
+            # which are unaffected because nothing here raises. No continue,
+            # no try/except, no exception swallowing in user-visible flow.
+            #
+            # hash_simhash_map currently has no live readers (the simhash
+            # branch at line 712+ is dead code behind `if False` since
+            # 2026-09-16, see comment at line 712). Dropping an overflow row is
+            # functionally a no-op. If the simhash branch is ever revived, its
+            # SELECT-side must NOT be confused by missing rows for these
+            # records (treat as "unknown", same as row absence).
+            try:
+                _bsim = int(body_sim_value)
+            except (TypeError, ValueError):
+                _bsim = None
+            if _bsim is not None and 0 <= _bsim < (1 << 63):
+                conn.execute(
+                    """INSERT OR IGNORE INTO hash_simhash_map (response_hash, body_simhash)
+                       VALUES (?, ?)""",
+                    (response_hash, _bsim),
+                )
+        # Capture OLD web_subdomains state BEFORE the UPSERT to detect
+        # hash_id changes in the live-active path. trg_ws_au (DEPRECATED 2026-10-07) on hash_id
+        # change will set change_type=2; we may downgrade it to 0 below
+        # if the new and old body_simhash are within the hamming threshold.
+        # We need OLD.response_hash (via JOIN web_hashes) so we can look up
+        # the OLD body_simhash in hash_simhash_map later.
+        prior_ws = conn.execute(
+            """SELECT ws.hash_id, ws.is_active, wh.response_hash
+               FROM web_subdomains ws
+               JOIN web_hashes wh ON wh.id = ws.hash_id
+               WHERE ws.business_id = ? AND ws.subdomain = ? AND ws.port = ?""",
+            (business_id, subdomain, record["port"]),
+        ).fetchone()
+        prior_hash_id = prior_ws[0] if prior_ws else None
+        prior_was_active = bool(prior_ws[1]) if prior_ws else False
+        prior_response_hash = prior_ws[2] if prior_ws else None
         existing = conn.execute(
             "SELECT first_seen FROM web_subdomains WHERE business_id = ? AND subdomain = ? AND port = ?",
             (business_id, subdomain, record["port"]),
         ).fetchone()
         first_seen = existing[0] if existing else fetched_at
+        # 2026-10-03: 写 ips 列(从 httpx JSONL 提取的 host_ip + a[] 数组)。
+        # 优先 record['ips'](parse_json_web 已经从 item 顶层提取),
+        # 若空则 fallback parse raw_json(老数据 / httpx 字段改名时的兜底)。
+        ips_value = record.get("ips") or "[]"
+        if ips_value == "[]":
+            raw = record.get("raw_json")
+            if raw:
+                try:
+                    _j = json.loads(raw)
+                    _ips: list[str] = []
+                    _hi = _j.get("host_ip")
+                    if isinstance(_hi, str) and _hi:
+                        _ips.append(_hi)
+                    _a = _j.get("a")
+                    if isinstance(_a, list):
+                        for _x in _a:
+                            if isinstance(_x, str) and _x and _x not in _ips:
+                                _ips.append(_x)
+                    if _ips:
+                        ips_value = json.dumps(_ips, ensure_ascii=False)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        # 2026-10-07: write curr_body (round 1) and roll prev_body <- curr_body
+        # (round 2+) so the inline algo_diff block has prev_body != NULL on the
+        # second cycle and compare() emits a real verdict. Without this,
+        # prev_body is NULL on round 1 (no previous cycle), the inline block
+        # skips via `_prev_row[4] is not None`, and change_type stays at
+        # whatever the trigger wrote — never upgrades to 0/2 from the
+        # round-2 fixture swap. The `prev_body = curr_body` self-ref reads
+        # the row's CURRENT value (round 1 body, NOT excluded.*) and writes
+        # it to prev_body in the same statement; `curr_body = excluded.curr_body`
+        # then writes round 2 body. Both run atomically in one UPSERT.
+        # CASE WHEN guards round 1 (curr_body IS NULL on first INSERT) so
+        # prev_body stays NULL on the first cycle instead of being clobbered
+        # by NULL = NULL.
+        _curr_body_bytes = record.get("body")
+        if isinstance(_curr_body_bytes, (bytes, bytearray)) and _curr_body_bytes:
+            _curr_body_blob = zlib.compress(bytes(_curr_body_bytes), level=6)
+        else:
+            _curr_body_blob = None
+        _curr_content_type = _s(record.get("content_type"))
         conn.execute(
             """INSERT INTO web_subdomains
                (business_id, hash_id, subdomain, port, url, status_code, content_length, title, technologies,
-                first_seen, last_seen, fetched_at, is_active, raw_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                first_seen, last_seen, fetched_at, is_active, raw_json, ips,
+                curr_body, content_type, final_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?,
+                       ?, ?, ?)
                ON CONFLICT(business_id, subdomain, port) DO UPDATE SET
                  hash_id = excluded.hash_id, url = excluded.url,
                  status_code = excluded.status_code, content_length = excluded.content_length,
                  title = excluded.title, technologies = excluded.technologies,
                  last_seen = excluded.last_seen, fetched_at = excluded.fetched_at,
-                 is_active = 1, raw_json = excluded.raw_json""",
+                 is_active = 1, raw_json = excluded.raw_json,
+                 ips = excluded.ips,
+                 prev_body = CASE WHEN curr_body IS NOT NULL THEN curr_body ELSE prev_body END,
+                 curr_body = excluded.curr_body,
+                 content_type = excluded.content_type,
+                 final_url = excluded.final_url""",
             (business_id, hash_id, subdomain, record["port"], _s(record.get("url")), record.get("status_code"),
              record.get("content_length"), _s(record.get("title")), _s(record.get("technologies")),
-             first_seen, fetched_at, fetched_at, _s(record.get("raw_json"))),
+             first_seen, fetched_at, fetched_at, _s(record.get("raw_json")), ips_value,
+             _curr_body_blob, _curr_content_type, _s(record.get("final_url"))),
         )
+        # Near-duplicate downgrade (live-active path only):
+        # If hash_id actually changed AND the previous row was active,
+        # 2026-10-07 refactor: trg_ws_au 已 no-op 化,不再 set change_type=2。
+#     复活位的初值由 Python 显式写 (commit 2)。
+        # Look up the simhash on both sides; if both are present and the
+        # hamming distance is within threshold, the body is "near-duplicate"
+        # (e.g. ad slot, timestamp jitter, CDN whitespace drift) so we
+        # downgrade change_type to 0 to suppress false-positive changes.
+        #
+        # DEPRECATED 2026-09-16: this whole simhash branch has been superseded
+        # by the algo_diff block immediately below. The branch is kept for
+        # now (a) so the existing simhash infrastructure (hash_simhash_map
+        # table + hamming helper) stays documented in source, and (b) as a
+        # fallback if algo_diff is ever disabled. The branch is currently a
+        # no-op — algo_diff owns the final change_type decision. See
+        # modules/main/daily/lib/algo_diff/README.md for the rationale.
+        # 2026-10-07 refactor: DEPRECATED simhash 近邻降级写 change_type=0 (commit 1 后续).
+        # E 已由 if False 早退,本注释仅为与 B 风格统一,便于 grep 发现。
+        # 原因: import 阶段不应写 change_type=0,按分工 "diff 写 0/2"。
+        # 原 simhash 降级逻辑 (回滚时把 if False 改成 if True: 即可):
+        #   - 取 prior_response_hash 与 new response_hash 的 body_simhash
+        #   - 若 hamming_simhash(...) <= SIMHASH_HAMMING_THRESHOLD 则写 change_type = 0
+        if False and (prior_hash_id is not None
+                and prior_hash_id != hash_id
+                and prior_was_active):
+            rows = conn.execute(
+                """SELECT
+                       (SELECT body_simhash FROM hash_simhash_map WHERE response_hash = ?),
+                       (SELECT body_simhash FROM hash_simhash_map WHERE response_hash = ?)""",
+                (prior_response_hash, response_hash),
+            ).fetchone()
+            old_sim, new_sim = rows[0], rows[1]
+            if old_sim is not None and new_sim is not None:
+                if hamming_simhash(int(old_sim), int(new_sim)) <= SIMHASH_HAMMING_THRESHOLD:
+                    conn.execute(
+                        """UPDATE web_subdomains SET change_type = 0
+                           WHERE business_id = ? AND subdomain = ? AND port = ?""",
+                        (business_id, subdomain, record["port"]),
+                    )
+        # The similarity verdict used to be computed here by importing the
+        # retired Python diff package in-process. That engine now lives in
+        # its own repository and is reached through the command line, so
+        # this path no longer computes a verdict. The columns that used to
+        # record it stay in the schema and are filled by that engine when
+        # it is installed; the daily snapshot copies them without
+        # interpreting them. Nothing in this repository depends on the
+        # values, and the block was best-effort by construction, so the
+        # import outcome is unchanged.
+
+        # =====================================================================
         web_count += 1
     for hash_id, subdomains in seen_hash_counts.items():
         conn.execute(
@@ -617,6 +1028,14 @@ def persist(conn: sqlite3.Connection, business: str, targets: list[str], exclude
 
     conn.execute("UPDATE web_subdomains SET is_active = 0 WHERE business_id = ?", (business_id,))
     conn.execute("UPDATE tcp_assets SET is_active = 0 WHERE business_id = ?", (business_id,))
+    # 2026-10-08: reset ct for this business。临时关闭 trigger + diff.py + algo_diff.write
+    # 路径之后, web_subdomains.change_type 唯一的 reset 入口。后续 diff 阶段
+    # (未开启时) 才从 baseline=0 开始累计 1/2/4/8。
+    _cur = conn.execute(
+        "UPDATE web_subdomains SET change_type = 0 WHERE business_id = ?",
+        (business_id,),
+    )
+    print(f"[change_type] import_scan_results.py:1083  reset change_type=0  table=web_subdomains  business_id={business_id}  rows={_cur.rowcount}")
 
     _hash_ids, web_count, _new_hash_ids = _upsert_web_records(conn, business_id, fetched_at, web)
 

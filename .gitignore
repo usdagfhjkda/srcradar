@@ -105,6 +105,12 @@ modules/private/*
 # stray 文件被误 add。
 modules/public/srcradar-mcp-server/
 
+# ---- srcradar-algo-diff-cpp(独立 repo,只在工作树留目录占位,不进 git) ----
+# 仓库: usdagfhjkda/srcradar-algo-diff-cpp
+# 落盘目录是 modules/public/algo_diff_cpp/(每日流水线按这个路径调用),
+# 仓库名与目录名不同,两种拼写都屏蔽,避免误 add。
+modules/public/algo_diff_cpp/
+modules/public/srcradar-algo-diff-cpp/
 # ---- 5. 内部使用脚本(不进 OSS) ----
 # install-internal.sh 是内部部署用脚本,public 版本用 install.sh 即可。
 # 保留本地副本(用于内部机器部署),但不入仓。
@@ -113,3 +119,17 @@ install-internal.sh
 # ---- 6. config 目录(本地工作树配置,不入 OSS)----
 config/*
 !config/.gitkeep
+
+# ---- 7. 插件模块真配置(operator 自填,不入 OSS)----
+# example 模板(入仓) vs 真值(屏蔽)。顶层 config/* 只匹配 modules 外的 config/,
+# 插件自带 config/ 在子目录,不会被它盖住,需逐条显式屏蔽。
+modules/public/katana/config/katana.conf
+modules/public/notify/config/notify.conf
+modules/public/notify/config/notify.conf.bak
+modules/public/health/config/health.conf
+modules/public/health/.lock
+modules/public/http/config/http.conf
+
+# ---- 8. CI fixture 原始备份 ----
+# smoke_e2e 的 fixture 镜像备份,跟 tests/fixtures/ 下同名文件内容重复。
+tests/fixtures/.ci-originals/

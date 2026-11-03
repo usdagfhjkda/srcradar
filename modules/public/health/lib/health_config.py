@@ -1,0 +1,105 @@
+"""
+modules/public/health/lib/health_config.py — 解析 config/health.conf
+
+格式 (同 modules/public/notify/lib/notify_config.py):
+    key=value        value 末尾空白自动 trim
+    # 整行注释     行内 # 后内容忽略
+
+字段:
+    DISK_WARN_PCT            disk usage >= 该百分比记 warn (默认 80)
+    DISK_ALERT_PCT           disk usage >= 该百分比记 alert (默认 90)
+    CPU_LOAD5_PER_NPROC      5min load average / nproc 上限 (默认 2.0)
+    CPU_PCT_ALERT            top -bn1 瞬时 CPU 占用告警线 (默认 95)
+    MEM_ALERT_PCT            memory usage >= 该百分比记 alert (默认 90)
+    CRON_MAX_AGE_HOURS       cron 任务日志 mtime 超过该小时数告警 (默认 25)
+    WATCHED_LOGS             空格分隔的日志路径列表 (预置 dashboard_watchdog.log)
+
+用法:
+    python3 health_config.py <config_path>           输出 shell-eval 行
+    python3 health_config.py <config_path> <key>     输出单 key 值
+    python3 health_config.py --help                  本帮助
+
+设计:
+    - 与 notify_config.py 同款 parse_config 模式,纯 stdlib
+    - WATCHED_LOGS 这种空格分隔多值,parse 后保持为原始 string,
+      由调用方 split() 处理
+    - 真配置(operator 自填)走 config/health.conf (.gitignore 屏蔽),
+      本文件只读,不入仓
+"""
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+DOC = """\
+health_config.py — 解析 config/health.conf (key=value)
+
+用法:
+    python3 health_config.py <config_path>           输出 shell-eval 形式
+    python3 health_config.py <config_path> <key>     输出单 key 值
+    python3 health_config.py --help                  本帮助
+
+退出码: 0=ok 1=参数 2=文件不存在 3=语法
+"""
+
+
+def parse_config(path: Path) -> dict[str, str] | None:
+    """读取 key=value 配置文件;空行 / 整行 # / 行内 # 后内容忽略。
+
+    Returns None 表示文件不存在或解析失败;返回空 dict 表示文件全空。
+    """
+    out: dict[str, str] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        print(f"[health_config] cannot read {path}: {exc}", file=sys.stderr)
+        return None
+    for raw in text.splitlines():
+        if "#" in raw:
+            raw = raw.split("#", 1)[0]
+        if not raw.strip():
+            continue
+        if "=" not in raw:
+            print(f"[health_config] syntax error (no '='): {raw!r}", file=sys.stderr)
+            return None
+        key, _, value = raw.partition("=")
+        key, value = key.strip(), value.rstrip()
+        if not KEY_RE.match(key):
+            print(f"[health_config] invalid key: {key!r}", file=sys.stderr)
+            return None
+        out[key] = value
+    return out
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(DOC, file=sys.stderr)
+        return 1
+    if sys.argv[1] in ("-h", "--help"):
+        print(DOC)
+        return 0
+
+    cfg_path = Path(sys.argv[1])
+    if not cfg_path.is_file():
+        print(f"[health_config] config not found: {cfg_path}", file=sys.stderr)
+        return 2
+
+    kv = parse_config(cfg_path)
+    if kv is None:
+        return 3
+
+    if len(sys.argv) >= 3:
+        print(kv.get(sys.argv[2], ""))
+        return 0
+
+    for k, v in kv.items():
+        safe = v.replace("'", "'\"'\"'")
+        print(f"{k}='{safe}'")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

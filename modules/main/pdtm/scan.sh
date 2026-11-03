@@ -14,6 +14,9 @@
 export PATH="$PATH:$HOME/.pdtm/go/bin"
 source "$(cd "$(dirname "$0")" && pwd)/../lib/load_config.sh"
 load_config_set "$(cd "$(dirname "$0")" && pwd)/../../../config/pdtm.conf" "$(cd "$(dirname "$0")" && pwd)/../lib"
+# 2026-10-03: source resolve_tools.sh — httpx/dnsx 路径从 config/pdtm.conf
+# 自动读取(env 覆盖 > conf 注入 > 默认 fallback),不再硬编码 ~/.pdtm/go/bin/。
+source "$(cd "$(dirname "$0")" && pwd)/lib/resolve_tools.sh"
 
 
 
@@ -111,8 +114,8 @@ if [ ! -s "$GLOB_HOSTS" ]; then
     # the "no glob base" skip path below).
     [ -s "$DNSX_OUT" ] && sort -u "$DNSX_OUT" -o "$DNSX_OUT"
     echo "[+] 精确快路径:$(wc -l < "$DNSX_OUT") 条已入 DNSX_OUT,继续跑 dnsx"
-    # dnsx 解析精确子域 → 写 ALIVE(给 scanner.sh 用)
-    DNSX_BIN="${DNSX_BIN:-$HOME/.pdtm/go/bin/dnsx}"
+    # 2026-10-03: dnsx 路径经 resolve_tools.sh 解析(env 覆盖 > conf 注入 > 默认)
+    DNSX_BIN=$(resolve_tool dnsx "$HOME/.pdtm/go/bin/dnsx")
     [ -x "$DNSX_BIN" ] || DNSX_BIN=$(command -v dnsx || echo /opt/srcradar/bin/dnsx)
     [ -x "$DNSX_BIN" ] || DNSX_BIN=$(command -v dnsx || true)
     if [ -x "$DNSX_BIN" ]; then
@@ -200,8 +203,8 @@ if [ -s "$SUBS_TMP" ]; then
 fi
 
 # ===== 2) dnsx 解析存活 =====
-# dnsx 路径:硬编码默认 ~/.pdtm/go/bin/dnsx,可用环境变量 DNSX_BIN 覆盖
-DNSX_BIN="${DNSX_BIN:-$HOME/.pdtm/go/bin/dnsx}"
+# 2026-10-03: dnsx 路径经 resolve_tools.sh 解析(env 覆盖 > conf 注入 > 默认)
+DNSX_BIN=$(resolve_tool dnsx "$HOME/.pdtm/go/bin/dnsx")
 [ -x "$DNSX_BIN" ] || { echo "[-] 缺少 dnsx: $DNSX_BIN" >&2; exit 1; }
 echo "[*] dnsx -> alive.txt ..."
 if [ -s "$SUBS_TMP" ]; then
@@ -332,6 +335,153 @@ fi
 
 # ===== 4) 解析候选(alterx 派生 + subfinder 已知子域,一起送 dnsx) =====
 # 注: ALIVE 是 glob 模式导出的 SUBS_TMP 的 dnsx 结果;精确子域已在前置快速通道
+# ===== 3.8) shuffledns brute(字典爆破,业务规模感知抽样,与 alterx 并联) =====
+# 最小实现:Top + Rolling 两模式共用抽样量,30 天 cadence 与 alterx 对齐
+# brute 自算 base:从 $TARGET 跑 target_glob.py all-bases(精确+glob 都支持)
+echo "[*] brute 节奏闸门 ..."
+BRUTE_RUN_THIS_TURN=0
+if [ -n "${SKIP_BRUTE:-}" ]; then
+    echo "[*] brute 跳过 (SKIP_BRUTE env)"
+elif python3 brute_runs.py should-run \
+        --db "$DB" --business-id "$BUSINESS_ID" \
+        --cadence-days "${BRUTE_CADENCE_DAYS:-30}" \
+        ${FORCE_BRUTE:+--force}; then
+    BRUTE_RUN_THIS_TURN=1
+    echo "[*] brute 节奏闸门:本轮跑 brute"
+else
+    echo "[*] brute 节奏闸门:本轮跳过 brute (cadence=${BRUTE_CADENCE_DAYS:-30}d)"
+fi
+
+if [ "$BRUTE_RUN_THIS_TURN" = "1" ] && [ -s "$TARGET" ]; then
+    SHUFFLEDNS_BIN="${SHUFFLEDNS_BIN:-$HOME/.pdtm/go/bin/shuffledns}"
+    [ -x "$SHUFFLEDNS_BIN" ] || SHUFFLEDNS_BIN=$(command -v shuffledns || true)
+
+    if [ ! -x "$SHUFFLEDNS_BIN" ]; then
+        echo "[!] shuffledns 缺失,跳过 brute 阶段"
+    else
+        # 0) brute 自算 base(从 $TARGET,精确+glob 都支持)
+        # shuffledns -d 不接受换行,转 CSV(对齐 dnsx RESOLVERS_CSV 的处理)
+        BRUTE_BASES=$(python3 target_glob.py all-bases --input "$TARGET" 2>/dev/null | tr "\n" "," | sed "s/,$//" || true)
+        if [ -z "$BRUTE_BASES" ]; then
+            echo "[!] brute 无法从 $TARGET 提取 base,跳过"
+        else
+            BRUTE_TMPDIR=$(mktemp -d)
+            BRUTE_MODE="${BRUTE_MODE:-top}"
+            # wordlist 路径查找链(三段,谁存在用谁):
+            #   1. $wordlists_dir/<file>      ← config/pdtm.conf 提供(由 install_wordlists 写入)
+            #   2. <模块目录>/wordlists/<file> ← 源码版默认(本机普通用户)
+            #   3. /opt/srcradar/wordlists/<file> ← docker / root 全局路径
+            #   4. /usr/share/srcradar/wordlists/<file> ← 兜底(老 docker 镜像)
+            BRUTE_MODULE_DIR="$(cd "$(dirname "$0")" && pwd)"
+            BRUTE_WL_DIR="${wordlists_dir:-$BRUTE_MODULE_DIR/wordlists}"
+            case "$BRUTE_MODE" in
+                rolling)
+                    BRUTE_WL_BASE="dns-Jhaddix-clean.txt"
+                    ;;
+                top|*)
+                    BRUTE_WL_BASE="subdomains-top1million-20000.txt"
+                    ;;
+            esac
+            BASE_WL=""
+            for cand in "$BRUTE_WL_DIR/$BRUTE_WL_BASE" \
+                        "/opt/srcradar/wordlists/$BRUTE_WL_BASE" \
+                        "/usr/share/srcradar/wordlists/$BRUTE_WL_BASE"; do
+                if [ -f "$cand" ]; then
+                    BASE_WL="$cand"
+                    break
+                fi
+            done
+
+            if [ ! -f "$BASE_WL" ]; then
+                echo "[!] wordlist 缺失: $BASE_WL,跳过 brute"
+            else
+                BRUTE_BASE_COUNT=$(echo "$BRUTE_BASES" | wc -l)
+                echo "[*] brute 提取 base: $BRUTE_BASE_COUNT 个 (mode=$BRUTE_MODE)"
+
+                # wordlist 准备
+                BRUTE_WORDLIST="$BRUTE_TMPDIR/brute_wordlist.txt"
+                awk -F. '{for(i=1;i<NF;i++) print $i}' "$ALTERX_OUT" 2>/dev/null \
+                    | sort -u > "$BRUTE_TMPDIR/alterx_words.txt"
+                cat "$BASE_WL" "$BRUTE_TMPDIR/alterx_words.txt" | sort -u > "$BRUTE_WORDLIST"
+
+                # 业务规模感知抽样
+                if [ "$LINES" -lt 20 ]; then
+                    SAMPLE_SIZE=1000
+                elif [ "$LINES" -lt 100 ]; then
+                    SAMPLE_SIZE=5000
+                elif [ "$LINES" -lt 500 ]; then
+                    SAMPLE_SIZE=20000
+                elif [ "$LINES" -lt 5000 ]; then
+                    SAMPLE_SIZE=50000
+                else
+                    SAMPLE_SIZE=100000
+                fi
+
+                # 自适应减半
+                BASE_COUNT=$BRUTE_BASE_COUNT
+                BRUTE_MAX_CANDIDATES="${BRUTE_MAX_CANDIDATES:-1000000}"
+                attempts=0
+                while [ $(( BASE_COUNT * SAMPLE_SIZE )) -gt "$BRUTE_MAX_CANDIDATES" ] && [ "$attempts" -lt 5 ]; do
+                    SAMPLE_SIZE=$(( (SAMPLE_SIZE + 1) / 2 ))
+                    BASE_COUNT_LIMIT=$(( BRUTE_MAX_CANDIDATES / SAMPLE_SIZE ))
+                    if [ "$BASE_COUNT" -gt "$BASE_COUNT_LIMIT" ]; then
+                        echo "$BRUTE_BASES" | head -n "$BASE_COUNT_LIMIT" > "$BRUTE_TMPDIR/bases.limited"
+                        BRUTE_BASES=$(cat "$BRUTE_TMPDIR/bases.limited")
+                        BASE_COUNT=$BASE_COUNT_LIMIT
+                    fi
+                    attempts=$((attempts + 1))
+                done
+                [ "$attempts" -gt 0 ] && echo "[brute] 自适应减半 $attempts 次, SAMPLE_SIZE=$SAMPLE_SIZE"
+
+                # 确定性抽样(避免按字典序选到全数字 token)
+                # 用 wordlist 内容 hash 作为 -R seed,保证同 wordlist → 同抽样
+                WL_LINES=$(wc -l < "$BRUTE_WORDLIST")
+                if [ "$WL_LINES" -gt "$SAMPLE_SIZE" ]; then
+                    echo "[*] wordlist 抽样: $WL_LINES -> $SAMPLE_SIZE"
+                    WL_SEED=$(sha256sum "$BRUTE_WORDLIST" | cut -c1-8)
+                    # sort -R 用稳定 seed;--random-source=/dev/urandom + head -n
+                    # 组合给出稳定抽样(同 WL → 同抽样,不同 WL → 不同抽样)
+                    { sort -R --random-source=<(yes "$WL_SEED" | head -c 4096) "$BRUTE_WORDLIST" || true; } \
+                        | head -n "$SAMPLE_SIZE" > "${BRUTE_WORDLIST}.sampled"
+                    mv "${BRUTE_WORDLIST}.sampled" "$BRUTE_WORDLIST"
+                fi
+
+                BRUTE_WORDLIST_HASH=$(sha256sum "$BRUTE_WORDLIST" | cut -c1-12)
+
+                BRUTE_OUT="brute.txt"
+                : > "$BRUTE_OUT"
+                "$SHUFFLEDNS_BIN" \
+                    -mode bruteforce \
+                    -d "$BRUTE_BASES" \
+                    -ad \
+                    -w "$BRUTE_WORDLIST" \
+                    -r "$resolvers_file" \
+                    -sw -wt 250 \
+                    -t 100 \
+                    -batch-size 200000 \
+                    -silent \
+                    -o "$BRUTE_OUT" || true
+
+                # 守门 + cache filter
+                if [ -s "$BRUTE_OUT" ]; then
+                    grep -E -f targets.regex "$BRUTE_OUT" > "${BRUTE_OUT}.try" && mv "${BRUTE_OUT}.try" "$BRUTE_OUT"
+                    [ -s excludes.regex ] && grep -v -E -f excludes.regex "$BRUTE_OUT" > "${BRUTE_OUT}.try" && mv "${BRUTE_OUT}.try" "$BRUTE_OUT"
+                    python3 permutation_cache.py filter \
+                        --db "$DB" --business-id "$BUSINESS_ID" --wordlist-hash "$BRUTE_WORDLIST_HASH" \
+                        < "$BRUTE_OUT" > "${BRUTE_OUT}.try" && mv "${BRUTE_OUT}.try" "$BRUTE_OUT"
+                fi
+            fi
+        fi
+    fi
+fi
+
+# ===== 3.9) 合并 ALTERX_OUT + BRUTE_OUT(去重) =====
+BRUTE_OUT="${BRUTE_OUT:-brute.txt}"
+if [ -s "$BRUTE_OUT" ]; then
+    cat "$ALTERX_OUT" "$BRUTE_OUT" 2>/dev/null | sort -u > "${DNSX_OUT}.try"
+    mv "${DNSX_OUT}.try" "$DNSX_OUT"
+fi
+
 # 写进 DNSX_OUT。这里改 -o 为 append,确保 glob 流与精确子域合并(去重在 4.5 之前
 # 加 sort -u 完成)。
 echo "[*] dnsx on candidates ..."
@@ -364,6 +514,16 @@ if [ "$ALTERX_RUN_THIS_TURN" = "1" ]; then
     python3 permutation_cache.py record \
         --db "$DB" --business-id "$BUSINESS_ID" --wordlist-hash "$WORDLIST_HASH" \
         --candidates "$ALTERX_OUT" --resolved "$DNSX_OUT" || true
+fi
+
+# brute_runs 单独 mark(不与 alterx_runs 共享事务,因为 brute 走独立 wordlist_hash)
+if [ "$BRUTE_RUN_THIS_TURN" = "1" ]; then
+    BRUTE_OUT="${BRUTE_OUT:-brute.txt}"
+    BRUTE_CANDIDATES=$( [ -s "$BRUTE_OUT" ] && wc -l < "$BRUTE_OUT" || echo 0 )
+    python3 brute_runs.py mark \
+        --db "$DB" --business-id "$BUSINESS_ID" \
+        --wordlist-hash "${BRUTE_WORDLIST_HASH:-brute-default}" \
+        --candidates "$BRUTE_CANDIDATES" --resolved 0 || true
 fi
 
 # ===== 6) 泛解析域：只走 subfinder,按 base 去重后追加 =====
