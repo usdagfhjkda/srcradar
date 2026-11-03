@@ -228,27 +228,54 @@ install_wordlists() {
     return 0
 }
 
-# ---- 写 config/pdtm.conf 的 wordlists_dir=<abs_path> 行 ----
-# 已有 wordlists_dir= 行替换 value;没有追加;chmod 600(与其他模块一致)
+# ---- 写 config/pdtm.conf 的运行时路径字段 ----
+# 已有同名字段替换 value;没有则追加;chmod 600(与其他模块一致)。
+#
+# 写 4 个字段:
+#   wordlists_dir   词表目录(本模块刚装好的)
+#   httpx_bin       httpx 可执行文件
+#   dnsx_bin        dnsx 可执行文件
+#   resolvers_file  DNS 解析器列表(仓内自带)
+#
+# 后 3 个以前由部署侧单独写入, 本模块不负责, 导致装完配置仍不完整: 依赖
+# 工具路径的下游 (T1/T2 reverify helper / check_wildcard) 会因找不到 httpx
+# 或解析器列表而失败。这里由安装器自己写全, 装完即可用。
+#
+# 路径一律写绝对路径: 消费方 (check_wildcard.sh) 按该值直接读文件, 而它的
+# cwd 是调用方而非仓库根, 相对路径在那里会找不到。
 write_wordlists_config() {
     local wl_dir="$1"
     local cfg="$SCRIPT_DIR/../../../config/pdtm.conf"
+    local tool_dir="$HOME/.pdtm/go/bin"
+    local resolvers="$SCRIPT_DIR/resolvers"
     mkdir -p "$(dirname "$cfg")"
 
     local tmp
     tmp="$(mktemp)"
     if [ -f "$cfg" ]; then
-        awk '/^wordlists_dir=/ { next } { print }' "$cfg" > "$tmp" || cp /dev/null "$tmp"
+        awk '
+            /^wordlists_dir=/ { next }
+            /^httpx_bin=/     { next }
+            /^dnsx_bin=/      { next }
+            /^resolvers_file=/ { next }
+            { print }
+        ' "$cfg" > "$tmp" || cp /dev/null "$tmp"
     fi
 
     cat >> "$tmp" <<EOF
 wordlists_dir=$wl_dir
+httpx_bin=$tool_dir/httpx
+dnsx_bin=$tool_dir/dnsx
+resolvers_file=$resolvers
 EOF
 
     mv "$tmp" "$cfg"
     chmod 600 "$cfg"
     log "config written: $cfg"
     log "  wordlists_dir=$wl_dir"
+    log "  httpx_bin=$tool_dir/httpx"
+    log "  dnsx_bin=$tool_dir/dnsx"
+    log "  resolvers_file=$resolvers"
 }
 
 # ---- uninstall ----
