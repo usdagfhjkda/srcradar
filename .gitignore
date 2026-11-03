@@ -127,4 +127,5 @@ modules/public/katana/config/katana.conf
 modules/public/notify/config/notify.conf
 modules/public/notify/config/notify.conf.bak
 modules/public/health/config/health.conf
+modules/public/health/.lock
 modules/public/http/config/http.conf
