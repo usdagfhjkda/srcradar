@@ -35,6 +35,11 @@
 
 set -euo pipefail
 
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/modules/main/lib/i18n.sh"
+
 # ---- the configuration (change it here to upgrade the upstream version) ----
 # Note: the upstream vendors such as ENScan_GO / cdncheck are pulled by the
 # install.sh of the matching module
@@ -110,7 +115,7 @@ err()  { printf "[init][err]  %s\n" "$*" >&2; }
 # ---- the environment check ----
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || {
-        err "缺少命令: $1"
+        err "$(t root.init.missing_command cmd="$1")"
         return 1
     }
 }
@@ -226,21 +231,21 @@ check_one_dep() {
 check_deps() {
     MISSING_DEP=0
     MISSING_OPT=0
-    printf "[init] 完整功能跑通 — 环境检查\n"
-    printf "[init] 图例: [B]=build 期  [C]=运行时必需  [S]=推荐装(没装数据不全)\n\n"
+    printf "%s\n" "$(t root.init.check_deps_header)"
+    printf "%s\n\n" "$(t root.init.check_deps_legend)"
     for line in "${DEPS[@]}"; do
         check_one_dep "$line" || true
     done
     printf "\n"
     if [ "$MISSING_DEP" = 0 ] && [ "$MISSING_OPT" = 0 ]; then
-        log "环境 OK,所有依赖都齐"
+        log "$(t root.init.deps_all_present)"
         return 0
     fi
     if [ "$MISSING_DEP" = 1 ]; then
-        err "缺必需依赖,跑 ./init.sh --install-deps 自动装,或参 README §五"
+        err "$(t root.init.missing_required_deps)"
         return 1
     fi
-    warn "依赖完整(必需项都装了);缺 [S] 类推荐项,数据采集中某些阶段会受影响"
+    warn "$(t root.init.missing_optional_deps)"
     return 2
 }
 
@@ -255,10 +260,10 @@ install_deps() {
 
     local os missing_pkgs cmd min apt_pkg dnf_pkg brew_pkg category note pkg_name
     os="$(detect_os)"
-    log "OS 探测: $os"
+    log "$(t root.init.os_detected os="$os")"
 
     if [ "$os" = "unknown" ]; then
-        err "无法识别 OS;不支持 Alpine / Arch / NixOS 等,自己装:bash python3 docker git sqlite3 flock subfinder alterx naabu ffuf gau"
+        err "$(t root.init.unsupported_os)"
         return 4
     fi
 
@@ -277,7 +282,7 @@ install_deps() {
             brew)  pkg_name="$brew_pkg" ;;
         esac
         if [ -z "$pkg_name" ]; then
-            warn "$cmd 无对应 $os 包(URLFinder 等中文社区工具),请手动下载二进制放进 PATH"
+            warn "$(t root.init.no_package_for_cmd cmd="$cmd" os="$os")"
             MISSING_OPT=1
             continue
         fi
@@ -290,7 +295,7 @@ install_deps() {
     done
 
     if [ "${#missing_pkgs[@]}" = 0 ] && [ "$MISSING_OPT" = 0 ]; then
-        log "依赖已装齐,无需安装"
+        log "$(t root.init.nothing_to_install)"
         return 0
     fi
 
@@ -306,33 +311,33 @@ EOF
         return 0
     fi
 
-    log "将安装: ${missing_pkgs[*]:-(无可自动装的包)}"
+    log "$(t root.init.will_install missing_pkgs="${missing_pkgs[*]:-$(t root.init.no_auto_packages)}")"
 
     case "$os" in
         apt)
-            warn "需要 sudo 权限更新 apt 索引 + 装包"
-            sudo apt-get update || { err "apt-get update 失败"; return 4; }
+            warn "$(t root.init.need_sudo_apt)"
+            sudo apt-get update || { err "$(t root.init.apt_update_failed)"; return 4; }
             sudo apt-get install -y "${missing_pkgs[@]}" || {
-                err "apt-get install 失败(部分包可能在 universe/contrib,先 enable)"
+                err "$(t root.init.apt_install_failed)"
                 return 4
             }
             ;;
         dnf)
-            warn "需要 sudo 权限装包"
+            warn "$(t root.init.need_sudo_install)"
             sudo dnf install -y "${missing_pkgs[@]}" || {
-                err "dnf install 失败"
+                err "$(t root.init.dnf_install_failed)"
                 return 4
             }
             ;;
         brew)
             brew install "${missing_pkgs[@]}" || {
-                err "brew install 失败"
+                err "$(t root.init.brew_install_failed)"
                 return 4
             }
             ;;
     esac
 
-    log "安装完成,跑 ./init.sh --check-deps 复核"
+    log "$(t root.init.deps_installed)"
     return 0
 }
 
@@ -342,7 +347,7 @@ init_db() {
     local db_install="$DB_DIR/install.sh"
 
     if [ ! -x "$db_install" ]; then
-        err "modules/main/db/install.sh 缺失或不可执行: $db_install"
+        err "$(t root.init.db_installer_missing db_install="$db_install")"
         return 5
     fi
 
@@ -351,7 +356,7 @@ init_db() {
         log "init-db OK: $db_path"
         return 0
     else
-        err "init-db 失败(看 modules/main/db/install.sh 输出)"
+        err "$(t root.init.init_db_failed)"
         return 6
     fi
 }
@@ -360,7 +365,7 @@ init_db() {
 check_schema() {
     local db_install="$DB_DIR/install.sh"
     if [ ! -x "$db_install" ]; then
-        err "modules/main/db/install.sh 缺失或不可执行: $db_install"
+        err "$(t root.init.db_installer_missing_check_schema db_install="$db_install")"
         return 7
     fi
     log "check-schema (via modules/main/db/install.sh)"
@@ -414,31 +419,31 @@ main() {
             ;;
         check)
             if check_env; then
-                log "环境 OK (git/curl/docker)"
+                log "$(t root.init.env_ok)"
                 return 0
             else
-                err "环境检查失败"
+                err "$(t root.init.env_check_failed)"
                 return 2
             fi
             ;;
         offline)
-            log "--offline: 跳过所有网络调用"
+            log "$(t root.init.offline_skip_network)"
             next_step_hint
             return 0
             ;;
     esac
 
-    log "模式: $MODE"
-    check_env || { err "环境检查失败,装齐再跑"; return 2; }
+    log "$(t root.init.mode mode="$MODE")"
+    check_env || { err "$(t root.init.env_check_failed_needs_deps)"; return 2; }
 
     if check_deps >/dev/null 2>&1; then
         :
     else
         rc=$?
         if [ "$rc" = 1 ]; then
-            warn "缺必需依赖(/init core)。跑 init.sh --install-deps 装齐后再 ./install.sh"
+            warn "$(t root.init.missing_core_deps)"
         elif [ "$rc" = 2 ]; then
-            warn "缺 [S] 类推荐项,./install.sh 仍可跑,数据采集中某些阶段会受影响"
+            warn "$(t root.init.missing_optional_deps_for_install)"
         fi
     fi
 

@@ -42,6 +42,11 @@
 
 set -euo pipefail
 
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/modules/main/lib/i18n.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -56,12 +61,12 @@ usage() {
 # ---- the prerequisite: run ./check.sh ----
 run_check() {
     if [ ! -x "$SCRIPT_DIR/check.sh" ]; then
-        err "check.sh 缺失或不可执行: $SCRIPT_DIR/check.sh"
+        err "$(t root.install.check_script_missing script_dir="$SCRIPT_DIR")"
         return 2
     fi
-    log "前置:跑 ./check.sh ..."
+    log "$(t root.install.check_prerequisite)"
     if ! "$SCRIPT_DIR/check.sh"; then
-        err "check.sh 失败;按其提示升级 go/python3/git 后重跑"
+        err "$(t root.install.check_failed)"
         return 2
     fi
     log "check.sh OK"
@@ -75,17 +80,17 @@ run_module() {
     local minstall="$mdir/install.sh"
 
     if [ ! -x "$minstall" ]; then
-        warn "模块 $area/$name 的 install.sh 缺失或不可执行;跳过"
+        warn "$(t root.install.module_installer_missing area="$area" name="$name")"
         return 0
     fi
 
-    log "[$area/$name] 跑 install.sh $*"
+    log "$(t root.install.run_module area="$area" name="$name" args="$*")"
     if "$minstall" "$@"; then
         log "[$area/$name] OK"
         return 0
     else
         local rc=$?
-        err "[$area/$name] 失败 (exit=$rc)"
+        err "$(t root.install.module_failed area="$area" name="$name" rc="$rc")"
         return 3
     fi
 }
@@ -94,7 +99,7 @@ run_module() {
 do_init_db() {
     local db_install="$SCRIPT_DIR/modules/main/db/install.sh"
     if [ ! -x "$db_install" ]; then
-        err "modules/main/db/install.sh 缺失"
+        err "$(t root.install.db_installer_missing)"
         return 3
     fi
     # the DB path is passed through to db/install.sh. $RECON_DB comes first (the
@@ -120,7 +125,7 @@ do_init_db() {
 write_db_conf() {
     local cfg="$SCRIPT_DIR/config/db.conf"
     if [ -f "$cfg" ]; then
-        log "config/db.conf 已存在;跳过(尊重用户配置)"
+        log "$(t root.install.db_conf_exists)"
         return 0
     fi
     mkdir -p "$(dirname "$cfg")"
@@ -140,7 +145,7 @@ write_db_conf() {
 # ./srcradar falls back to the hardcoded path.
 recon_db_path=$SCRIPT_DIR/modules/main/db/recon.sqlite3
 DBEOF
-    log "已写入 $cfg (recon_db_path 默认 = $SCRIPT_DIR/modules/main/db/recon.sqlite3)"
+    log "$(t root.install.db_conf_written cfg="$cfg" script_dir="$SCRIPT_DIR")"
 }
 
 # ---- the file level VIRTUAL_NAMES ----
@@ -243,7 +248,7 @@ ask_checklist() {
     done < <(discover_modules)
 
     if [ "${#entries[@]}" -eq 0 ]; then
-        err "无任何可安装模块;modules/ 目录为空"
+        err "$(t root.install.no_modules)"
         return 1
     fi
 
@@ -316,7 +321,7 @@ ask_checklist() {
                 break
                 ;;
             q|Q)
-                log "用户退出"
+                log "$(t root.install.user_quit)"
                 return 1
                 ;;
             *)
@@ -330,7 +335,7 @@ ask_checklist() {
                         SELECTED["$target"]=1
                     fi
                 else
-                    warn "无效输入: '$reply'(期望 1-${#entries[@]} / 0 / q)"
+                    warn "$(t root.install.invalid_reply reply="$reply" count="${#entries[@]}")"
                 fi
                 ;;
         esac
@@ -363,15 +368,15 @@ main() {
     done
 
     if [ "$MODE" = "check-only" ]; then
-        run_check || { err "check 阶段失败,退出"; exit 2; }
-        log "check-only 模式完成;未进入 checklist"
+        run_check || { err "$(t root.install.check_stage_failed_check_only)"; exit 2; }
+        log "$(t root.install.check_only_done)"
         exit 0
     fi
 
     if [ "${SKIP_CHECK:-0}" != "1" ]; then
-        run_check || { err "check 阶段失败,退出"; exit 2; }
+        run_check || { err "$(t root.install.check_stage_failed)"; exit 2; }
     else
-        warn "跳过 check.sh(--skip-check)"
+        warn "$(t root.install.skip_check)"
     fi
 
     declare -A SELECTED_M=()
@@ -409,13 +414,13 @@ main() {
             if [ ! -d "$vmdir" ]; then
                 # it probes with ls-remote first, and when the repo does not exist (404) it warns and skips it without blocking
                 if git ls-remote --heads "$vurl" >/dev/null 2>&1; then
-                    log "[$vkey] 目录不存在;git clone $vurl $vmdir"
+                    log "$(t root.install.virtual_module_cloning vkey="$vkey" vurl="$vurl" vmdir="$vmdir")"
                     if ! git clone "$vurl" "$vmdir"; then
-                        err "[$vkey] git clone 失败;中断 install"
+                        err "$(t root.install.virtual_module_clone_failed vkey="$vkey")"
                         exit 3
                     fi
                 else
-                    warn "[$vkey] standalone repo 尚未公开,请先创建 $vurl 后重试;跳过"
+                    warn "$(t root.install.virtual_module_not_public vkey="$vkey" vurl="$vurl")"
                     continue
                 fi
             fi
@@ -447,7 +452,7 @@ main() {
     done
 
     if [ "$installed" -eq 0 ]; then
-        warn "未勾选任何模块;无操作"
+        warn "$(t root.install.nothing_selected)"
     fi
 
     if [ "$DO_INIT_DB" = "1" ]; then
@@ -457,9 +462,9 @@ main() {
     # write config/db.conf automatically at the end (when it does not exist)
     write_db_conf || true
 
-    log "全部装完($installed 模块)。PATH 提示: export PATH=\"\$PATH:\$HOME/go/bin:\$HOME/.pdtm/go/bin\""
+    log "$(t root.install.all_installed installed="$installed")"
     if [ "${SELECTED_M[main/daily]:-0}" != "1" ]; then
-        warn "daily 模块未安装(cron 未注册)。需要监控请手动: ./srcradar daily install_cron"
+        warn "$(t root.install.daily_not_installed)"
     fi
     return 0
 }
