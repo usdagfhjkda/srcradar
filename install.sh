@@ -1,38 +1,44 @@
 #!/usr/bin/env bash
 #
-# install.sh — 外部版:交互式 checklist 选模块,默认全不勾。
+# install.sh — the public edition: an interactive checklist to pick the modules,
+# nothing is checked by default.
 #
-# 行为:
-#   - 先跑 check.sh
-#   - 进入 checklist:每个模块 [ ]/[x] 切换;0 确认;q 退出
-#   - 按 main / public / private 三段字母序排列,段间用 --- 分隔
-#   - daily 默认不勾(避免默默注册 cron)
+# What it does:
+#   - it runs check.sh first
+#   - it enters the checklist: every module is toggled with [ ]/[x]; 0 confirms;
+#     q quits
+#   - it is sorted into the main / public / private sections in alphabetical
+#     order, separated by ---
+#   - daily is not checked by default (so that the cron is not registered
+#     silently)
 #
-# 与 init.sh 的关系:
-#   - init.sh --check-deps 装系统依赖(go/python3/docker/...)
-#   - init.sh --init-db 建空 DB
-#   - install.sh 调模块 install.sh 拉源码 + go build + 装二进制
+# How it relates to init.sh:
+#   - init.sh --check-deps installs the system dependencies (go/python3/docker/...)
+#   - init.sh --init-db creates an empty DB
+#   - install.sh calls the install.sh of the modules to pull the source + go build
+#     + install the binaries
 #
-# 用法:
-#   ./install.sh                  # 交互式 checklist(默认)
-#   ./install.sh --check          # 只跑 check.sh(不进入 checklist)
-#   ./install.sh --skip-check     # 跳 check,直接进 checklist(知道环境已达标的用户)
-#   ./install.sh --init-db        # 末尾建空 DB(默认开)
-#   末尾自动写 config/db.conf(若不存在)给 ./srcradar 用,无需手动
-#   ./install.sh --no-init-db     # 不建 DB
-#   ./install.sh --offline        # 跳过所有网络(假设已 clone)
+# Usage:
+#   ./install.sh                  # the interactive checklist (the default)
+#   ./install.sh --check          # only run check.sh (it does not enter the checklist)
+#   ./install.sh --skip-check     # skip the check and go straight to the checklist (for a user who knows the environment is ready)
+#   ./install.sh --init-db        # create an empty DB at the end (on by default)
+#   config/db.conf is written automatically at the end (when it does not exist)
+#   for ./srcradar to use, so nothing has to be done by hand
+#   ./install.sh --no-init-db     # do not create the DB
+#   ./install.sh --offline        # skip every network call (the clone is assumed to be done)
 #   ./install.sh -h|--help
 #
-# checklist 交互:
-#   输入数字 N  → 切换 N 的状态(选中↔未选)
-#   输入 0      → 确认,进入安装
-#   输入 q      → 退出
+# The checklist interaction:
+#   type the number N  -> toggle the state of N (selected <-> not selected)
+#   type 0            -> confirm and start the install
+#   type q            -> quit
 #
-# 退出码:
-#   0   全部成功
-#   1   参数错误 / 用户 q 退出
-#   2   check.sh 不通过
-#   3   某个模块 install.sh 失败
+# Exit codes:
+#   0   everything succeeded
+#   1   bad arguments / the user quit with q
+#   2   check.sh did not pass
+#   3   the install.sh of a module failed
 
 set -euo pipefail
 
@@ -47,7 +53,7 @@ usage() {
     sed -n '2,30p' "$0"
 }
 
-# ---- 前置:跑 ./check.sh ----
+# ---- the prerequisite: run ./check.sh ----
 run_check() {
     if [ ! -x "$SCRIPT_DIR/check.sh" ]; then
         err "check.sh 缺失或不可执行: $SCRIPT_DIR/check.sh"
@@ -62,7 +68,7 @@ run_check() {
     return 0
 }
 
-# ---- 跑单个模块 install.sh ----
+# ---- run the install.sh of a single module ----
 run_module() {
     local area="$1" name="$2"; shift 2
     local mdir="$SCRIPT_DIR/modules/$area/$name"
@@ -91,8 +97,10 @@ do_init_db() {
         err "modules/main/db/install.sh 缺失"
         return 3
     fi
-    # 把 DB 路径透传给 db/install.sh。优先 $RECON_DB(用户/启动点 export),
-    # 退而求其次用 <repo>/modules/main/db/recon.sqlite3(源码版默认)。
+    # the DB path is passed through to db/install.sh. $RECON_DB comes first (the
+    # user / the start point exports it),
+    # and <repo>/modules/main/db/recon.sqlite3 is the fallback (the default of the
+    # source checkout).
     local db_path="${RECON_DB:-$SCRIPT_DIR/modules/main/db/recon.sqlite3}"
     log "init-db (via modules/main/db/install.sh --path $db_path)"
     bash "$db_install" --path "$db_path" || return 3
@@ -100,11 +108,15 @@ do_init_db() {
     export DB="$db_path"
 }
 
-# ---- 自动写 config/db.conf(若不存在) ----
-# 与 ./srcradar 顶部 load_config_set 配合;源码版装完即生效。
-# config/db.conf 不存在 = ./srcradar 走硬编码(/opt/srcradar/db/...)兜底,
-# 源码版默认无 /opt/... 时会回落到模块默认路径(<repo>/modules/main/db/)。
-# 写一份默认值让用户能直观看到配置入口,也可手动覆盖 docker 路径。
+# ---- write config/db.conf automatically (when it does not exist) ----
+# It works together with the load_config_set at the top of ./srcradar; in the
+# source checkout it takes effect right after the install.
+# A missing config/db.conf means that ./srcradar falls back to the hardcoded path
+# (/opt/srcradar/db/...),
+# and since the source checkout has no /opt/... by default it falls back to the
+# module default path (<repo>/modules/main/db/).
+# Writing a default value lets the user see where the configuration entry is, and
+# it can be overridden by hand for the docker path.
 write_db_conf() {
     local cfg="$SCRIPT_DIR/config/db.conf"
     if [ -f "$cfg" ]; then
@@ -113,52 +125,68 @@ write_db_conf() {
     fi
     mkdir -p "$(dirname "$cfg")"
     cat > "$cfg" <<DBEOF
-# srcradar — DB path config (auto-generated by install.sh on first run)
+# srcradar — the DB path config (auto-generated by install.sh on the first run)
 #
-# 解析优先级(由 ./srcradar 顶部统一处理):
-#   1) CLI flag --db / 环境变量 $RECON_DB / $DB
-#   2) 此文件 recon_db_path(走 modules/main/lib/load_config.sh)
-#   3) image 内 /opt/srcradar/db/recon.sqlite3 (docker entrypoint init-db 默认)
-#   4) 老 mount /data/recon.sqlite3 (兼容早期 srcradar-data volume)
-#   5) 都不命中 -> 模块默认(<repo>/modules/main/db/recon.sqlite3)
+# The resolution priority (handled uniformly at the top of ./srcradar):
+#   1) the CLI flag --db / the environment variables $RECON_DB / $DB
+#   2) the recon_db_path of this file (through modules/main/lib/load_config.sh)
+#   3) /opt/srcradar/db/recon.sqlite3 inside the image (the default of the docker entrypoint init-db)
+#   4) the old mount /data/recon.sqlite3 (for the early srcradar-data volume)
+#   5) none of them matches -> the module default (<repo>/modules/main/db/recon.sqlite3)
 #
-# 源码版默认写到 <repo>/modules/main/db/recon.sqlite3;docker 版请改为
-# 容器内绝对路径或直接删除本文件让 ./srcradar 走硬编码兜底。
+# The source checkout writes <repo>/modules/main/db/recon.sqlite3 by default; the
+# docker edition has to change it to
+# an absolute path inside the container, or this file has to be deleted so that
+# ./srcradar falls back to the hardcoded path.
 recon_db_path=$SCRIPT_DIR/modules/main/db/recon.sqlite3
 DBEOF
     log "已写入 $cfg (recon_db_path 默认 = $SCRIPT_DIR/modules/main/db/recon.sqlite3)"
 }
 
-# ---- 文件级 VIRTUAL_NAMES ----
-# 共享给 discover_modules()(用来在 checklist 中列出虚拟模块)和 main() 的
-# install-stage(用来在磁盘没目录时触发 git clone)。
-# 必须放在文件级(且**在这里直接赋值**,不能在函数里赋值)——
-# 因为 discover_modules() 通过 `< <(discover_modules)` 进程替换被调用,
-# 子 shell 里给 VIRTUAL_NAMES 赋值,父 shell 拿不到,install-stage 会读到空。
-# 注意必须用 `declare -A X=(...)` 语法而不是 `X=(...)`,否则 set -u 下会
-# 把 ["srcradar-mcp-server"] 当成变量名 $srcradar(没引号也不识别为关联数组 key)。
-# 新增虚拟模块:在这里加一行 `["<name>"]=<area>`。
+# ---- the file level VIRTUAL_NAMES ----
+# It is shared by discover_modules() (to list the virtual modules in the checklist)
+# and by the install stage of main()
+# (to trigger the git clone when the directory is not on the disk).
+# It has to sit at the file level (and **be assigned right here**, not inside a
+# function) -
+# because discover_modules() is called through the `< <(discover_modules)` process
+# substitution, and
+# an assignment to VIRTUAL_NAMES in the subshell does not reach the parent shell, so
+# the install stage would read it as empty.
+# Note that the `declare -A X=(...)` syntax is required rather than `X=(...)`,
+# otherwise under set -u
+# ["srcradar-mcp-server"] would be taken as the variable name $srcradar (it is
+# not recognised as an associative array key even when it is quoted).
+# To add a virtual module: add one line `["<name>"]=<area>` here.
 declare -A VIRTUAL_NAMES=(["srcradar-mcp-server"]=public ["srcradar-algo-diff-cpp"]=public)
 
-# ---- 虚拟模块的落盘目录名 ----
-# 默认落盘目录名 == 虚拟名(与仓库名一致)。这里可以单独指定:
-#   键 = 虚拟名, 值 = 目录名(相对 modules/<area>/)。
-# 比较引擎的仓库名是 srcradar-algo-diff-cpp, 但每日流水线调用的是
-# modules/public/algo_diff_cpp/, 忽略规则也按后者写, 因此这里解耦。
+# ---- the directory name a virtual module lands in ----
+# By default the directory name == the virtual name (the same as the repo name).
+# It can be set separately here:
+#   the key = the virtual name, the value = the directory name (relative to
+#   modules/<area>/).
+# The repo name of the comparison engine is srcradar-algo-diff-cpp, but the daily
+# pipeline calls
+# modules/public/algo_diff_cpp/, and the ignore rule is written for the latter,
+# so they are decoupled here.
 declare -A VIRTUAL_DIRS=(["srcradar-algo-diff-cpp"]="algo_diff_cpp")
 
-# ---- 收集所有可安装模块(按字母序,分 main / public / private) ----
-# 输出:三段关联数组 AREA[N] / NAME[N] / DESC[N] / N 顺序
+# ---- collect every installable module (alphabetically, split into main / public / private) ----
+# The output: three associative arrays AREA[N] / NAME[N] / DESC[N] in the order of N
 discover_modules() {
     local -a order=()
-    # 虚条目:public/srcradar-mcp-server
-    #   该模块是独立 repo (https://github.com/usdagfhjkda/srcradar-mcp-server),
-    #   默认情况下 modules/public/srcradar-mcp-server/ 不存在(.gitignore 屏蔽)。
-    #   为保证 checklist 视觉布局(段内字母序),在字母序插入前无条件追加
-    #   "srcradar-mcp-server" 到 names;install 阶段由 main() 检测目录不存在
-    #   再触发 git clone。
-    # 兜底实现:见 for mdir 循环之后的 virtual-name fallback 段。
-    # (同时保留 for mdir 循环里的虚拟名检测,用于"目录真实存在"时去重)
+    # the virtual entry: public/srcradar-mcp-server
+    #   that module is a standalone repo (https://github.com/usdagfhjkda/srcradar-mcp-server),
+    #   by default modules/public/srcradar-mcp-server/ does not exist (.gitignore blocks it).
+    #   To keep the visual layout of the checklist (the alphabetical order inside a
+    #   section), "srcradar-mcp-server" is appended to names unconditionally before
+    #   the alphabetical insert; in the install stage main() detects that the
+    #   directory does not exist
+    #   and triggers the git clone.
+    # The fallback implementation: see the virtual-name fallback section after the
+    # for mdir loop.
+    # (the virtual name detection inside the for mdir loop is kept as well, to
+    # deduplicate when the directory really exists)
 
     for area in main public private; do
         local adir="$SCRIPT_DIR/modules/$area"
@@ -166,8 +194,10 @@ discover_modules() {
         local -a names=()
         for mdir in "$adir"/*/; do
             local bname; bname="$(basename "$mdir")"
-            # 虚条目:在它"应该出现"的 area 段补一条(目录不存在也算);
-            # 其它 area 段扫到同名目录则跳过,避免重复。
+            # the virtual entry: it is added to the area section where it "should"
+            # appear (it counts even when the directory does not exist);
+            # the other area sections skip a directory with the same name, to avoid a
+            # duplicate.
             if [ -n "${VIRTUAL_NAMES[$bname]:-}" ]; then
                 [ "${VIRTUAL_NAMES[$bname]}" = "$area" ] && names+=("$bname")
                 continue
@@ -175,12 +205,15 @@ discover_modules() {
             [ -d "$mdir" ] || continue
             names+=("$bname")
         done
-        # virtual-name 兜底:无论磁盘目录在不在,checklist 都要列出 virtual 名。
-        # for mdir 循环只在 $adir/*/ 能迭代到虚名时才生效(目录存在场景);
-        # 本段补上"目录被 .gitignore 屏蔽 / 还没 clone"的场景。
+        # the virtual-name fallback: whether the directory is on the disk or not, the
+        # checklist lists the virtual name.
+        # The for mdir loop only works when $adir/*/ can iterate over the virtual
+        # name (the case where the directory exists);
+        # this section covers "the directory is blocked by .gitignore / not cloned
+        # yet".
         for vname in "${!VIRTUAL_NAMES[@]}"; do
             [ "${VIRTUAL_NAMES[$vname]}" = "$area" ] || continue
-            # 已在 names 里就不重复(避免目录存在时双倍添加)
+            # it is not added twice when it is already in names (that would double it when the directory exists)
             local _v_dup=0
             local _v_existing
             for _v_existing in "${names[@]:-}"; do
@@ -188,7 +221,7 @@ discover_modules() {
             done
             [ "$_v_dup" = "0" ] && names+=("$vname")
         done
-        # 字母序排序(空目录也能跑)
+        # the alphabetical sort (it also runs with an empty directory)
         local -a sort_names=()
         mapfile -t sort_names < <(printf '%s\n' "${names[@]:-}" | sort)
         for n in "${sort_names[@]}"; do
@@ -199,10 +232,10 @@ discover_modules() {
     printf '%s\n' "${order[@]}"
 }
 
-# ---- checklist 交互 ----
-# 输入:discover_modules 的输出(每行 area/name)
-# 副作用:导出 SELECTED_M[area/name]=1 给后续 install 阶段用
-# 输出:0 = 确认,1 = q 退出
+# ---- the checklist interaction ----
+# The input: the output of discover_modules (one area/name per line)
+# The side effect: it exports SELECTED_M[area/name]=1 for the install stage
+# The output: 0 = confirmed, 1 = q quit
 ask_checklist() {
     local -a entries=()
     while IFS= read -r line; do
@@ -214,13 +247,15 @@ ask_checklist() {
         return 1
     fi
 
-    # 段首分隔符宽度(对齐最长 name + area 前缀)
+    # the width of the section separator (aligned with the longest name + the area prefix)
     local sep_width=40
     local last_area=""
 
-    # 默认勾选规则:main/* 除 daily 外默认勾上(确保 ./install.sh 默认装核心);
-    # daily 仍默认不勾(避免默默注册 cron);
-    # public/* / private/* 默认不勾(用户主动选)。
+    # the default selection rule: main/* is checked by default except daily (so
+    # that ./install.sh installs the core by default);
+    # daily is still not checked by default (so that the cron is not registered
+    # silently);
+    # public/* / private/* are not checked by default (the user picks them).
     declare -A SELECTED
     for e in "${entries[@]}"; do
         case "$e" in
@@ -229,7 +264,7 @@ ask_checklist() {
         esac
     done
 
-    # 模块描述(可读性增强)
+    # the module description (it makes the list easier to read)
     desc_for() {
         case "$1" in
             main/daily)   echo "日度 cron 03:00 + dashboard(默认不勾,免登 crontab)" ;;
@@ -257,7 +292,7 @@ ask_checklist() {
             n=$((n+1))
             local area="${e%%/*}"
             local name="${e##*/}"
-            # 段头(只在换 area 时打一次)
+            # the section header (it is only printed once per area)
             if [ "$area" != "$last_area" ]; then
                 printf '\n%s ' "$area"
                 printf -- '-%.0s' $(seq 1 "$sep_width")
@@ -277,7 +312,7 @@ ask_checklist() {
         reply="${reply:-q}"
         case "$reply" in
             0|"")
-                # 0 或空 = 确认开始安装
+                # 0 or empty = confirm and start the install
                 break
                 ;;
             q|Q)
@@ -285,7 +320,7 @@ ask_checklist() {
                 return 1
                 ;;
             *)
-                # 数字 → 切换对应条目状态
+                # a number -> toggle the state of that entry
                 if [[ "$reply" =~ ^[0-9]+$ ]] && [ "$reply" -ge 1 ] && [ "$reply" -le "${#entries[@]}" ]; then
                     local idx=$((reply-1))
                     local target="${entries[$idx]}"
@@ -301,7 +336,7 @@ ask_checklist() {
         esac
     done
 
-    # 把选中的条目 export 给 main 用
+    # export the selected entries for main to use
     for e in "${entries[@]}"; do
         [ "${SELECTED[$e]}" = "1" ] && SELECTED_M["$e"]=1
     done
@@ -345,28 +380,34 @@ main() {
         exit 1
     fi
 
-    # 按 main → public → private 顺序执行选中的模块
+    # run the selected modules in the order main -> public -> private
     local -a areas=(main public private)
     local installed=0
     for area in "${areas[@]}"; do
         local adir="$SCRIPT_DIR/modules/$area"
         [ -d "$adir" ] || continue
 
-        # 虚拟 module(目录被 .gitignore 屏蔽 / 还没 clone):即使磁盘没有,checklist
-        # 勾了也要 install。for mdir 循环只迭代磁盘真实目录,虚拟 module 在这里处理。
-        # 共享 VIRTUAL_NAMES(discovery 时已注册),URL 拼接约定:
-        #   https://github.com/<owner>/<vname>.git  ← 当前 owner 硬编码 usdagfhjkda,
-        #   后续可改成 per-name 关联数组,目前只支持单一 owner。
+        # a virtual module (the directory is blocked by .gitignore / not cloned yet):
+        # it has to be installed even when the disk has nothing, as long as the
+        # checklist
+        # checked it. The for mdir loop only iterates over the directories that are
+        # really on the disk, the virtual modules are handled here.
+        # It shares VIRTUAL_NAMES (it was already registered during the discovery),
+        # the URL convention:
+        #   https://github.com/<owner>/<vname>.git  <- the owner is hardcoded as
+        #   usdagfhjkda for now,
+        #   it can become a per-name associative array later, for now only a single
+        #   owner is supported.
         for vname in "${!VIRTUAL_NAMES[@]}"; do
             [ "${VIRTUAL_NAMES[$vname]}" = "$area" ] || continue
             local vkey="$area/$vname"
             [ "${SELECTED_M[$vkey]:-0}" = "1" ] || continue
-            # 落盘目录名默认与虚拟名一致;VIRTUAL_DIRS 可单独指定
+            # the directory name it lands in defaults to the virtual name; VIRTUAL_DIRS can set it separately
             local vdirname="${VIRTUAL_DIRS[$vname]:-$vname}"
             local vmdir="$SCRIPT_DIR/modules/$area/$vdirname"
             local vurl="https://github.com/usdagfhjkda/$vname.git"
             if [ ! -d "$vmdir" ]; then
-                # 先 ls-remote 探测,repo 不存在(404)时 warn 跳过、不阻塞
+                # it probes with ls-remote first, and when the repo does not exist (404) it warns and skips it without blocking
                 if git ls-remote --heads "$vurl" >/dev/null 2>&1; then
                     log "[$vkey] 目录不存在;git clone $vurl $vmdir"
                     if ! git clone "$vurl" "$vmdir"; then
@@ -378,10 +419,14 @@ main() {
                     continue
                 fi
             fi
-            # 用落盘目录名而不是虚拟名: clone 落在 $vmdir (VIRTUAL_DIRS 映射),
-            # run_module 按 $SCRIPT_DIR/modules/$area/$name 找 install.sh, 传虚拟名
-            # 会去找一个从未创建的目录, 导致 clone 成功但安装被跳过。
-            # 无 VIRTUAL_DIRS 映射的虚拟模块两者同名, 行为不变。
+            # it uses the directory name it lands in rather than the virtual name: the
+            # clone lands in $vmdir (the VIRTUAL_DIRS mapping), and
+            # run_module looks for install.sh in $SCRIPT_DIR/modules/$area/$name, so
+            # passing the virtual name
+            # would look for a directory that was never created, and the clone would
+            # succeed while the install is skipped.
+            # A virtual module without a VIRTUAL_DIRS mapping has the same name for
+            # both, so the behaviour is unchanged.
             run_module "$area" "$vdirname" --yes || exit 3
             installed=$((installed+1))
         done
@@ -390,7 +435,7 @@ main() {
             local name; name="$(basename "$mdir")"
             local key="$area/$name"
             if [ "${SELECTED_M[$key]:-0}" = "1" ]; then
-                # db 模块特殊:check + 后续 --init-db 触发;其余 --yes
+                # the db module is special: check + the later --init-db trigger; the others take --yes
                 if [ "$name" = "db" ]; then
                     run_module "$area" "$name" --check || exit 3
                 else
@@ -409,7 +454,7 @@ main() {
         do_init_db || exit $?
     fi
 
-    # 末尾自动写 config/db.conf(若不存在)
+    # write config/db.conf automatically at the end (when it does not exist)
     write_db_conf || true
 
     log "全部装完($installed 模块)。PATH 提示: export PATH=\"\$PATH:\$HOME/go/bin:\$HOME/.pdtm/go/bin\""
