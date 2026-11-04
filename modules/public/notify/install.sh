@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 #
-# modules/public/notify/install.sh — 装 notify 模块(可选推送插件)
+# modules/public/notify/install.sh — install the notify module (optional push plugin)
 #
-# notify 模块组成:
-#   - notify_send.sh            主推送脚本(gpg 加密 + curl POST 到 Resend HTTP API)
-#   - lib/notify_config.py      config/notify.conf 读取器
-#   - config/notify.conf.example 配置占位模板(operator 自填真值后另存为
-#                              config/notify.conf,.gitignore 屏蔽)
+# notify module parts:
+#   - notify_send.sh            main push script (gpg encryption + curl POST to the Resend HTTP API)
+#   - lib/notify_config.py      reader for config/notify.conf
+#   - config/notify.conf.example config placeholder template (the operator fills in the real
+#                              values and saves it as config/notify.conf, .gitignore keeps it out)
 #
-# 用法:
-#   bash install.sh              # 默认:写 config/notify.conf.example(若缺)
-#                                 # + 自检 gpg / curl / notify_config.py
-#   bash install.sh --check      # 只查依赖 + 自检,不动 config
+# Usage:
+#   bash install.sh              # default: write config/notify.conf.example (if missing)
+#                                 # + self-check gpg / curl / notify_config.py
+#   bash install.sh --check      # only check the dependencies + self-check, do not touch config
 #   bash install.sh --uninstall
 #
-# 退出码:
+# Exit codes:
 #   0 = OK
-#   2 = 缺依赖 (gpg / python3 / curl)
-#   3 = notify 模块自检失败
+#   2 = missing dependency (gpg / python3 / curl)
+#   3 = notify module self-check failed
 #
 
 set -euo pipefail
@@ -49,7 +49,7 @@ check_deps() {
     return $rc
 }
 
-# ---- 写 example 占位(若缺) ----
+# ---- write the example placeholder (if missing) ----
 write_example() {
     if [ -f "$EXAMPLE_CONF" ]; then
         log "example 已存在: $EXAMPLE_CONF"
@@ -57,20 +57,20 @@ write_example() {
         log "写入 example: $EXAMPLE_CONF"
         mkdir -p "$(dirname "$EXAMPLE_CONF")"
         cat > "$EXAMPLE_CONF" <<'EOF'
-# notify 模块配置占位模板
+# notify module config placeholder template
 #
-# 真值请复制本文件为 config/notify.conf(同目录)再编辑。
-# config/notify.conf 在 .gitignore 内,不入仓。
+# Copy this file to config/notify.conf (same directory) and edit it to fill in the real values.
+# config/notify.conf is inside .gitignore, it is not committed.
 #
-# 字段:
-#   RESEND_API_KEY  Resend HTTP API key(在 https://resend.com/api-keys
-#                   生成,以 re_ 开头,至少 20 字符;绑一个发件域)
-#   FROM_ADDR       发件人地址(必须在 Resend 后台已验证的发件域下)
-#   TO_ADDR         收件人邮箱(操作员)
-#   SUBJECT         邮件主题前缀(默认 "[srcradar] daily diff")
-#   GPG_RECIPIENT   GPG 收件人邮箱(== TO_ADDR;给 gpg -r 用)
+# Fields:
+#   RESEND_API_KEY  Resend HTTP API key (generated at https://resend.com/api-keys
+#                   starts with re_, at least 20 characters; binds one sending domain)
+#   FROM_ADDR       sender address (must be under a sending domain already verified in the Resend backend)
+#   TO_ADDR         recipient email (the operator)
+#   SUBJECT         email subject prefix (default "[srcradar] daily diff")
+#   GPG_RECIPIENT   GPG recipient email (== TO_ADDR; used for gpg -r)
 #
-# 任何字段留空 / REPLACE_WITH_* 都会让 notify_send.sh 拒绝发并打印配置缺失。
+# Any field left empty / REPLACE_WITH_* makes notify_send.sh refuse to send and print what is missing.
 RESEND_API_KEY=REPLACE_WITH_RESEND_API_KEY
 FROM_ADDR=noreply@your-domain.example
 TO_ADDR=REPLACE_WITH_RECIPIENT_EMAIL
@@ -81,7 +81,7 @@ EOF
     fi
 }
 
-# ---- 自检 ----
+# ---- self-check ----
 verify() {
     local rc=0
     if command -v gpg >/dev/null 2>&1; then
@@ -99,8 +99,8 @@ verify() {
     else
         err "python3 缺失"; rc=1
     fi
-    # 关键:在 TTY 下 example 通常已被 operator 复制成 notify.conf。
-    # 非 TTY(--check)不强制要求真值存在,但要确认 example 在。
+    # key point: under a TTY the example has normally already been copied to notify.conf by the operator.
+    # non-TTY (--check) does not require the real values to exist, but the example must be there.
     if [ -t 0 ]; then
         if [ -f "$TARGET_CONF" ]; then
             printf "  OK 真值配置存在: %s\n" "$TARGET_CONF"
@@ -118,7 +118,7 @@ verify() {
     else
         err "notify_config.py --help 失败"; rc=1
     fi
-    # RESEND_API_KEY 格式提醒(只在 --check 路径打印,不强制)
+    # RESEND_API_KEY format reminder (printed only on the --check path, not enforced)
     if [ -f "$TARGET_CONF" ]; then
         if grep -q '^RESEND_API_KEY=' "$TARGET_CONF" 2>/dev/null; then
             local key
@@ -132,7 +132,7 @@ verify() {
             fi
         fi
     fi
-    # payload 目录可写
+    # payload directory is writable
     mkdir -p "$PAYLOAD_DIR" 2>/dev/null && chmod 0700 "$PAYLOAD_DIR" \
         && printf "  OK payload dir: %s\n" "$PAYLOAD_DIR" \
         || { warn "payload 目录不可写 ($PAYLOAD_DIR)"; }
@@ -140,7 +140,7 @@ verify() {
 }
 
 uninstall() {
-    # 仅移除可能由 install.sh 自动创建的文件;不动 operator 自填的 notify.conf
+    # only remove the files that install.sh may have created; leave the operator's notify.conf alone
     log "保留 example 模板与 operator 自填的真值 config;无可清理项"
     return 0
 }

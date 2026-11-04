@@ -16,7 +16,7 @@ DATA=/opt/srcradar/db
 BIN=/opt/srcradar/bin
 # shellcheck disable=SC2034
 EXPECTED_BINS=(pdtm dnsx httpx subfinder alterx naabu cdncheck cdnmatch db_align)
-# (上方的 EXPECTED_BINS 保留只为向后兼容文档;实际检查见下方 REQUIRED_BINS / PD_CORE)
+# (EXPECTED_BINS above is kept only for backward-compatible documentation; the real checks are the REQUIRED_BINS / PD_CORE lists below)
 
 # 1) DB exists
 if [ ! -f "$DATA/recon.sqlite3" ]; then
@@ -24,7 +24,7 @@ if [ ! -f "$DATA/recon.sqlite3" ]; then
     exit 1
 fi
 
-# 2) srcradar 自建 binary 必须都在(pdtm 拉的 PD 工具数量可变,不硬编码)
+# 2) the srcradar-built binaries must all be present (the number of PD tools pulled by pdtm varies, so it is not hardcoded)
 REQUIRED_BINS=(cdnmatch db_align)
 for b in "${REQUIRED_BINS[@]}"; do
     if [ ! -x "$BIN/$b" ]; then
@@ -33,8 +33,8 @@ for b in "${REQUIRED_BINS[@]}"; do
     fi
 done
 
-# 3) PD 工具链至少要有核心 4 个(dnsx/httpx/subfinder/naabu,其他可选)
-# 用软检查:少一个 warn,缺两个以上才 unhealthy
+# 3) the PD toolchain must have at least the 4 core ones (dnsx/httpx/subfinder/naabu, the rest are optional)
+# soft check: one missing is a warning, two or more missing is unhealthy
 PD_CORE=(dnsx httpx subfinder naabu)
 MISSING=0
 for b in "${PD_CORE[@]}"; do

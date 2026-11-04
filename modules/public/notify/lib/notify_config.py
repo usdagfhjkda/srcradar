@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-modules/public/notify/lib/notify_config.py — 解析 config/notify.conf
+modules/public/notify/lib/notify_config.py — parse config/notify.conf
 
-格式 (同 modules/main/lib/load_config.py):
-    key=value        value 末尾空白自动 trim
-    # 整行注释     行内 # 后内容忽略
+Format (same as modules/main/lib/load_config.py):
+    key=value        trailing whitespace in the value is trimmed
+    # whole-line comment     everything after an inline # is ignored
 
-用法:
-    python3 notify_config.py <config_path>           # 输出 shell-eval 行
-    python3 notify_config.py <config_path> <key>     # 输出单 key 值
-    python3 notify_config.py --help                  # 输出本 help
+Usage:
+    python3 notify_config.py <config_path>           # output the shell-eval lines
+    python3 notify_config.py <config_path> <key>     # output the value of a single key
+    python3 notify_config.py --help                  # output this help
 
-设计:
-    - 与 modules/main/lib/load_config.py 走同款 parse_config 模式,
-      但语义简化:仅解析键值对,不区分 type / section。
-    - 真凭据绝不写入 stdout 之外的任何 sink(本脚本只 print,不写文件)。
+Design:
+    - the same parse_config pattern as modules/main/lib/load_config.py,
+      but with simplified semantics: only key/value pairs are parsed, no type / section distinction.
+    - the real credentials never reach any sink other than stdout (this script only prints, it writes no file).
 """
 from __future__ import annotations
 
@@ -25,14 +25,14 @@ from pathlib import Path
 KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 DOC = """\
-notify_config.py — 解析 config/notify.conf (key=value)
+notify_config.py — parse config/notify.conf (key=value)
 
-用法:
-    python3 notify_config.py <config_path>           输出 shell-eval 形式
-    python3 notify_config.py <config_path> <key>     输出单 key 值
-    python3 notify_config.py --help                  本帮助
+Usage:
+    python3 notify_config.py <config_path>           output in shell-eval form
+    python3 notify_config.py <config_path> <key>     output the value of a single key
+    python3 notify_config.py --help                  this help
 
-退出码: 0=ok 1=参数 2=文件不存在 3=语法
+Exit codes: 0=ok 1=arguments 2=file not found 3=syntax
 """
 
 

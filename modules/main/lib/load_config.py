@@ -1,31 +1,31 @@
 #!/usr/bin/env python3
 """
-load_config.py — 解析 srcradar/config/*.conf
+load_config.py — parse srcradar/config/*.conf
 
-格式:
-    # 整行以 # 开头(允许前导空白)是注释,跳过
-    行内第一个 # 后所有内容忽略(行内注释)
-    value 末尾空白自动 trim
-    空行跳过
-    格式: key=value    (key 不允许含 = 或 #,value 内允许任意字符)
+Format:
+    # a whole line starting with # (leading whitespace allowed) is a comment, skip it
+    everything after the first # on a line is ignored (inline comment)
+    trailing whitespace of value is trimmed automatically
+    blank lines are skipped
+    format: key=value    (key must not contain = or #, value may contain any character)
 
-用法:
+Usage:
     python3 load_config.py <config_path>
-        输出 shell 可 source 的内容到 stdout
+        print content that shell can source to stdout
     python3 load_config.py <config_path> <key>
-        输出单个 key 的值(空字符串表示未设)
+        print the value of a single key (empty string means not set)
 
-退出码:
-    0 = 成功
-    1 = 参数错
-    2 = 文件不存在或读不了
-    3 = 语法错(key 不合法等)
+Exit codes:
+    0 = success
+    1 = bad arguments
+    2 = file does not exist or cannot be read
+    3 = syntax error (invalid key, etc)
 """
 import re
 import sys
 from pathlib import Path
 
-# key 命名:字母数字下划线,至少1字符,不允许 = 或 # 或空白
+# key naming: letters, digits and underscore, at least 1 character, no = or # and no whitespace
 KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -74,7 +74,7 @@ def main():
 
     # full dump in shell-eval form (already plain key=value)
     for k, v in kv.items():
-        # 单引号包裹,内部 ' 用 '"'"' 转义
+        # wrap in single quotes, escape an inner ' as '"'"'
         safe = v.replace("'", "'\"'\"'")
         print(f"{k}='{safe}'")
 

@@ -2,17 +2,17 @@
 # set_config.sh — view or update recon_business_config for one business.
 #
 # Usage:
-#   ./manage/set_config.sh -n <业务名>                              # 仅查看当前 config
-#   ./manage/set_config.sh -n <业务名> --disable                    # enabled=0
-#   ./manage/set_config.sh -n <业务名> --enable                     # enabled=1
-#   ./manage/set_config.sh -n <业务名> --web 0 --icp 1              # 多个字段
+#   ./manage/set_config.sh -n <business name>                       # show the current config only
+#   ./manage/set_config.sh -n <business name> --disable             # enabled=0
+#   ./manage/set_config.sh -n <business name> --enable              # enabled=1
+#   ./manage/set_config.sh -n <business name> --web 0 --icp 1       # several fields
 #
-# 规则:
-#   - -n 必填; 至少一个变更 flag; 不给任何 flag = 只读
-#   - --enable / --disable 二选一, 互斥
-#   - --web/--tcp/--icp 值必须 0 或 1
-#   - 业务行必须在; 不存在时直接报错 (add_business.sh 才会创建)
-#   - 仅修改你给的字段, 其它字段不动
+# Rules:
+#   - -n is required; at least one change flag; no flag at all = read-only
+#   - --enable / --disable: pick one, they are mutually exclusive
+#   - --web/--tcp/--icp values must be 0 or 1
+#   - the business row must exist; error out when it does not (only add_business.sh creates it)
+#   - only the fields you pass are modified, the other fields stay untouched
 
 set -euo pipefail
 

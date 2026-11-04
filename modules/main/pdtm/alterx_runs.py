@@ -1,14 +1,14 @@
-"""alterx 节奏控制:决定本轮是否跑 alterx 派生。
+"""alterx cadence control: decides whether this round runs the alterx derivation.
 
-子命令:
-  should-run  - 查 alterx_runs.last_ran_at,与 cadence 天数比较。
-               首跑(无行)=> 视为过期,退 0;节奏内(新鲜)=> 退 1。
-  mark        - 把当前时间写入 alterx_runs.last_ran_at (UPSERT)。
-               接受 --conn 标志以便并入外层事务(与 permutation_state.record 共享 commit)。
+Subcommands:
+  should-run  - read alterx_runs.last_ran_at and compare it with the cadence in days.
+               first run (no row) => treated as expired, exit 0; within the cadence (fresh) => exit 1.
+  mark        - write the current time into alterx_runs.last_ran_at (UPSERT).
+               accepts the --conn flag so it can join the outer transaction (shared commit with permutation_state.record).
 
-环境变量 / 标志:
-  ALTERX_CADENCE_DAYS / --cadence-days   节奏天数,默认 30,设 0 即"永远过期"(每跑都跑)
-  FORCE_ALTERX / --force                 1 表示忽略节奏强制跑一次,should-run 与 mark 都生效
+Environment variables / flags:
+  ALTERX_CADENCE_DAYS / --cadence-days   cadence in days, default 30, setting 0 means "always expired" (run every time)
+  FORCE_ALTERX / --force                 1 means ignore the cadence and force one run, takes effect for both should-run and mark
 """
 from __future__ import annotations
 

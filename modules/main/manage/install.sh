@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# modules/main/manage/install.sh — 装 manage 模块(业务管理)
+# modules/main/manage/install.sh — install the manage module (business management)
 #
-# manage 模块组成:
-#   - add_business.sh  加业务(seed)
-#   - set_config.sh    业务 config 切换
-#   - seeds/           种子业务数据(预留 .gitkeep)
+# manage module contents:
+#   - add_business.sh  add a business (seed)
+#   - set_config.sh    switch the business config
+#   - seeds/           seed business data (reserved .gitkeep)
 #
-# 用法:
-#   bash install.sh                  # 默认:检查 + 创建 seeds/
-#   bash install.sh --check          # 只查依赖
+# Usage:
+#   bash install.sh                  # default: check + create seeds/
+#   bash install.sh --check          # only check the dependencies
 #   bash install.sh --uninstall
 #
-# 退出码:0/1/2/3/4 同 pdtm 模块
+# Exit codes: 0/1/2/3/4 same as the pdtm module
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ usage() {
     sed -n "2,13p" "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
-# ---- 检查 ----
+# ---- check ----
 check_deps() {
     local rc=0
     command -v bash >/dev/null 2>&1 || { err "缺 bash"; rc=2; }
@@ -37,7 +37,7 @@ check_deps() {
     return $rc
 }
 
-# ---- 准备 seeds 目录 ----
+# ---- prepare the seeds directory ----
 install() {
     mkdir -p "$SCRIPT_DIR/seeds"
     if [ ! -f "$SCRIPT_DIR/seeds/.gitkeep" ]; then

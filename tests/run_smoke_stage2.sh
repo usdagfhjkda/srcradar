@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/run_smoke_stage2.sh — 完整 stage 2 本地跑(对应 GitHub Actions workflow):
+# tests/run_smoke_stage2.sh — full local stage 2 run (mirrors the GitHub Actions workflow):
 #   -1/10  Install srcradar modules (db + pdtm + manage)
 #    0/10  Seed scope (smoketest) + add_business
 #    1/10  Verify srcradar dispatcher
@@ -12,7 +12,7 @@
 #    8/10  Assert algo_diff change_type verdicts
 #    9/10  Cleanup fixture servers
 #
-# 用法:
+# Usage:
 #   ./tests/run_smoke_stage2.sh
 set -euo pipefail
 
@@ -142,9 +142,9 @@ echo
 echo "===================================================="
 echo "[6/10] Middle: ct2 servers swap initial -> changed"
 echo "===================================================="
-# 用 fixture_server 自带的 GET /change endpoint 触发 swap.
-# 一个 server 启着 (round 1 启的), 调 /change 后永久切到 changed.json.
-# ct0 server 不动 (port 28080/28504 持续 same body).
+# trigger the swap with the GET /change endpoint built into fixture_server.
+# one server stays up (the one started in round 1); after calling /change it switches permanently to changed.json.
+# the ct0 servers are left alone (port 28080/28504 keep serving the same body).
 for PORT in "${CT2_PORTS[@]}"; do
     if ! curl -sf "http://127.0.0.1:${PORT}/change" >/dev/null 2>&1; then
         echo "[FAIL] ct2 swap on :${PORT} (GET /change failed)"

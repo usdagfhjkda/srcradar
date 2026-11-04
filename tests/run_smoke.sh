@@ -1,35 +1,35 @@
 #!/usr/bin/env bash
 # tests/run_smoke.sh -- 11-port x 3-round fixture-driven smoke (local-only).
 #
-# 只本地:CI 仍跑 5 端口 + tests/smoke_e2e.py 18 scenario (见 .github/workflows/smoke_e2e.yml).
-# CI 不受本 wrapper 影响. 不动 modules/* 或 config/*.
+# local only: CI still runs 5 ports + tests/smoke_e2e.py 18 scenarios (see .github/workflows/smoke_e2e.yml).
+# CI is not affected by this wrapper. modules/* and config/* are left untouched.
 #
-# 11 端口配置 (复用一个 fixture server 二进制, 多 fixture JSON).
+# 11 port setup (reuses one fixture server binary, multiple fixture JSONs).
 #   ct0 ports (28800/28802/28801) -> spring_boot / aliyun_oss / (none initially)
 #   ct2 302_200 ports (28804/28805/28810/28803/28808) -> 302_200/initial & changed
 #   ct2 body_drift ports (28805/28806/28809) -> body_drift/initial & changed
 #   ct2 body_growth ports (28807/28810) -> body_growth/initial & changed
 #
 # Round 1: cold-start 28804/28805/28810  (28804 = 302_200 R1, 28805 = body_drift R1, 28810 = body_growth R1)
-#   daily_monitor 一次 → 3 row ct=1
-#   SQL deactivate 这 3 row (is_active=0)
-#   /stop 这 3 个 server
+#   daily_monitor once → 3 rows ct=1
+#   SQL deactivate these 3 rows (is_active=0)
+#   /stop these 3 servers
 #
 # Round 2: cold-start 28800/28802/28803/28806/28807/28808/28809 (7 ports)
-#   daily_monitor 一次 → 11 row 在 db; 7 个新 row ct=1, 3 个旧 row 仍 ct=1
-#   /stop 这 7 个 server
+#   daily_monitor once → 11 rows in db; the 7 new rows are ct=1, the 3 old rows are still ct=1
+#   /stop these 7 servers
 #
 # Round 3 setup (SQL reactivate R1 ports + start/restart/change/dead):
 #   - reactivate 28804/28805/28810 is_active=1
-#   - RESTART 28804 (same R1 fixture) → 期望 ct=4 (reactivated)
-#   - RESTART 28805 (same R1 fixture) + /change → 期望 ct=2 (reactivated+body)
-#   - 不动 28810 (dead, no server) → 期望 ct=8 (deactivated)
-#   - START 28801 cold-start (302_200/initial) → 期望 ct=1
-#   - 维持 28800/28802/28806/28808 (same fixture, R2) → 期望 ct=0
-#   - /change 28803/28807/28809 → 期望 ct=2
-#   - daily_monitor 一次
+#   - RESTART 28804 (same R1 fixture) → expect ct=4 (reactivated)
+#   - RESTART 28805 (same R1 fixture) + /change → expect ct=2 (reactivated+body)
+#   - leave 28810 alone (dead, no server) → expect ct=8 (deactivated)
+#   - START 28801 cold-start (302_200/initial) → expect ct=1
+#   - keep 28800/28802/28806/28808 (same fixture, R2) → expect ct=0
+#   - /change 28803/28807/28809 → expect ct=2
+#   - daily_monitor once
 #
-# 用法:
+# Usage:
 #   ./tests/run_smoke.sh
 
 set -uo pipefail
@@ -37,7 +37,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT" || exit
 
-# 端口矩阵 ===========================================================
+# port matrix ===========================================================
 declare -A R1_FIX   # Round 1 fixture
 declare -A R2_FIX   # Round 2 fixture (initial)
 declare -A R3_FIX   # Round 3 fixture (cold-start 28801)
@@ -69,7 +69,7 @@ R3_ACTION[28804]="restart"
 R3_ACTION[28805]="restart_change"
 R3_ACTION[28810]="dead"
 
-# 期望 ct 矩阵 (round 3 跑完后)
+# expected ct matrix (after round 3 has run)
 declare -A EXPECT_CT
 EXPECT_CT[28800]=0
 EXPECT_CT[28801]=1
@@ -99,7 +99,7 @@ err()  { printf "[smoke][err] %s\n" "$*" >&2; }
 
 # === Helpers ============================================================
 
-# 杀掉某个端口的进程 (lsof + kill -9)
+# kill the process on a given port (lsof + kill -9)
 kill_port() {
     local port="$1"
     local PIDS
@@ -110,7 +110,7 @@ kill_port() {
     fi
 }
 
-# 启 smoke_fixture_server.py 在 port + file, 等 /health
+# start smoke_fixture_server.py on port + file, wait for /health
 start_server() {
     local port="$1" file="$2"
     local attempt=0
@@ -149,7 +149,7 @@ start_server() {
     return 1
 }
 
-# /stop 服务器 (用 curl /stop 路由, 由 smoke_fixture_server.py 处理 SIGTERM)
+# /stop a server (via the curl /stop route, smoke_fixture_server.py handles SIGTERM)
 stop_server() {
     local port="$1"
     if ! curl -sf --max-time 3 "http://127.0.0.1:${port}/stop" >/dev/null 2>&1; then
@@ -168,7 +168,7 @@ stop_server() {
     return 1
 }
 
-# /change 服务器 (切到 changed fixture)
+# /change a server (switch to the changed fixture)
 change_fixture() {
     local port="$1"
     if ! curl -sf "http://127.0.0.1:${port}/change" >/dev/null 2>&1; then
@@ -241,7 +241,7 @@ log "daily_monitor round 1"
 export SRCDAR_PORTS="28804,28805,28810"
 $SRCDAR_CMD daily daily_monitor
 
-# SQL deactivate 这 3 row
+# SQL deactivate these 3 rows
 for port in "${R1_PORTS[@]}"; do
     stop_server "$port"
 done

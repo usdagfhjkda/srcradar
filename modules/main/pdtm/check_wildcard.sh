@@ -1,54 +1,55 @@
 #!/usr/bin/env bash
 #
-# check_wildcard.sh - 用 dnsx 判断 glob 域是否开启了泛解析（wildcard DNS）
+# check_wildcard.sh - use dnsx to determine whether a glob domain has wildcard DNS enabled
 #
-# 原理：对含 `*` 的 glob 模式（如 `*.example.com` / `cc-*.example.com` /
-#       `aaa.*.bbb.com`），把 `*` 替换为随机 label 后 DNS 探测；能解析则为泛解析。
-#       对不含 `*` 的精确单子域（如 `demo.scanme.sh`），不需要 wildcard 检测
-#       （它就是一个具体 host，不存在"通配"语义）。
+# How it works: for a glob pattern containing `*` (e.g. `*.example.com` / `cc-*.example.com` /
+#       `aaa.*.bbb.com`), replace `*` with a random label and probe it over DNS; if it
+#       resolves, the domain is a wildcard. For an exact single subdomain without `*`
+#       (e.g. `demo.scanme.sh`) no wildcard check is needed
+#       (it is one concrete host, there is no "wildcard" semantics).
 #
-# 用法：
+# Usage:
 #   ./check_wildcard.sh target.txt
 #   cat target.txt | ./check_wildcard.sh
 #
-# 输出：
-#   wildcard.txt     -> 开启了泛解析的 glob 模式
-#   no_wildcard.txt  -> 没有开启泛解析 / 精确单子域（不需要检测）
+# Output:
+#   wildcard.txt     -> glob patterns with wildcard DNS enabled
+#   no_wildcard.txt  -> no wildcard DNS / exact single subdomain (no check needed)
 #
 set -euo pipefail
 
-# ---- 加载 config/pdtm.conf(优先级: env > config > 脚本默认值) ----
+# ---- load config/pdtm.conf (priority: env > config > script default) ----
 SCRIPT_DIR_CW="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR_CW/../lib/load_config.sh"
 load_config_set "$SCRIPT_DIR_CW/../../../config/pdtm.conf" "$SCRIPT_DIR_CW/../lib"
 
-# ---- 配置 ----
+# ---- config ----
 INPUT="${1:-/dev/stdin}"
 WILDCARD_OUT="wildcard.txt"
 NORMAL_OUT="no_wildcard.txt"
-# 解析器来源与 ./resolvers 文件保持一致(见 README §八-11)
+# resolver source stays consistent with the ./resolvers file (see README section 8-11)
 resolvers_file="${resolvers_file:-resolvers}"
 RESOLVERS="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
 [ -z "$RESOLVERS" ] && { echo "[-] 错误: $resolvers_file 文件为空或不可读" >&2; exit 1; }
 PROBES=3
 
-# ---- 依赖检查 ----
+# ---- dependency check ----
 command -v dnsx >/dev/null 2>&1 || {
   echo "[!] 未找到 dnsx，请先安装：go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest" >&2
   exit 1
 }
 
-# 清空输出文件
+# truncate the output files
 : > "$WILDCARD_OUT"
 : > "$NORMAL_OUT"
 
-# 生成一个随机字符串（用于替换 glob 中的 *）
+# generate a random string (used to replace * in the glob)
 rand_label() {
   head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-16
 }
 
 while IFS= read -r line || [ -n "$line" ]; do
-  # 去空白、跳过空行和注释
+  # strip whitespace, skip empty lines and comments
   line="$(echo "$line" | tr -d '[:space:]')"
   [ -z "$line" ] && continue
   case "$line" in \#*) continue ;; esac
@@ -56,8 +57,8 @@ while IFS= read -r line || [ -n "$line" ]; do
   is_wildcard="no"
 
   if [[ "$line" == *\** ]]; then
-    # 含 * 的 glob pattern:把 * 替换为随机 label 再 dnsx 探测
-    # 例: *.example.com       -> <rand>.example.com
+    # glob pattern containing *: replace * with a random label, then probe with dnsx
+    # e.g. *.example.com       -> <rand>.example.com
     #     cc-*.example.com    -> cc-<rand>.example.com
     #     aaa.*.bbb.com       -> aaa.<rand>.bbb.com
     for _ in $(seq "$PROBES"); do
@@ -69,7 +70,7 @@ while IFS= read -r line || [ -n "$line" ]; do
       fi
     done
   else
-    # 精确单子域:不存在"通配"语义,直接归到 no_wildcard
+    # exact single subdomain: no "wildcard" semantics, goes straight to no_wildcard
     is_wildcard="no"
   fi
 

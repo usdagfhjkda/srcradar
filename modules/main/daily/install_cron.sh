@@ -7,13 +7,13 @@
 #
 # The installed entry always runs `-type pdtm,icp`. Per-business filtering
 # happens in `recon_business_config` (recon.sqlite3), read by
-# daily_monitor.sh at runtime — see README §四. This script no longer
+# daily_monitor.sh at runtime — see README "install / uninstall cron". This script no longer
 # takes -type: the config table is the single source of truth for what
 # each business runs.
 #
 # enscan is NOT in cron — it's a manual-only stage (db_align data refresh),
 # not gated by config and not yet considered production-ready. Invoke
-# manually via `run_one_business.sh -type enscan 业务名` when needed.
+# manually via `run_one_business.sh -type enscan <business_name>` when needed.
 #
 # Beijing-time 03:00 daily. The user runs as ubuntu (no sudo needed for
 # `crontab -`). flock ensures manual + cron runs cannot overlap.

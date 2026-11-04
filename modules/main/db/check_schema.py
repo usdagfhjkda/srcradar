@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""check_schema.py — 校对 db/schema.sql vs 各源文件里的 CREATE TABLE。
+"""check_schema.py — cross-check db/schema.sql against the CREATE TABLE statements in the source files.
 
-check-only,不修改任何东西。
+check-only, it does not modify anything.
 
-退出码:
-    0 = 一致(允许报告里只有 "ACCEPTED-DRIFT" 类目)
-    1 = drift(出现 "REAL-DRIFT",需要人工同步 schema.sql / 源文件)
+Exit codes:
+    0 = consistent (the report may contain only "ACCEPTED-DRIFT" categories)
+    1 = drift (a "REAL-DRIFT" appears, schema.sql / the source files must be synced by hand)
 
-分类:
-    - REAL-DRIFT:       表结构真不一致(增/减列) → exit 1
-    - ACCEPTED-DRIFT:   ALTER-列 + 隐式建表 等 A1 协议下预期的差异 → exit 0 但打印提示
-    - MISSING/NEW:      同 REAL-DRIFT,exit 1
+Categories:
+    - REAL-DRIFT:       the table structure really differs (column added/removed) → exit 1
+    - ACCEPTED-DRIFT:   differences expected under the A1 protocol, such as ALTER columns + implicit table creation → exit 0 but prints a notice
+    - MISSING/NEW:      same as REAL-DRIFT, exit 1
 """
 import pathlib
 import re
@@ -20,11 +20,11 @@ schema_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 \
     else pathlib.Path(__file__).resolve().parent.parent / "db/schema.sql"
 repo = schema_path.parent.parent.parent
 
-# 这些表是迁移临时表,不该出现在 schema.sql
+# these tables are migration temporaries, they must not appear in schema.sql
 TRANSIENT_TABLES = {"web_subdomains_new"}
 
-# A1 协议下"通过 ALTER TABLE 加列"在源文件里会出现,而 schema.sql 把它们合并进建表 DDL。
-# 这里列出已知的 ALTER 列 — 对比时允许 schema.sql "超前"。
+# under the A1 protocol "adding a column via ALTER TABLE" shows up in the source files, while schema.sql merges them into the CREATE TABLE DDL.
+# the known ALTER columns are listed here — during the comparison schema.sql is allowed to be "ahead".
 ACCEPTED_ALTER_COLS = {
     "businesses":     {"change_type"},
     "companies":      {"change_type"},
@@ -88,14 +88,14 @@ schema_fps = extract_create_tables(schema_text)
 real_drift = []
 accepted_drift = []
 
-# schema.sql vs 源文件
+# schema.sql vs source files
 for t, scols in schema_fps.items():
     candidates = []
     for tag, fp in src_fps.items():
         if t in fp:
             candidates.append((tag, fp[t]))
     if not candidates:
-        # 仅 schema.sql 有(隐式建表合法)
+        # only in schema.sql (implicit table creation is legal)
         accepted_drift.append(f"[ACCEPTED] {t} 只在 schema.sql (隐式建表,源文件仅 INSERT)")
         continue
     src_cols = set()
@@ -103,7 +103,7 @@ for t, scols in schema_fps.items():
         src_cols.update(c)
     schema_cols = set(scols)
     only_schema = schema_cols - src_cols
-    # 分类 REAL vs ACCEPTED
+    # classify REAL vs ACCEPTED
     accepted = ACCEPTED_ALTER_COLS.get(t, set())
     real_new = only_schema - accepted
     accepted_only = only_schema & accepted
@@ -114,7 +114,7 @@ for t, scols in schema_fps.items():
         accepted_drift.append(
             f"[ACCEPTED] {t}: schema.sql 超前 ALTER 列: {sorted(accepted_only)}")
 
-# 源文件 vs schema.sql
+# source files vs schema.sql
 for tag, fp in src_fps.items():
     for t in fp:
         if t in TRANSIENT_TABLES:

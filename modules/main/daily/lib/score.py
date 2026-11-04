@@ -9,7 +9,7 @@ Two entry points:
   2. score_new(conn, ids)    — cron hook. Sets score for the given hash ids
                               (the set newly inserted by _upsert_web_records).
                               Skips rows that already have a score (no
-                              overwriting manual edits — see README §"评分规则").
+                              overwriting manual edits — see README "Scoring rules").
 
 Rules (baseline 50; INT 0..100):
   +20  any active web_subdomain has CJK chars in title (U+4E00-U+9FA5)
@@ -19,7 +19,7 @@ Rules (baseline 50; INT 0..100):
 
 Description column is NEVER touched by this module.
 
-Cross-project contract (see README §"跨项目依赖"):
+Cross-project contract (see README "Cross-project dependency"):
   import_scan_results.py calls `score_new` as a subprocess:
       python3 lib/score.py score-new --db <path> --ids <id1,id2,...>
   The subprocess is best-effort: a failure here does NOT break the import.

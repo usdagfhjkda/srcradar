@@ -1,10 +1,10 @@
-"""alterx 排列状态缓存。
+"""alterx permutation state cache.
 
-子命令:
-  filter  - 读 stdin 上的候选排列,过滤掉已解析/缓存未到期/泛解析命中的项,输出剩余
-  record  - 把 dnsx 解析结果写回 permutation_state
+Subcommands:
+  filter  - read the candidate permutations on stdin, filter out the ones already resolved / still cached / matched by wildcard resolution, output the rest
+  record  - write the dnsx resolution results back into permutation_state
 
-nxdomain 缓存窗口 30 天,词表 hash 变更触发全量重试。
+The nxdomain cache window is 30 days; a wordlist hash change triggers a full retry.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from alterx_runs import mark_ran_with_conn
 
-CACHE_DAYS = 30  # nxdomain 重试窗口
+CACHE_DAYS = 30  # nxdomain retry window
 
 
 def now_iso() -> str:
@@ -68,7 +68,7 @@ def filter_permutations(db_path: str, business_id: int, wordlist_hash: str,
             continue
         status, next_at, wlh = row
         if wlh != wordlist_hash:
-            kept.append(perm)  # 词表变更,重新尝试
+            kept.append(perm)  # wordlist changed, retry
             continue
         if status in ("resolved", "wildcard_hit"):
             skipped_resolved += 1
@@ -123,8 +123,8 @@ def record_permutations(db_path: str, business_id: int, wordlist_hash: str,
                 """,
                 rows,
             )
-        # 与 alterx_runs 在同一 commit,半状态无法回滚。无候选时也写
-        # alterx_runs,这样 FORCE_ALTERX=1 之类也能正确重置节奏时钟。
+        # same commit as alterx_runs, a half state cannot be rolled back. also written
+        # when there are no candidates, so that things like FORCE_ALTERX=1 correctly reset the cadence clock.
         mark_ran_with_conn(
             conn, business_id, wordlist_hash,
             candidates=len(rows), resolved=len(resolved_set),

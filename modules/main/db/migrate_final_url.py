@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-# migrate_final_url.py — 给 web_subdomains / web_subdomains_pre 加 final_url 列
+# migrate_final_url.py — add a final_url column to web_subdomains / web_subdomains_pre
 #
-# 背景 (2026-10-28):
-#   快字段比较里有一个 redirect 槽位, 需要单独记录跟随重定向后的最终 URL
-#   (CompareInput.prev_redirect / curr_redirect), 但从来没被填充过 ——
-#   pipeline.cpp 构造 CompareInput 时没赋值, sqlite_io.cpp 的 SELECT 也没取。
-#   所以 STEP 1 实际只比 title/status_code/technologies/content_length 四个字段。
+# Background (2026-10-28):
+#   the fast-field comparison has a redirect slot that has to record the final URL after following the redirect
+#   (CompareInput.prev_redirect / curr_redirect), but it was never populated —
+#   pipeline.cpp does not assign it when building CompareInput, and the SELECT in sqlite_io.cpp does not read it either.
+#   so STEP 1 actually compares only the four fields title/status_code/technologies/content_length.
 #
-#   补这个槽位时不能用 web_subdomains.url 列: 它的形态不稳定 ——
-#   httpx 连的是 IP 还是域名取决于扫描阶段的输入格式, 同一资产每天可能是
-#   域名形态也可能是 IP 形态, 导致 url 不等 -> 误判 fast_field -> ct=2
-#   (body 逐字节相同也被判成变更)。
-#   httpx 的 final_url (跟随 -follow-redirects 后的最终落点) 实测稳定:
-#     - 同一资产, IP 直连与域名直连两种输入下 final_url 完全相同
-#     - 2xx 响应里该字段不存在 -> 天然为空 -> 比较时两边都空即相等,
-#       自动跳过 (200 与 302 不需要分流, 空值自动跳过)
+#   the web_subdomains.url column cannot be used to fill this slot: its form is unstable —
+#   whether httpx connects to the IP or to the domain depends on the input format of the scan stage, the same asset may be
+#   a domain on one day and an IP on another, so url differs -> false fast_field -> ct=2
+#   (a byte-identical body is then judged as changed).
+#   httpx's final_url (the final landing point after following -follow-redirects) is stable in practice:
+#     - for the same asset, final_url is identical for both the IP-direct and the domain-direct input form
+#     - the field does not exist in a 2xx response -> naturally empty -> both sides empty means equal,
+#       so it is skipped automatically (200 and 302 need no split, empty values are skipped automatically)
 #
-# 用法:
+# Usage:
 #   python3 migrate_final_url.py --db <path> --check
 #   python3 migrate_final_url.py --db <path> --apply
 #
-# 幂等: 列已存在则跳过。
+# Idempotent: skipped when the column already exists.
 
 import argparse
 import sqlite3
@@ -29,7 +29,7 @@ from pathlib import Path
 
 DEFAULT_DB = str(Path(__file__).resolve().parent / "recon.sqlite3")
 
-# 表 -> 新增列
+# table -> new column
 TABLES = ("web_subdomains", "web_subdomains_pre")
 COLUMNS = ("final_url",)
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """migrate_business_scan_count.py — idempotent schema migration.
 
-2026-10-01: 给 businesses 加 scan_count 列 (冷启动期守护).
-支持 --check (只检查, 不改 DB) 和 --apply (缺失时 ALTER TABLE).
+2026-10-01: add a scan_count column to businesses (cold-start guard).
+Supports --check (check only, do not touch the DB) and --apply (ALTER TABLE when missing).
 """
 import argparse
 import sqlite3
 import sys
 from pathlib import Path
 
-DEFAULT_DB = str((Path(__file__).resolve().parent / "recon.sqlite3"))  # 同目录下的 recon.sqlite3
+DEFAULT_DB = str((Path(__file__).resolve().parent / "recon.sqlite3"))  # recon.sqlite3 in the same directory
 SQL_PATH = Path(__file__).resolve().parent.parent / "daily" / "lib" / "migrate_business_scan_count.sql"
 
 
@@ -28,15 +28,15 @@ def check_only(db_path: str) -> int:
         conn.close()
 
 
-# Backfill 规则: 按 id ASC (假设 id 反映接入时间顺序), id-1 索引本表.
-# operator 决策 (2026-10-01): id=1 -> 4, id=2 -> 3, id=3 -> 2, id>=4 -> 0.
-# 真实业务名不在本文件出现,具体数值由本常量决定。
+# Backfill rule: by id ASC (assuming id reflects the onboarding order), id-1 indexes this table.
+# operator decision (2026-10-01): id=1 -> 4, id=2 -> 3, id=3 -> 2, id>=4 -> 0.
+# the real business names do not appear in this file, the concrete values are decided by this constant.
 BACKFILL_SEQUENCE = [4, 3, 2]  # idx = (id - 1) -> scan_count target
 
 
 def _do_backfill(conn: sqlite3.Connection) -> None:
-    """Backfill 老业务 scan_count 初值 (id-based). 仅影响 scan_count==0 的行.
-    Idempotent: 已设值的不动。
+    """Backfill the initial scan_count of the old businesses (id-based). Only affects rows where scan_count==0.
+    Idempotent: rows that already have a value are left alone.
     """
     rows = conn.execute(
         "SELECT id, business_name FROM businesses WHERE scan_count = 0 ORDER BY id ASC"
@@ -62,7 +62,7 @@ def apply(db_path: str) -> int:
     try:
         if has_column(conn, "businesses", "scan_count"):
             print("[apply] businesses.scan_count 已存在, no-op")
-            # 仍然跑 backfill: idempotent, scan_count=0 行才更新
+            # still run the backfill: idempotent, only rows with scan_count=0 are updated
             _do_backfill(conn)
             conn.commit()
             return 0
@@ -71,7 +71,7 @@ def apply(db_path: str) -> int:
         _do_backfill(conn)
         conn.commit()
         print("[应用] 已迁移: businesses + scan_count + idx + 老业务 backfill")
-        # 验证
+        # verify
         for r in conn.execute("SELECT id, business_name, scan_count FROM businesses ORDER BY id"):
             print(f"  biz_id={r[0]} {r[1]} scan_count={r[2]}")
         return 0
@@ -89,7 +89,7 @@ def main() -> int:
         return check_only(args.db)
     if args.do_apply:
         return apply(args.db)
-    # 默认: 等同 --apply (idempotent)
+    # default: same as --apply (idempotent)
     return apply(args.db)
 
 

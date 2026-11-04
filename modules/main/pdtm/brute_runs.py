@@ -1,13 +1,13 @@
-"""shuffledns 节奏控制:决定本轮是否跑 brute 派生。
+"""shuffledns cadence control: decides whether this round runs the brute derivation.
 
-子命令:
-  should-run  - 查 brute_runs.last_ran_at,与 cadence 天数比较。
-               首跑(无行)=> 视为过期,退 0;节奏内(新鲜)=> 退 1。
-  mark        - 把当前时间写入 brute_runs.last_ran_at (UPSERT)。
+Subcommands:
+  should-run  - look up brute_runs.last_ran_at and compare it against the cadence in days.
+               first run (no row) => treated as expired, exit 0; within the cadence (fresh) => exit 1.
+  mark        - write the current time into brute_runs.last_ran_at (UPSERT).
 
-环境变量 / 标志:
-  BRUTE_CADENCE_DAYS / --cadence-days   节奏天数,默认 30,设 0 即"永远过期"(每跑都跑)
-  FORCE_BRUTE / --force                 1 表示忽略节奏强制跑一次,should-run 与 mark 都生效
+Environment variables / flags:
+  BRUTE_CADENCE_DAYS / --cadence-days   cadence in days, default 30; 0 means "always expired" (run every time)
+  FORCE_BRUTE / --force                 1 means ignore the cadence and force one run; applies to both should-run and mark
 """
 from __future__ import annotations
 

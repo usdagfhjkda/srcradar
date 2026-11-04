@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 #
-# modules/public/katana/install.sh — 装 katana 模块(可选 URL 扫描插件)
+# modules/public/katana/install.sh — install the katana module (optional URL scanning plugin)
 #
-# katana 模块组成:
-#   - katana_enrich.sh         CLI 入口(daily-url stage / dashboard 调用)
-#   - lib/katana_runner.py     subprocess + JSONL 解析 + 入 web_hash_urls
-#   - lib/risks.py             危险路由 5 词黑名单(沿用 URLFinder)
-#   - lib/schema_map.py        katana JSONL → web_hash_urls 字段对齐
-#   - config/katana.conf.example 占位模板(operator 自填真值后另存为
-#                              config/katana.conf,.gitignore 屏蔽)
+# katana module parts:
+#   - katana_enrich.sh         CLI entry point (daily-url stage / dashboard calls)
+#   - lib/katana_runner.py     subprocess + JSONL parsing + insert into web_hash_urls
+#   - lib/risks.py             dangerous route 5-word blacklist (same as URLFinder)
+#   - lib/schema_map.py        katana JSONL → web_hash_urls field alignment
+#   - config/katana.conf.example placeholder template (the operator fills in the real
+#                              values and saves it as config/katana.conf, .gitignore keeps it out)
 #
-# 用法:
-#   bash install.sh              # go install katana + 写 example + 自检
-#   bash install.sh --check      # 只查依赖 + 自检,不动 config / 不装二进制
-#   bash install.sh --uninstall  # 不删二进制(由 go env 管),只删 config
+# Usage:
+#   bash install.sh              # go install katana + write the example + self-check
+#   bash install.sh --check      # only check the dependencies + self-check, do not touch config / do not install the binary
+#   bash install.sh --uninstall  # do not delete the binary (managed by go env), only delete the config
 #
-# 退出码:
+# Exit codes:
 #   0 = OK
-#   2 = 缺依赖 (go / python3 / mmh3 / curl / git)
-#   3 = katana 模块自检失败(关键文件缺失)
+#   2 = missing dependency (go / python3 / mmh3 / curl / git)
+#   3 = katana module self-check failed (key file missing)
 
 set -euo pipefail
 
@@ -42,11 +42,11 @@ check_deps() {
     command -v curl >/dev/null 2>&1      || { err "缺 curl"; rc=2; }
     command -v git >/dev/null 2>&1       || { err "缺 git"; rc=2; }
 
-    # mmh3 Python 模块(algo_diff + response_hash 算法依赖)
+    # mmh3 Python module (algo_diff + response_hash algorithm dependency)
     python3 -c "import mmh3" 2>/dev/null \
         || { err "缺 python3 mmh3 (pip install mmh3)"; rc=2; }
 
-    # 关键文件
+    # key files
     [ -f "${SCRIPT_DIR}/katana_enrich.sh" ] \
         || { err "katana_enrich.sh 缺失"; rc=3; }
     [ -f "${SCRIPT_DIR}/lib/katana_runner.py" ] \
@@ -69,7 +69,7 @@ install_katana_bin() {
         err "go install 失败;检查 GOPATH / GOBIN / 网络"
         return 1
     fi
-    # katana 默认装到 $(go env GOPATH)/bin;PATH 通常已含,显式 echo 一次
+    # katana installs to $(go env GOPATH)/bin by default; PATH usually already includes it, echo it once explicitly
     local gobin
     gobin="$(go env GOPATH)/bin"
     if [ -x "${gobin}/katana" ] && ! command -v katana >/dev/null 2>&1; then
@@ -84,25 +84,25 @@ write_example() {
         log "写入 example: $EXAMPLE_CONF"
         mkdir -p "$(dirname "$EXAMPLE_CONF")"
         cat > "$EXAMPLE_CONF" <<'CONFEOF'
-# katana 模块配置占位模板
+# katana module config placeholder template
 #
-# 真值请复制本文件为 config/katana.conf(同目录)再编辑。
-# config/katana.conf 在 .gitignore 内,不入仓。
+# Copy this file to config/katana.conf (same directory) and edit it to fill in the real values.
+# config/katana.conf is inside .gitignore, it is not committed.
 #
-# 字段:
-#   KATANA_BIN            二进制绝对路径;留空走 PATH 探测(默认)
-#   KATANA_TIMEOUT        单 host 超时秒数(默认 600;大字典场景用户拍板)
-#   KATANA_EXTRA_RISKS    追加风险词(逗号分隔),默认: remove,delete,insert,update,logout
-#                         例: KATANA_EXTRA_RISKS=signout,drop,truncate
-#   KATANA_OMIT_BODY      1=不存 body(节省存储,response_hash 退化为 status|length)
-#                         0=存 body(默认;algo_diff 需要)
-#   KATANA_EXTRA_FLAGS    追加 katana flags(空格分隔),例: --no-sandbox
+# Fields:
+#   KATANA_BIN            absolute path of the binary; leave empty to probe PATH (default)
+#   KATANA_TIMEOUT        per-host timeout in seconds (default 600; user decision for large dictionary scenarios)
+#   KATANA_EXTRA_RISKS    extra risk words (comma separated), default: remove,delete,insert,update,logout
+#                         e.g. KATANA_EXTRA_RISKS=signout,drop,truncate
+#   KATANA_OMIT_BODY      1=do not store the body (saves storage, response_hash degrades to status|length)
+#                         0=store the body (default; algo_diff needs it)
+#   KATANA_EXTRA_FLAGS    extra katana flags (space separated), e.g. --no-sandbox
 #
-# 鉴权面:
-#   - katana 自身无鉴权;本模块通过 subprocess 调,不 link Go 源码(MIT 边界)
-#   - 5 词风险黑名单沿用 URLFinder(URLFinder/config/config.go:19),双重保险:
-#     (1) katana -crawl-out-scope regex 源头拦截
-#     (2) lib/risks.py 入库前再过一遍
+# Authentication surface:
+#   - katana itself has no auth; this module calls it via subprocess and does not link the Go source (MIT boundary)
+#   - the 5-word risk blacklist is reused from URLFinder (URLFinder/config/config.go:19), belt and braces:
+#     (1) katana -crawl-out-scope regex blocks it at the source
+#     (2) lib/risks.py checks it once more before the insert
 KATANA_BIN=
 KATANA_TIMEOUT=600
 KATANA_EXTRA_RISKS=remove,delete,insert,update,logout
@@ -113,7 +113,7 @@ CONFEOF
 }
 
 uninstall() {
-    # 不删 katana 二进制(用户可能装到全局)
+    # do not delete the katana binary (the user may have installed it globally)
     rm -f "$TARGET_CONF"
     log "已删 $TARGET_CONF(真值;example 保留)"
     log "katana 二进制未删;如需: rm \$(go env GOPATH)/bin/katana"

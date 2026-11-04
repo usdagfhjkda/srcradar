@@ -1,33 +1,35 @@
 #!/usr/bin/env bash
-# check.sh — 仅检查 srcradar 环境所需的 go / python3 / git 版本。
+# check.sh — only checks the go / python3 / git versions srcradar needs.
 #
-# 行为:
-#   - 不安装任何东西。
-#   - 三个工具逐项查,每项独立报告。
-#   - 全部达标:exit 0 + 汇总 OK。
-#   - 有任意一项不达标:exit 1 + 打印修法(不自动修)。
+# Behaviour:
+#   - installs nothing.
+#   - checks the three tools one by one, each reported separately.
+#   - all of them pass: exit 0 + a summary OK.
+#   - any of them fails: exit 1 + prints how to fix it (no auto-fix).
 #
-# 设计动机:
-#   init.sh 的 check / check-deps 路径耦合了 6+ 项,能装则装、不能装则报告。
-#   check.sh 职责单一 —— 只答"环境够不够跑 srcradar",答完即走。
-#   装的事归 install.sh。
+# Design rationale:
+#   the check / check-deps paths of init.sh are coupled to 6+ items, installing
+#   what can be installed and reporting what cannot.
+#   check.sh has a single responsibility — it only answers "is the environment
+#   good enough to run srcradar", and leaves once the answer is given.
+#   installing is install.sh's job.
 #
-# 用法:
-#   ./check.sh             # 查全部
-#   ./check.sh -h|--help   # 用法
+# Usage:
+#   ./check.sh             # check everything
+#   ./check.sh -h|--help   # usage
 #
-# 阈值:
-#   GO_MIN  = 1.25    (db_align Go 1.21+ + cdnmatch / ENScan_GO latest tag 要求)
-#   PY_MIN  = 3.12    (db/init_db.py / daily/lib/*.py / ymicp/*.py 实际只 >= 3.7,
-#                       收紧到 3.12 是为了 pathlib modern 语法 + tomllib 安全冗余)
-#   GIT_MIN = 2.0     (init 时 clone 上游 fork; 任何 >= 2.x 即可)
+# Thresholds:
+#   GO_MIN  = 1.25    (db_align needs Go 1.21+; cdnmatch / ENScan_GO need the latest tag)
+#   PY_MIN  = 3.12    (db/init_db.py / daily/lib/*.py / ymicp/*.py really only need >= 3.7,
+#                       tightened to 3.12 is for modern pathlib syntax + tomllib safety margin)
+#   GIT_MIN = 2.0     (init clones the upstream fork; any >= 2.x works)
 #
-# 退出码:
-#   0   三项全部达标
-#   1   任意一项不达标(缺失或版本低)
-#   2   参数错误
+# Exit codes:
+#   0   all three pass
+#   1   any of them fails (missing or version too low)
+#   2   bad arguments
 #
-# 关联脚本:install.sh(会在入口处再跑一次 check.sh 的检查)
+# Related script: install.sh (runs the check.sh checks again at its entry point)
 
 set -euo pipefail
 
@@ -45,7 +47,7 @@ usage() {
     sed -n '2,30p' "$0"
 }
 
-# 跨平台:command -v + 已知漏报兜底路径
+# cross-platform: command -v + fallback paths for the known false negatives
 detect_cmd_path() {
     local cmd="$1"
     command -v "$cmd" 2>/dev/null && return 0

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""init_db.py — 根据 db/schema.sql 生成空 recon.sqlite3。
+"""init_db.py — build an empty recon.sqlite3 from db/schema.sql.
 
-用法:
+Usage:
     python3 init_db.py [DB_PATH] [SCHEMA_SQL]
 
-    DB_PATH      默认 <repo>/db/recon.sqlite3
-    SCHEMA_SQL   默认 <repo>/db/schema.sql
+    DB_PATH      default <repo>/db/recon.sqlite3
+    SCHEMA_SQL   default <repo>/db/schema.sql
 
-行为:
-    - DB_PATH 不存在 → 直接建
-    - DB_PATH 已存在 → 备份到 DB_PATH.bak.YYYYMMDD_HHMMSS 再覆盖
-    - 建完校验 14 张 srcradar 表都存在;缺则报错退出 2
+Behaviour:
+    - DB_PATH does not exist → create it directly
+    - DB_PATH already exists → back it up to DB_PATH.bak.YYYYMMDD_HHMMSS, then overwrite
+    - after building, verify that all 14 srcradar tables exist; if any is missing, error out with exit 2
 
-退出码:
-    0 = 成功
-    2 = 缺表 / schema.sql 缺失 / sqlite 执行失败
+Exit codes:
+    0 = success
+    2 = missing table / schema.sql missing / sqlite execution failed
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def main() -> int:
         print(f"[err] schema.sql 缺失: {schema_path}", file=sys.stderr)
         return 2
 
-    # 已存在 → 备份
+    # already exists → back it up
     if db_path.exists():
         ts = time.strftime("%Y%m%d_%H%M%S")
         bak = db_path.with_suffix(db_path.suffix + f".bak.{ts}")
@@ -53,7 +53,7 @@ def main() -> int:
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 喂 schema
+    # feed the schema
     sql = schema_path.read_text(encoding="utf-8")
     try:
         con = sqlite3.connect(str(db_path))
@@ -65,7 +65,7 @@ def main() -> int:
     finally:
         con.close()
 
-    # 校验
+    # verify
     con = sqlite3.connect(str(db_path))
     try:
         got = {r[0] for r in con.execute(

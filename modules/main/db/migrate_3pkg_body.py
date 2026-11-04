@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-migrate_3pkg_body.py — idempotent schema migration: 给 web_subdomains /
-web_subdomains_pre 加 curr_body_1 / curr_body_2 两列 (zlib BLOB)。
+migrate_3pkg_body.py — idempotent schema migration: add the curr_body_1 /
+curr_body_2 columns (zlib BLOB) to web_subdomains / web_subdomains_pre.
 
-2026-10-25: 3 包噪声提取方案。
-  当前只有 web_subdomains.curr_body (一次扫描的 body) 和
-  web_subdomains_pre.curr_body (上一天的 body), 两点对比无法区分
-  "动态噪声" 和 "同长度的真实变更"。灰区行 (ratio 落在 0.02~0.98)
-  需要额外两次独立采样, 构成 3 包:
-      包1 = curr_body      (原扫描)
-      包2 = curr_body_1    (同一时刻连发第 1 次)
-      包3 = curr_body_2    (同一时刻连发第 2 次)
-  三包共同稳定的区域 = 真实内容; 每包都变的区域 = 动态噪声。
+2026-10-25: 3-package noise extraction scheme.
+  today there are only web_subdomains.curr_body (the body of one scan) and
+  web_subdomains_pre.curr_body (the body of the previous day); comparing two
+  points cannot tell "dynamic noise" from "a real change of the same length".
+  Grey-zone rows (ratio between 0.02 and 0.98) need two extra independent samples, forming 3 packages:
+      pkg1 = curr_body      (the original scan)
+      pkg2 = curr_body_1    (1st of two extra requests fired back to back at the same moment)
+      pkg3 = curr_body_2    (2nd of two extra requests fired back to back at the same moment)
+  The region that is stable across all three packages = real content; a region that changes in every package = dynamic noise.
 
-用法:
+Usage:
   python3 migrate_3pkg_body.py --check
   python3 migrate_3pkg_body.py --apply [--db PATH]
 """
@@ -24,7 +24,7 @@ from pathlib import Path
 
 DEFAULT_DB = str(Path(__file__).resolve().parent / "recon.sqlite3")
 
-# 表 -> 新增列
+# table -> columns to add
 TABLES = ("web_subdomains", "web_subdomains_pre")
 COLUMNS = ("curr_body_1", "curr_body_2")
 

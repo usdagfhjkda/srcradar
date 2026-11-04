@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""migrate_scope_glob.py — 把现有 scope 行 (无 *) 前面加 *. 前缀。
+"""migrate_scope_glob.py — prefix every existing scope row (without *) with a *. prefix.
 
-背景: pdtm scope 格式从纯域名 (example.com) 升级为 glob (.*.example.com)。
-对存量数据,所有无 * 的行统一在前面加 *. 即可向后兼容(因为 *.example.com
-的语义包含 example.com 本身 + 所有子域,是「最宽松」的兼容映射)。
+Background: the pdtm scope format was upgraded from a plain domain (example.com) to a glob (.*.example.com).
+For the existing data, prefixing every row that has no * with *. is enough to stay backward compatible
+(because the semantics of *.example.com cover example.com itself plus all subdomains, which is the "most permissive" compatible mapping).
 
-用法:
-    python3 migrate_scope_glob.py --db recon.sqlite3            # dry-run (默认)
-    python3 migrate_scope_glob.py --db recon.sqlite3 --apply    # 真正写库
+Usage:
+    python3 migrate_scope_glob.py --db recon.sqlite3            # dry-run (default)
+    python3 migrate_scope_glob.py --db recon.sqlite3 --apply    # really write to the DB
 """
 from __future__ import annotations
 
