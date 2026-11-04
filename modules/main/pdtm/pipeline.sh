@@ -1,44 +1,56 @@
 #!/usr/bin/env bash
-# pipeline.sh - 串联 check_wildcard → scan → scanner → import → finalize_scope
+# pipeline.sh - chains check_wildcard -> scan -> scanner -> import -> finalize_scope
 #
 # Usage:
 #   pipeline.sh -b NAME [flags]
 #
 # Flags:
 # REQUIRED:
-#   -b, --business string         业务名(从 DB 读 scope,或仅作入参传给 import)
+#   -b, --business string         the business name (the scope is read from the DB,
+#                                   or it is only passed on to import as an argument)
 #
 # INPUT:
-#   -i, --input string            输入目录,含 target.txt + exclude.txt(覆盖 DB)
-#   -t, --target string           target 文件路径(默认 target.txt)
+#   -i, --input string            the input directory, it holds target.txt + exclude.txt
+#                                   (it overrides the DB)
+#   -t, --target string           the path of the target file (target.txt by default)
 #
 # PATHS:
-#   -d, --db string               DB 路径(默认 ${DB:-${RECON_DB:-../db/recon.sqlite3}})
-#   -o, --scan-dir string         scanner 输出目录(默认 scan_results)
+#   -d, --db string               the DB path (${DB:-${RECON_DB:-../db/recon.sqlite3}} by default)
+#   -o, --scan-dir string         the output directory of the scanner (scan_results by default)
 #
 # STAGES:
-#       --tcp                     启用 TCP 端口扫描(透传 scanner.sh -all,naabu 被动+主动)
-#       --skip-check-wildcard     跳过 check_wildcard.sh
-#       --skip-scan               跳过 scan.sh(同时跳过内嵌 brute 阶段)
-#       --skip-brute              仅跳过 scan.sh 内嵌 brute 阶段(alterx 不受影响)
-#       --force-brute             强制本轮跑 brute,忽略 30 天 cadence(FORCE_BRUTE=1)
-#       --brute-mode top|rolling  brute 模式: top=SecLists 2w(默认),rolling=Jhaddix-clean
-#       --skip-scanner            跳过 scanner.sh
-#       --skip-import             跳过 import_scan_results.py
-#       --skip-reverify           跳过 reverify 阶段(默认开)
-#       --dry-run-import          import 阶段 dry-run,不写 DB
+#       --tcp                     enable the TCP port scan (passed through to scanner.sh
+#                                   -all, naumab passive + active)
+#       --skip-check-wildcard     skip check_wildcard.sh
+#       --skip-scan               skip scan.sh (and with it the embedded brute stage)
+#       --skip-brute              only skip the embedded brute stage of scan.sh (alterx
+#                                   is not affected)
+#       --force-brute             force the brute stage this round, ignoring the 30 day
+#                                   cadence (FORCE_BRUTE=1)
+#       --brute-mode top|rolling  the brute mode: top=SecLists 2w (the default),
+#                                   rolling=Jhaddix-clean
+#       --skip-scanner            skip scanner.sh
+#       --skip-import             skip import_scan_results.py
+#       --skip-reverify           skip the reverify stage (on by default)
+#       --dry-run-import          the import stage runs as a dry run, it does not write
+#                                   the DB
 #
 # DEBUG:
-#       --debug int               中间产物保留级别:0=清理,1=保留(默认 1)
-#       --keep-on-fail            仅失败时保留中间产物(已默认覆盖,留作兼容)
+#       --debug int               how much of the intermediate output is kept: 0=clean
+#                                   it up, 1=keep it (1 by default)
+#       --keep-on-fail            only keep the intermediate output on a failure (it is
+#                                   already covered by default, it is kept for
+#                                   compatibility)
 #
 # Examples:
-#   pipeline.sh -b example.com                          从 DB 读 scope
-#   pipeline.sh -b example.com -i ./input/              从 ./input/ 读 target+exclude
-#   pipeline.sh -b example.com --skip-check-wildcard    跳过泛解析探测
-#   pipeline.sh -b example.com --dry-run-import         跑全流程但不写库
-#   pipeline.sh -b example.com --debug 0                跑完清理中间文件
-#   pipeline.sh -b example.com --tcp                   启用 TCP 端口扫描
+#   pipeline.sh -b example.com                          read the scope from the DB
+#   pipeline.sh -b example.com -i ./input/              read target+exclude from ./input/
+#   pipeline.sh -b example.com --skip-check-wildcard    skip the wildcard probe
+#   pipeline.sh -b example.com --dry-run-import         run everything but do not write
+#                                                      the DB
+#   pipeline.sh -b example.com --debug 0                clean the intermediate files up
+#                                                      when it is done
+#   pipeline.sh -b example.com --tcp                   enable the TCP port scan
 #
 set -euo pipefail
 
@@ -46,12 +58,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # 2026-10-03: source load_config.sh + resolve_tools.sh —
-# httpx/dnsx 路径从 config/pdtm.conf 自动读取(env 覆盖 > conf 注入 > 默认 fallback)。
+# the httpx/dnsx paths are read from config/pdtm.conf automatically (env override >
+# the conf injection > the default fallback).
 source "$SCRIPT_DIR/../lib/load_config.sh"
 load_config_set "$SCRIPT_DIR/../../../config/pdtm.conf" "$SCRIPT_DIR/../lib"
 source "$SCRIPT_DIR/lib/resolve_tools.sh"
 
-# ===== 默认 =====
+# ===== the defaults =====
 TARGET_FILE=target.txt
 EXCLUDE_FILE=exclude.txt
 WILDCARD_OUT=wildcard.txt
@@ -74,11 +87,11 @@ BRUTE_MODE=        # brute 模式,空=默认 top
 KEEP_ON_FAIL=
 KEEP_OUTPUT=1   # 默认保留 -- 防止 import 阶段异常时数据被销毁。--debug 0 关闭。
 
-# 标记:是否由本脚本生成 target.txt / exclude.txt;且 import 实际跑过才删除
+# the marker: whether target.txt / exclude.txt were generated by this script; they are only deleted when the import actually ran
 INPUT_GENERATED=0
 IMPORT_RAN=0
 
-# ===== 参数 =====
+# ===== the arguments =====
 while [ $# -gt 0 ]; do
     case "$1" in
         -b|--business)         BUSINESS="$2"; shift 2 ;;
@@ -98,7 +111,7 @@ while [ $# -gt 0 ]; do
         --tcp)                  ENABLE_TCP=1; shift ;;
         --keep-on-fail)        KEEP_ON_FAIL=1; shift ;;
         --debug)
-            # 默认就是 --debug (KEEP_OUTPUT=1)。--debug 0 显式关闭,回到清理旧行为。
+            # the default is --debug (KEEP_OUTPUT=1). --debug 0 turns it off explicitly and goes back to the old cleanup behaviour.
             case "${2:-}" in
                 0) KEEP_OUTPUT=0; shift 2 ;;
                 1) shift 2 ;;   # 显式 1 → 默认就是, 但还是要消费掉这个 token
@@ -113,9 +126,11 @@ done
 
 [ -n "$BUSINESS" ] || { echo "需要 -b/--business 指定业务名" >&2; exit 1; }
 
-# ===== 防御: scan_results 残留检测 =====
-# 防止上一次 run(尤其 --debug 1 / 手动跑)留的 JSON/TXT 被本次 import 当新结果吃掉,
-# 把别业务的 subdomain 错挂到本业务名下。检测到非空目录直接拒绝跑,要求人工清理。
+# ===== the defence: the leftover detection in scan_results =====
+# It stops the JSON/TXT left over by the previous run (especially with --debug 1 /
+# a manual run) from being eaten by this import as new results,
+# which would attach the subdomain of another business to this business. A non-empty
+# directory makes it refuse to run and asks for a manual cleanup.
 if [ -d "$SCAN_DIR" ] && [ -n "$(ls -A "$SCAN_DIR" 2>/dev/null)" ]; then
     echo "[-] 检测到 $SCAN_DIR/ 残留文件:" >&2
     ls -la "$SCAN_DIR/" >&2
@@ -128,14 +143,16 @@ if [ -d "$SCAN_DIR" ] && [ -n "$(ls -A "$SCAN_DIR" 2>/dev/null)" ]; then
 fi
 mkdir -p "$DB_DIR"
 
-# ===== 防御: pdtm CWD 跨 run 运行时文件残留检测 =====
-# 防上一次 run(尤其 KEEP_OUTPUT=1 / ctrl-c / 中途失败)在 pdtm CWD
-# 留下 scan.sh 中间产物,本次 scanner.sh 把它们当输入读到错误业务的
-# 子域。
+# ===== the defence: the leftover runtime file detection in the pdtm CWD across runs =====
+# It stops the intermediate output of scan.sh that the previous run (especially with
+# KEEP_OUTPUT=1 / a ctrl-c / a failure halfway) left in the
+# pdtm CWD from being read by this scanner.sh as the input of the wrong
+# business.
 #
-# 不放 filter.regex / targets.regex / excludes.regex / *.bak ---
-# 这些是 scan.sh 阶段每跑必建的内部 state,KEEP_OUTPUT=1 模式下正常
-# 保留;放进本检测会"自拦"。
+# filter.regex / targets.regex / excludes.regex / *.bak are not included —
+# those are the internal state that the scan.sh stage builds on every run, and they
+# are kept normally in the KEEP_OUTPUT=1 mode;
+# putting them in this detection would make it block itself.
 POLLUTED=()
 for f in dnsx_output.txt dnsx_output.txt.try alive.txt alterx.txt \
          brute.txt resume.cfg no_wildcard.txt wildcard.txt \
@@ -155,15 +172,18 @@ if [ "${#POLLUTED[@]}" -gt 0 ]; then
     exit 2
 fi
 
-# ===== 准备 target.txt / exclude.txt =====
-# 优先级: -i 指定 > 从 DB 读 > 报错
-# -i 始终是目录,必读 target.txt + exclude.txt(缺 exclude 则空)
+# ===== prepare target.txt / exclude.txt =====
+# The priority: the -i that was given > read from the DB > an error
+# -i is always a directory, and both target.txt + exclude.txt are read (the exclude
+# is empty when it is missing)
 prepare_input() {
     if [ -n "$INPUT_PATH" ]; then
         [ -d "$INPUT_PATH" ] || { echo "-i 不是目录: $INPUT_PATH (必须是含 target.txt + exclude.txt 的目录)" >&2; exit 1; }
         [ -f "$INPUT_PATH/target.txt" ] || { echo "目录 $INPUT_PATH 缺少 target.txt" >&2; exit 1; }
-        # 当 -i 是 ./ 或脚本所在目录时,$INPUT_PATH/target.txt 与 $TARGET_FILE 指向同一 inode,
-        # 直接 cp 会报 "are the same file"。用 -ef 判定后跳过复制,让 import 阶段原样读取。
+        # when -i is ./ or the directory of the script, $INPUT_PATH/target.txt and
+        # $TARGET_FILE point at the same inode,
+        # and a plain cp reports "are the same file". The -ef test skips the copy, so
+        # that the import stage reads it as it is.
         if [ "$INPUT_PATH/target.txt" -ef "$TARGET_FILE" ]; then
             :
         else
@@ -183,8 +203,9 @@ prepare_input() {
         command -v python3 >/dev/null || { echo "未提供 -i 需要 python3 读 DB (其 sqlite3 stdlib)" >&2; exit 1; }
         [ -f "$DB" ] || { echo "未提供 -i 且 DB 不存在: $DB" >&2; exit 1; }
 
-        # 用 python3 + sqlite3 stdlib 从 DB 读 scope,避免依赖 sqlite3 CLI 二进制;
-        # 同一脚本的 bootstrap_db/finalize_scope 都已用该模式。
+        # it reads the scope from the DB with python3 + the sqlite3 stdlib, to avoid
+        # depending on the sqlite3 CLI binary;
+        # the bootstrap_db/finalize_scope of the same script already use that pattern.
         TMP_T=$(mktemp); TMP_E=$(mktemp)
         BIZ_ID=$(python3 - "$DB" "$BUSINESS" "$TMP_T" "$TMP_E" <<'PY'
 import sqlite3, sys
@@ -242,10 +263,13 @@ PY
 }
 
 cleanup_input() {
-    # 默认保留全部中间产物(target/exclude/wildcard/dnsx_output/alive/alterx/scan_results),
-    # 防止 import binding error / 网络中断等异常下数据被销毁,便于人工或重跑 import。
-    # --debug 0 关闭保留 → 跑完强制清理 (旧的默认行为)。
-    # --keep-on-fail 仅在失败时保留 (默认已覆盖,留作兼容)。
+    # by default every intermediate artifact is kept (target/exclude/wildcard/dnsx_output/alive/alterx/scan_results),
+    # so that the data is not destroyed when an import binding error / a network
+    # outage hits, which makes it possible to run the import by hand or to rerun it.
+    # --debug 0 turns the keeping off -> the intermediate files are cleaned up when
+    # it is done (the old default behaviour).
+    # --keep-on-fail only keeps them on a failure (it is already covered by the
+    # default, it is kept for compatibility).
     local rc=$?
     if [ "$KEEP_OUTPUT" = "1" ]; then
         return 0
@@ -255,7 +279,7 @@ cleanup_input() {
         return 0
     fi
 
-    # import 跳过时仍清理中间产物(用户已明确不要入库)
+    # the intermediate artifacts are still cleaned up when the import is skipped (the user explicitly does not want them in the DB)
     if [ $rc -ne 0 ] && [ -n "$SKIP_IMPORT" ]; then
         :  # 跳过 import 是刻意行为,失败时也清理
     fi
@@ -295,13 +319,18 @@ cleanup_input() {
 }
 trap cleanup_input EXIT
 
-# ===== DB bootstrap:确保 businesses 表 + 所有 schema 都存在并插入业务行 =====
-# scan.sh 阶段的 permutation_cache.py 会读 permutation_state 表,
-# 而 import_scan_results.create_tables() 才会建它,故提前 bootstrap。
+# ===== the DB bootstrap: make sure the businesses table + all the schemas exist
+# and insert the business row =====
+# the permutation_cache.py of the scan.sh stage reads the permutation_state table,
+# and only import_scan_results.create_tables() creates it, so the bootstrap happens
+# earlier.
 bootstrap_db() {
-    # businesses 是与其它项目共用的表,只 INSERT 不 CREATE 不 ALTER;
-    # 缺失时报错让用户/上游项目先建,避免本项目偷偷定义共享 schema。
-    # 仅负责建本项目私有的其他表(scopes/web_hashes/web_subdomains/tcp_assets/permutation_state)。
+    # businesses is a table that is shared with the other projects, so it is only
+    # INSERTed, never CREATED and never ALTERed;
+    # when it is missing it reports an error and lets the user / the upstream project
+    # create it, so that this project does not sneakily define a shared schema.
+    # It is only responsible for the other tables that are private to this project
+    # (scopes/web_hashes/web_subdomains/tcp_assets/permutation_state).
     python3 - "$DB" "$BUSINESS" <<'PY' | tee /tmp/.bootstrap_db.log
 import sqlite3, sys
 sys.path.insert(0, ".")
@@ -309,13 +338,13 @@ import import_scan_results
 db, biz = sys.argv[1], sys.argv[2]
 conn = sqlite3.connect(db)
 conn.execute("PRAGMA foreign_keys = ON")
-# 校验 businesses 表已存在(由共享方/上游项目创建)
+# check that the businesses table exists (the shared side / the upstream project creates it)
 cols = [r[1] for r in conn.execute("PRAGMA table_info(businesses)").fetchall()]
 if "business_name" not in cols:
     sys.exit(f"[bootstrap_db] 错误: {db} 缺少 businesses 表或缺 business_name 列,请先在共享库中建好")
-# 建本项目私有 schema(scopes/web_hashes/.../permutation_state)
+# build the schema that is private to this project (scopes/web_hashes/.../permutation_state)
 import_scan_results.create_tables(conn)
-# 仅插入业务行,不触动 businesses 表其它列
+# only insert the business row, it does not touch the other columns of the businesses table
 conn.execute("INSERT OR IGNORE INTO businesses (business_name) VALUES (?)", (biz,))
 conn.commit()
 row = conn.execute("SELECT id FROM businesses WHERE business_name=?", (biz,)).fetchone()
@@ -330,12 +359,12 @@ PY
     export BUSINESS_ID
 }
 
-# ===== 步骤 =====
+# ===== the steps =====
 check_wildcard() { ./check_wildcard.sh "$TARGET_FILE"; }
 scan() {
-    # scan.sh 依赖 DB/BUSINESS_ID/RESOLVERS/WORDLIST/HASH 等 env
+    # scan.sh depends on the DB/BUSINESS_ID/RESOLVERS/WORDLIST/HASH env
     export DB BUSINESS_ID RESOLVERS WORDLIST WORDLIST_HASH
-    # brute 阶段控制
+    # the brute stage control
     [ -n "$SKIP_BRUTE" ]   && export SKIP_BRUTE=1
     [ -n "$FORCE_BRUTE" ]  && export FORCE_BRUTE=1
     [ -n "$BRUTE_MODE" ]   && export BRUTE_MODE
@@ -353,8 +382,10 @@ import() {
         ${DRY_RUN_IMPORT:+--dry-run}
 }
 
-# 收尾:显式再 upsert 一遍 scope,保证删除输入文件前 scope 已落库
-# (import 阶段已做一遍,这里是 final commit,幂等;只动 scopes 表,不动 web/tcp)
+# the wrap up: the scope is upserted once more explicitly, so that the scope is in
+# the DB before the input files are deleted
+# (the import stage already did it once, this is the final commit, it is idempotent;
+# it only touches the scopes table, not web/tcp)
 finalize_scope() {
     python3 - "$DB" "$BUSINESS" "$TARGET_FILE" "$EXCLUDE_FILE" "$WILDCARD_OUT" <<'PY'
 import sys, sqlite3
@@ -407,26 +438,38 @@ PY
 }
 
 # -----------------------------------------------------------------------
-# reverify (2026-10-03 移位重构)
+# reverify (the 2026-10-03 relocation refactor)
 #
-# 原位置: scanner.sh 阶段 3.6 (行 380-489),在 scanner 内部跑。
-#   缺陷: scanner 阶段仍在写新数据,DB 里 is_active=0 同时含"昨天失活"
-#   和"今天扫描后真正失活",reverify 读到的是混合状态,语义错。
+# The old position: stage 3.6 of scanner.sh (lines 380-489), it ran inside the
+# scanner.
+#   The defect: the scanner stage was still writing new data, so is_active=0 in the
+#   DB held both "the ones that went inactive yesterday"
+#   and "the ones that really went inactive after today's scan", and the reverify
+#   read a mixed state, which is semantically wrong.
 #
-# 新位置: import 完成之后、finalize_scope 之前。
-#   此时 DB 里 is_active=0 = 今天扫描后真正失活的资产(import 的
-#   "全清场 + 重新激活" 已经处理了大部分漏激活),reverify 只兜剩下的
-#   少数漏激活。语义清晰,与 cron 日报对齐。
+# The new position: after the import is done, before finalize_scope.
+#   At that point is_active=0 in the DB = the assets that really went inactive
+#   after today's scan (the "clear the whole stage + reactivate" of the import
+#   already handled most of the missed activations), and the reverify only covers
+#   the few remaining missed activations. The semantics are clear and they line up
+#   with the cron daily report.
 #
-# 流程:
-#   1) 从 DB 读本业务失活候选 (is_active=0 AND last_seen>=7d AND ips!='[]')
-#      用 web_subdomains.ips 字段(2026-10-03 schema 演进,从 httpx JSONL 写)
-#   2) 写 targets.lst (subdomain:port 每行),反向索引 target→sid
-#   3) 一次 httpx -l 批喂(对齐 stage 3.5 CDN+LB 参数,-rate-limit 50 -timeout 5)
-#   4) JSONL 流式解析 → 命中(200-299 + cl>1000 + 非 WAF + not failed) → UPDATE is_active=1
-#   5) 失败 try/except 隔离,不致命;落 reverify_hits.tsv 给人工审计
+# The flow:
+#   1) read the inactive candidates of this business from the DB
+#      (is_active=0 AND last_seen>=7d AND ips!='[]')
+#      using the web_subdomains.ips field (the 2026-10-03 schema evolution, it is
+#      written from the httpx JSONL)
+#   2) write targets.lst (subdomain:port, one per line), with the reverse index
+#      target->sid
+#   3) one httpx -l batch feed (it lines up with the stage 3.5 CDN+LB parameters,
+#      -rate-limit 50 -timeout 5)
+#   4) a streaming JSONL parse -> a hit (200-299 + cl>1000 + not a WAF + not failed)
+#      -> UPDATE is_active=1
+#   5) a failure is isolated by try/except, it is not fatal; reverify_hits.tsv is
+#      written for the manual audit
 #
-# 失败模式: DB 无候选 / httpx 不存在 / httpx 探测全失败 → 静默退出 0
+# The failure modes: no candidate in the DB / httpx does not exist / every httpx
+# probe fails -> it exits 0 silently
 # -----------------------------------------------------------------------
 reverify() {
     python3 - "$DB" "$BUSINESS" "$SCAN_DIR" <<'PYREVERIFY'
@@ -437,14 +480,15 @@ from pathlib import Path
 
 db_path, biz, scan_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 
-# 2026-10-03: httpx 路径(env > default)。
+# 2026-10-03: the httpx path (env > the default).
 HTTPX_BIN = os.environ.get("HTTPX_BIN") or str(Path.home() / ".pdtm/go/bin/httpx")
 if not Path(HTTPX_BIN).exists():
     print(f"[reverify] 跳过: httpx 不存在 ({HTTPX_BIN})", file=sys.stderr)
     sys.exit(0)
 
-# 读候选: 失活 (is_active=0)。
-# 按 spec (用户 2026-10-04), 失活唯一充要条件 = is_active=0, 跟 last_seen 无关。
+# read the candidates: the inactive ones (is_active=0).
+# By spec (the user, 2026-10-04), the only necessary and sufficient condition for
+# the deactivation is is_active=0, it has nothing to do with last_seen.
 conn = sqlite3.connect(db_path)
 conn.row_factory = sqlite3.Row
 try:
@@ -509,15 +553,18 @@ def run_httpx(input_path: Path, host_header: str | None) -> list[dict]:
             continue
     return out
 
-# ---------- pass 1: 复用 cached IPs (绕过 DNS) ----------
-# 利用 httpx input 格式 `<custom_host>,<target>` (runner.go:1827-1829):
-#   - 一个 input file 装所有 (subdomain, ip, port) 三元组, 1 次 httpx 调起
-#   - 每行格式 = "<subdomain>,<ip>:<port>"  (无 http:// 前缀, 见 httpx
+# ---------- pass 1: reuse the cached IPs (bypassing the DNS) ----------
+# It uses the httpx input format `<custom_host>,<target>` (runner.go:1827-1829):
+#   - one input file holds all the (subdomain, ip, port) triples, with 1 httpx call
+#   - the format of a line = "<subdomain>,<ip>:<port>"  (no http:// prefix, see
+#     the httpx
 #     case `!HasPrefixAny(http://, https://) && ContainsAny(",")`)
-#   - httpx 内部把 <subdomain> 当 CustomHost 写到 req.Host, TCP 连 <ip:port>
-#   - 不传 -H, 不需要 per-sub 拆分
-# 命中判断: httpx JSONL 输出 host 字段 = <ip> (Runner.analyze line 2704
-#   `Host: parsed.Hostname()`), 用 (ip, port) lookup 反查回 sid.
+#   - inside httpx it writes <subdomain> as the CustomHost into req.Host and
+#     connects the TCP to <ip:port>
+#   - no -H is passed and there is no per-sub split needed
+# The hit test: the host field of the httpx JSONL output = <ip> (Runner.analyze line
+#   2704
+#   `Host: parsed.Hostname()`), and the (ip, port) lookup maps it back to the sid.
 pass1_hits: set[int] = set()
 ipport_to_sids: dict[tuple[str, int], list[int]] = defaultdict(list)
 p1_input_lines: list[str] = []
@@ -536,7 +583,7 @@ for r in rows:
     if not valid_ips:
         continue
     for ip in valid_ips:
-        # httpx input 格式: <custom_host>,<target>  (target 不带 scheme)
+        # the httpx input format: <custom_host>,<target>  (the target has no scheme)
         p1_input_lines.append(f"{r['subdomain']},{ip}:{r['port']}\n")
         ipport_to_sids[(ip, r["port"])].append(r["id"])
 
@@ -558,7 +605,7 @@ for j in results:
 
 print(f"[reverify] pass1 (复用 IP, batch) 命中 {len(pass1_hits)} 行")
 
-# ---------- pass 2: 默认 DNS (独立查询) ----------
+# ---------- pass 2: the default DNS (a separate query) ----------
 pass2_candidates = [r for r in rows if r["id"] not in pass1_hits]
 pass2_hits: set[int] = set()
 if pass2_candidates:
@@ -580,7 +627,7 @@ if pass2_candidates:
 
 print(f"[reverify] pass2 (默认 DNS) 命中 {len(pass2_hits)} 行")
 
-# ---------- 汇总: 复活 + 标记永久失活 ----------
+# ---------- the summary: the revivals + the permanently inactive marking ----------
 all_hits = pass1_hits | pass2_hits
 all_misses = [r["id"] for r in rows if r["id"] not in all_hits]
 
@@ -597,12 +644,16 @@ with hits_path.open("w", encoding="utf-8") as out:
 
 if all_hits:
     placeholders = ",".join("?" for _ in all_hits)
-    # 2026-10-07 refactor: DEPRECATED change_type = 0 写入 (commit 1 后续).
-    # 原因: import 阶段不应写 change_type=0,按分工 "diff 写 0/2"。
-    # 原 SQL (回滚时把 if False: 改成 if True: 并去掉 -- 注释):
+    # 2026-10-07 refactor: the writing of the DEPRECATED change_type = 0 (the
+    # follow-up of commit 1).
+    # The reason: the import stage should not write change_type=0, by the division
+    # of labour "diff writes 0/2".
+    # The original SQL (to roll back, turn if False: into if True: and drop the --
+    # comment):
     #   UPDATE web_subdomains SET is_active = 1, change_type = 0, last_seen = ?
     #   WHERE id IN (...) AND is_active = 0
-    # 现在的行为: 仍然 UPDATE is_active=1 + last_seen, 但不写 change_type (留给 diff 阶段)。
+    # The behaviour now: it still UPDATEs is_active=1 + last_seen, but it does not
+    # write change_type (that is left to the diff stage).
     if False:  # DEPRECATED 2026-10-07 — see commit message
         conn.execute(
             f"UPDATE web_subdomains SET is_active = 1, change_type = 0, last_seen = ? "
@@ -617,11 +668,15 @@ if all_hits:
 else:
     n_reactivated = 0
 
-# 2026-10-15 refactor: 删 reverify 直接写 change_type=8.
-# 原因: ct=8 唯一来源应该是 diff.py, 条件 = pre.is_active=1 AND current.is_active=0
-#        AND reverify pass1+pass2 都 miss. pipeline.sh 只负责 is_active 切换,
-#        写 ct 是 diff 阶段.
-# n_deactivated 保留 = 0 占位 (print 引用, 实际写 ct 在 diff.py).
+# 2026-10-15 refactor: the reverify does not write change_type=8 directly any
+# more.
+# The reason: the only source of ct=8 should be diff.py, and the condition is
+#        pre.is_active=1 AND current.is_active=0
+#        AND both the reverify pass1 and pass2 missed it. pipeline.sh is only
+#        responsible for the is_active switch,
+#        writing the ct is the job of the diff stage.
+# n_deactivated stays as the = 0 placeholder (the print refers to it, the ct is
+# actually written in diff.py).
 n_deactivated = 0
 
 conn.commit()
@@ -634,7 +689,7 @@ conn.close()
 PYREVERIFY
 }
 
-# ===== 执行 =====
+# ===== the execution =====
 prepare_input
 echo "[*] target: $(wc -l < "$TARGET_FILE") 条 | exclude: $(wc -l < "$EXCLUDE_FILE") 条"
 bootstrap_db
@@ -653,11 +708,13 @@ else
     echo "[4/5] import  跳过 (--skip-import,数据未入库,不清理临时输入)"
 fi
 
-# 复核今天扫描后真正失活的资产,兜 import 的少数漏激活
-# 默认开, --skip-reverify 跳过。失败 try/except 隔离,不致命。
+# re-check the assets that really went inactive after today's scan, covering the
+# few missed activations of the import
+# It is on by default, --skip-reverify skips it. A failure is isolated by
+# try/except, it is not fatal.
 if [ -z "$SKIP_REVERIFY" ] && [ "$IMPORT_RAN" = 1 ]; then
     echo "[4.5/5] reverify"
-    # 2026-10-03: 解析 httpx 路径(env > conf > 默认),export 给 Python subprocess。
+    # 2026-10-03: resolve the httpx path (env > conf > the default), export it for the Python subprocess.
     HTTPX_BIN=$(resolve_tool httpx "$HOME/.pdtm/go/bin/httpx")
     export HTTPX_BIN
     if ! reverify; then
@@ -667,7 +724,7 @@ else
     echo "[4.5/5] reverify  跳过"
 fi
 
-# 最后一步:再次 upsert scope 提交,确保删输入文件前 scope 已落库
+# the last step: upsert the scope once more and commit, to make sure the scope is in the DB before the input files are deleted
 if [ "$IMPORT_RAN" = 1 ] && [ -z "$DRY_RUN_IMPORT" ]; then
     echo "[5/5] finalize_scope"
     finalize_scope
