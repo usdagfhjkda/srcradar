@@ -21,6 +21,14 @@ import argparse
 import sqlite3
 import sys
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 DEFAULT_DB = str(Path(__file__).resolve().parent / "recon.sqlite3")
 
@@ -50,7 +58,7 @@ def check_only(db_path: str) -> int:
         ok = True
         for t in TABLES:
             if not table_exists(conn, t):
-                print(f"[check] {t} 不存在 (跳过)")
+                print(_t("main.migrate_3pkg_body.check_missing", {"t": t}))
                 continue
             for c in COLUMNS:
                 exists = has_column(conn, t, c)
@@ -66,14 +74,14 @@ def apply(db_path: str) -> int:
     try:
         for t in TABLES:
             if not table_exists(conn, t):
-                print(f"[apply] {t} 不存在 (跳过)")
+                print(_t("main.migrate_3pkg_body.apply_missing", {"t": t}))
                 continue
             for c in COLUMNS:
                 if has_column(conn, t, c):
-                    print(f"[apply] {t}.{c} 已存在, 跳过")
+                    print(_t("main.migrate_3pkg_body.apply_exists", {"t": t, "c": c}))
                     continue
                 conn.execute(f"ALTER TABLE {t} ADD COLUMN {c} BLOB")
-                print(f"[apply] {t}.{c} 已添加")
+                print(_t("main.migrate_3pkg_body.apply_added", {"t": t, "c": c}))
         conn.commit()
         return 0
     finally:

@@ -34,6 +34,14 @@ import ast
 import sqlite3
 import sys
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 DEFAULT_DB = str(Path(__file__).resolve().parent / "recon.sqlite3")
 
@@ -92,10 +100,10 @@ def check_only(db_path: str) -> int:
     try:
         for t in TABLES:
             if not table_exists(conn, t):
-                print(f"[check] {t} 不存在 (跳过)")
+                print(_t("main.migrate_tech_normalize.check_table_missing", {"t": t}))
                 continue
             if not column_exists(conn, t, COLUMN):
-                print(f"[check] {t}.{COLUMN} 不存在 (跳过)")
+                print(_t("main.migrate_tech_normalize.check_column_missing", {"t": t, "COLUMN": COLUMN}))
                 continue
             total = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
             need = 0
@@ -103,7 +111,7 @@ def check_only(db_path: str) -> int:
                 _, changed = normalize(v)
                 if changed:
                     need += 1
-            print(f"[check] {t}.{COLUMN}: 总 {total} 行, 待回填 {need} 行")
+            print(_t("main.migrate_tech_normalize.check_counts", {"t": t, "COLUMN": COLUMN, "total": total, "need": need}))
         return 0
     finally:
         conn.close()
@@ -114,7 +122,7 @@ def apply(db_path: str, dry_run: bool) -> int:
     try:
         for t in TABLES:
             if not table_exists(conn, t) or not column_exists(conn, t, COLUMN):
-                print(f"[apply] {t}.{COLUMN} 不存在 (跳过)")
+                print(_t("main.migrate_tech_normalize.apply_column_missing", {"t": t, "COLUMN": COLUMN}))
                 continue
             # the rows to change are read out by id first, then updated one by one (it does not depend on any concrete business value)
             rows = conn.execute(
@@ -131,7 +139,7 @@ def apply(db_path: str, dry_run: bool) -> int:
             if not dry_run:
                 conn.commit()
             verb = "dry-run 待回填" if dry_run else "已回填"
-            print(f"[apply] {t}.{COLUMN}: {verb} {changed} 行")
+            print(_t("main.migrate_tech_normalize.apply_counts", {"t": t, "COLUMN": COLUMN, "verb": verb, "changed": changed}))
         return 0
     finally:
         conn.close()

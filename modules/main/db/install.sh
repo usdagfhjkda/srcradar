@@ -18,6 +18,10 @@
 # Exit codes: 0/1/2/3/4, the same as the pdtm module
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -53,7 +57,7 @@ init_db() {
         log "init-db OK: $db_path"
         return 0
     else
-        err "init_db.py 失败(看上面 [err] 行)"
+        err "$(t main.install.init_failed)"
         return 3
     fi
 }
@@ -62,11 +66,11 @@ init_db() {
 check_schema() {
     local checker="$SCRIPT_DIR/check_schema.py"
     [ -f "$checker" ] || { err "check_schema.py 缺失"; return 3; }
-    log "check-schema:校对 $SCRIPT_DIR/schema.sql"
+    log "$(t main.install.check_schema_label SCRIPT_DIR=$SCRIPT_DIR)"
     if python3 "$checker" "$SCRIPT_DIR/schema.sql"; then
         return 0
     else
-        err "schema drift(看上面)"
+        err "$(t main.install.drift_detected)"
         return 1
     fi
 }
@@ -80,9 +84,9 @@ verify_db() {
     local n
     n=$(sqlite3 "$db_path" "SELECT count(*) FROM sqlite_master WHERE type='table'" 2>/dev/null || echo 0)
     if [ "$n" -ge 14 ]; then
-        printf "  OK db 包含 %s 张表 (>= 14)\n" "$n"
+        printf "$(t main.install.table_count_ok)" "$n"
     else
-        err "db 仅含 $n 张表(期望 >= 14)"
+        err "$(t main.install.table_count_low n=$n)"
         return 1
     fi
     return 0
@@ -93,16 +97,16 @@ verify() {
     if [ -f "$db_path" ]; then
         verify_db "$db_path" || return 1
     else
-        warn "db 不存在(将自动 init): $db_path"
+        warn "$(t main.install.db_missing db_path=$db_path)"
     fi
     return 0
 }
 
 uninstall() {
-    log "db 模块反安装:删除 recon.sqlite3(只删自动建的)"
+    log "$(t main.install.uninstall_note)"
     local db_path="${DB_PATH:-$DEFAULT_DB}"
     if [ -f "$db_path" ]; then
-        warn "确认要删 $db_path 吗?手动 rm -f $db_path"
+        warn "$(t main.install.uninstall_confirm db_path=$db_path)"
     fi
     return 0
 }
@@ -112,7 +116,7 @@ main() {
     case "${1:-}" in
         --check)
             check_deps || exit $?
-            log "db 模块依赖 OK"
+            log "$(t main.install.deps_ok)"
             exit 0
             ;;
         --check-schema)

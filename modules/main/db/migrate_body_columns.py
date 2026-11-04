@@ -18,6 +18,14 @@ import argparse
 import sqlite3
 import sys
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 DEFAULT_DB = str(Path(__file__).resolve().parent / "recon.sqlite3")
 SQL_PATH = Path(__file__).resolve().parent.parent / "daily" / "lib" / "migrate_body_columns.sql"
@@ -58,7 +66,7 @@ def check_only(db_path: str) -> int:
         missing = 0
         for table, cols in COLUMNS.items():
             if not has_table(conn, table):
-                print(f"[check] 表 {table} 不存在")
+                print(t("main.migrate_body_columns.check_table_missing", {"table": table}))
                 missing += len(cols)
                 continue
             for col in cols:
@@ -68,7 +76,7 @@ def check_only(db_path: str) -> int:
                     missing += 1
         for table in TABLES:
             ok = has_table(conn, table)
-            print(f"[check] 表 {table} exists = {ok}")
+            print(t("main.migrate_body_columns.check_table_exists", {"table": table, "ok": ok}))
             if not ok:
                 missing += 1
         return 0 if missing == 0 else 1
@@ -78,18 +86,18 @@ def check_only(db_path: str) -> int:
 
 def apply(db_path: str) -> int:
     if not SQL_PATH.exists():
-        print(f"[apply][err] {SQL_PATH} 不存在", file=sys.stderr)
+        print(t("main.migrate_body_columns.sql_missing", {"SQL_PATH": SQL_PATH}), file=sys.stderr)
         return 2
     conn = sqlite3.connect(db_path)
     try:
         if not has_table(conn, "web_subdomains"):
-            print("[apply][err] web_subdomains 不存在, 先跑 init_db", file=sys.stderr)
+            print(t("main.migrate_body_columns.web_missing"), file=sys.stderr)
             return 3
 
         added: list[str] = []
         for table, cols in COLUMNS.items():
             if not has_table(conn, table):
-                print(f"[apply][err] 表 {table} 不存在, 跳过", file=sys.stderr)
+                print(t("main.migrate_body_columns.apply_table_missing", {"table": table}), file=sys.stderr)
                 return 3
             for col in cols:
                 if has_column(conn, table, col):
@@ -112,7 +120,7 @@ def apply(db_path: str) -> int:
         if added:
             print(f"[apply] 新增列: {', '.join(added)}")
         else:
-            print("[apply] 所有列已存在, no-op")
+            print(t("main.migrate_body_columns.noop"))
         for table in TABLES:
             print(f"[apply] 表 {table}: {'存在' if has_table(conn, table) else '缺失'}")
         return 0
@@ -123,8 +131,8 @@ def apply(db_path: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DEFAULT_DB)
-    ap.add_argument("--check", action="store_true", help="只检查,不写 DB")
-    ap.add_argument("--apply", dest="do_apply", action="store_true", help="缺失时补齐")
+    ap.add_argument("--check", action="store_true", help=t("main.migrate_body_columns.check_only"))
+    ap.add_argument("--apply", dest="do_apply", action="store_true", help=t("main.migrate_body_columns.fill_missing"))
     args = ap.parse_args()
     if args.check:
         return check_only(args.db)

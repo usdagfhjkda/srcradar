@@ -15,6 +15,15 @@ Categories:
 import pathlib
 import re
 import sys
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 schema_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 \
     else pathlib.Path(__file__).resolve().parent.parent / "db/schema.sql"
@@ -128,16 +137,16 @@ if real_drift:
     for p in real_drift:
         print(f"  {p}")
     if accepted_drift:
-        print("\nAccepted (A1 协议预期,无需修):")
+        print(_t("main.check_schema.accepted"))
         for p in accepted_drift:
             print(f"  {p}")
     sys.exit(1)
 else:
     n_tbl = len(schema_fps)
     n_src = sum(1 for fp in src_fps.values() if fp)
-    print(f"OK: schema.sql 含 {n_tbl} 张表,与 {n_src} 个源文件 CREATE 一致")
+    print(_t("main.check_schema.consistent", {"n_tbl": n_tbl, "n_src": n_src}))
     if accepted_drift:
-        print("注(ACCEPTED):")
+        print(_t("main.check_schema.accepted_note"))
         for p in accepted_drift:
             print(f"  {p}")
     sys.exit(0)
