@@ -1,4 +1,8 @@
 #!/bin/bash
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 # ==============================================================================
 # The script name: RedTeam_Asset_Scanner_v10.sh
 # The script description: an industrial grade red team asset mapping pipeline
@@ -122,55 +126,55 @@ ACTIVE_MAPPED_COUNT=0
 # ==============================================================================
 # the environment dependency check
 # ==============================================================================
-log "[*] 检查环境依赖..."
+log "$(t main.scanner.check_deps)"
 
 for cmd in dnsx naabu httpx cdncheck awk sed grep sort tr python3; do
 
     if ! command -v "$cmd" >/dev/null 2>&1; then
-        log "[-] 错误: 缺少依赖 [ $cmd ]"
+        log "$(t main.scanner.missing_dep cmd=$cmd)"
         exit 1
     fi
 done
 
-log "[+] 依赖检查通过"
+log "$(t main.scanner.deps_ok)"
 
 # ==============================================================================
 # the detection of the naabu SYN scan permission
 # the priority: setcap cap_net_raw > root > the degraded CONNECT
 # ==============================================================================
-log "[*] 检测 naabu 扫描模式权限..."
+log "$(t main.scanner.detect_naabu_perm)"
 
 NAABU_BIN=$(which naabu)
 
 if getcap "$NAABU_BIN" 2>/dev/null | grep -q cap_net_raw; then
     SCAN_MODE="-s s"
-    log "[+] 检测到 cap_net_raw 权限，使用 SYN 扫描模式"
+    log "$(t main.scanner.cap_net_raw)"
 elif [ "$(id -u)" -eq 0 ]; then
     SCAN_MODE="-s s"
-    log "[+] 当前为 root 用户，使用 SYN 扫描模式"
+    log "$(t main.scanner.root_syn_mode)"
 else
     SCAN_MODE="-s c"
-    log "[!] 无 raw socket 权限，降级为 CONNECT 扫描模式"
-    log "[!] 如需 SYN 扫描，执行: sudo setcap cap_net_raw+ep \$(which naabu)"
+    log "$(t main.scanner.degraded_connect)"
+    log "$(t main.scanner.howto_setcap)"
 fi
 
 log "[+] ======================================================================"
-log "[+] 红队资产自动化测绘流水线 v10 启动"
+log "$(t main.scanner.started)"
 log "[+] ======================================================================"
 
 # ==============================================================================
 # the input check
 # ==============================================================================
 if [ ! -s "$DNSX_INPUT_RAW" ]; then
-    log "[-] 错误: 输入文件不存在或为空"
-    log "[-] 文件路径: $DNSX_INPUT_RAW"
+    log "$(t main.scanner.input_missing)"
+    log "$(t main.scanner.input_path DNSX_INPUT_RAW=$DNSX_INPUT_RAW)"
     exit 1
 fi
 
 # ==============================================================================
 # stage 0: the data cleaning
 # ==============================================================================
-log "[*] 阶段 0: 清洗输入数据..."
+log "$(t main.scanner.stage0_clean)"
 
 awk '{print $1}' "$DNSX_INPUT_RAW" \
 | tr -d '\r' \
@@ -180,10 +184,10 @@ awk '{print $1}' "$DNSX_INPUT_RAW" \
 
 DOMAIN_COUNT=$(grep -c . "$OUTPUT_DIR/pure_domains.txt" || true)
 
-log "[+] 清洗完成，共 $DOMAIN_COUNT 个有效域名"
+log "$(t main.scanner.stage0_done DOMAIN_COUNT=$DOMAIN_COUNT)"
 
 if [ "$DOMAIN_COUNT" -eq 0 ]; then
-    log "[-] 错误: 清洗后域名为空"
+    log "$(t main.scanner.stage0_empty)"
     exit 1
 fi
 
@@ -207,7 +211,7 @@ fi
 # The downstream contract is kept: FILE_IP is still `<ip> <domain>`, so the stages
 # 3-9 do not change.
 # ==============================================================================
-log "[*] 阶段 1: DNS 解析 (jsonl, 含 CNAME) ..."
+log "$(t main.scanner.stage1_dns)"
 
 # 2026-10-03: the dnsx path is resolved through resolve_tools.sh (env override > the conf injection > the default)
 DNSX_BIN=$(resolve_tool dnsx "$HOME/.pdtm/go/bin/dnsx")
@@ -233,14 +237,14 @@ CDNMATCH_STATS="$OUTPUT_DIR/cdnmatch_stats.json"
      || log "[!] dnsx 退出非零 — JSONL 部分输出仍可继续"
 
 DNSX_OUTPUT_COUNT=$(wc -l < "$DNSX_RAW_FILE" | tr -d ' ')
-log "[+] dnsx JSONL: $DNSX_OUTPUT_COUNT 行"
+log "$(t main.scanner.stage1_dnsx_rows DNSX_OUTPUT_COUNT=$DNSX_OUTPUT_COUNT)"
 # ==============================================================================
 # stage 2: the CDN/WAF judgement (offline - ./bin/cdnmatch)
 # It replaces the original blocking `cdncheck -i <hosts>` call. cdnmatch imports
 # the sources_data.json table of cdncheck directly,
 # does an in-memory lookup on the dnsx JSONL, and there is no network overhead.
 # ==============================================================================
-log "[*] 阶段 2: cdnmatch 离线研判 CDN/WAF/Cloud ..."
+log "$(t main.scanner.stage2_cdnmatch)"
 
 CDN_DOMAIN_FILE="$OUTPUT_DIR/cdn_domains.txt"
 CDN_IP_FILE="$OUTPUT_DIR/cdn_ips.txt"
@@ -250,7 +254,7 @@ NON_CDN_DOMAIN_FILE="$OUTPUT_DIR/non_cdn_list.txt"
 NON_CDN_IP_FILE="$OUTPUT_DIR/non_cdn_ips.txt"
 
 if [ ! -x "./bin/cdnmatch" ]; then
-    log "[-] 缺少 ./bin/cdnmatch, 请 cd cdnmatch && make build"
+    log "$(t main.scanner.cdnmatch_missing)"
     exit 1
 fi
 ./bin/cdnmatch \
@@ -270,13 +274,13 @@ NON_CDN_DOMAIN_COUNT=$(wc -l < "$NON_CDN_DOMAIN_FILE" | tr -d ' ')
 CDNCHECK_HIT_COUNT=$CDN_IP_COUNT
 CNAME_NS_CDN_COUNT=$(wc -l < "$FILE_CNAME" | tr -d ' ')
 
-log "[+] DNS解析完成,唯一IP: $UNIQUE_IP_COUNT 个"
-log "[+] 研判结束: CDN/WAF IP: $CDN_IP_COUNT, CDN/WAF 域名: $CDN_DOMAIN_COUNT"
-log "[+] 扫描目标: 非CDN IP: $NON_CDN_IP_COUNT, 非CDN 域名: $NON_CDN_DOMAIN_COUNT"
+log "$(t main.scanner.dns_unique_ips UNIQUE_IP_COUNT=$UNIQUE_IP_COUNT)"
+log "$(t main.scanner.judgement_done CDN_IP_COUNT=$CDN_IP_COUNT CDN_DOMAIN_COUNT=$CDN_DOMAIN_COUNT)"
+log "$(t main.scanner.scan_targets NON_CDN_IP_COUNT=$NON_CDN_IP_COUNT NON_CDN_DOMAIN_COUNT=$NON_CDN_DOMAIN_COUNT)"
 
 # stage 3: the IP weight filter (the LB filter)
 # ==============================================================================
-log "[*] 阶段 3: 过滤大型负载均衡..."
+log "$(t main.scanner.stage3_filter_lb)"
 
 : > "$OUTPUT_DIR/pure_domains.txt"
 : > "$OUTPUT_DIR/pure_domains.txt"
@@ -289,7 +293,7 @@ while read -r ip; do
     DOMAIN_BIND_COUNT=$(grep -c "^$ip " "$FILE_IP" || echo 0)
 
     if [ "$DOMAIN_BIND_COUNT" -gt 15 ]; then
-        log "[!] 跳过LB核心IP: $ip (绑定 $DOMAIN_BIND_COUNT 个域名)"
+        log "$(t main.scanner.skip_lb_core ip=$ip DOMAIN_BIND_COUNT=$DOMAIN_BIND_COUNT)"
         echo "$ip" >> "$OUTPUT_DIR/lb_ips.txt"
         FILTERED_LB=$((FILTERED_LB + 1))
     else
@@ -301,14 +305,14 @@ done < "$OUTPUT_DIR/non_cdn_ips.txt"
 SCAN_IP_COUNT=$(wc -l < "$OUTPUT_DIR/pure_ips_to_scan.txt" | tr -d ' ')
 LB_IP_COUNT=$(wc -l < "$OUTPUT_DIR/lb_ips.txt" | tr -d ' ')
 
-log "[+] 过滤 $FILTERED_LB 个LB IP"
-log "[+] 剩余 $SCAN_IP_COUNT 个IP进入扫描"
+log "$(t main.scanner.filtered_lb FILTERED_LB=$FILTERED_LB)"
+log "$(t main.scanner.remaining_ips SCAN_IP_COUNT=$SCAN_IP_COUNT)"
 
 # ==============================================================================
 # stage 3.5: the CDN IP + the LB core IP are merged -> the httpx 80/443 probe with
 # the Host header
 # ==============================================================================
-log "[*] 阶段 3.5: CDN+LB IP 合并带Host头探测..."
+log "$(t main.scanner.stage35_merge)"
 
 # the stages 3.5/5/8 all use it, so it is checked and assigned once at the entry of
 # stage 3.5
@@ -324,7 +328,7 @@ cat "$OUTPUT_DIR/cdn_ips.txt" \
 | sort -u -o "$OUTPUT_DIR/cdn_lb_combined_ips.txt"
 
 CDN_LB_TOTAL=$(wc -l < "$OUTPUT_DIR/cdn_lb_combined_ips.txt" | tr -d ' ')
-log "[+] CDN+LB合并IP总数: $CDN_LB_TOTAL 个"
+log "$(t main.scanner.cdn_lb_total CDN_LB_TOTAL=$CDN_LB_TOTAL)"
 
 : > "$OUTPUT_DIR/pure_domains.txt"
 CDN_LB_WEB_COUNT=0
@@ -430,7 +434,7 @@ PYEOF
 # ==============================================================================
 if [ "$ENABLE_TCP" = true ]; then
 
-    log "[*] 阶段 4: naabu 被动资产发现 (直接扫 IP,含 LB、排除 CDN)..."
+    log "$(t main.scanner.stage4_naabu_passive)"
 
 # the passive scan sends no packet (it queries the public sources), so the non-CDN IPs
 # (including the LB core IPs) are fed to it directly.
@@ -450,12 +454,12 @@ naabu -l "$OUTPUT_DIR/non_cdn_ips.txt" \
 
 NAABU_COUNT=$(grep -c . "$OUTPUT_DIR/raw_naabu_passive.txt" || true)
 
-log "[+] naabu 被动发现 $NAABU_COUNT 个端口"
+log "$(t main.scanner.naabu_passive_ports NAABU_COUNT=$NAABU_COUNT)"
 
 # ==============================================================================
 # stage 4.5: the naabu active scan
 # ==============================================================================
-log "[*] 阶段 4.5: naabu 主动端口扫描 (模式: $SCAN_MODE, rate: 50)..."
+log "$(t main.scanner.stage45_naabu_active SCAN_MODE=$SCAN_MODE)"
 
 NAABU_ACTIVE_FILE="$OUTPUT_DIR/raw_naabu_active.txt"
 
@@ -475,13 +479,13 @@ naabu -l "$OUTPUT_DIR/pure_ips_to_scan.txt" \
 > "$NAABU_ACTIVE_FILE"
 NAABU_ACTIVE_COUNT=$(grep -c . "$NAABU_ACTIVE_FILE" || true)
 
-log "[+] naabu 主动扫描发现 $NAABU_ACTIVE_COUNT 个端口"
+log "$(t main.scanner.naabu_active_ports NAABU_ACTIVE_COUNT=$NAABU_ACTIVE_COUNT)"
 
 # ------------------------------------------------------------------------------
 # the active result IP:Port -> domain:Port reverse lookup mapping
 # the bare IP:Port is kept when there is no domain mapping
 # ------------------------------------------------------------------------------
-log "[*] 阶段 4.5: 主动扫描结果 IP→域名 反查映射..."
+log "$(t main.scanner.stage45_mapping)"
 
 : > "$OUTPUT_DIR/pure_domains.txt"
 
@@ -513,10 +517,10 @@ sort -u "$OUTPUT_DIR/raw_naabu_active_mapped.txt" \
 
 ACTIVE_MAPPED_COUNT=$(grep -c . "$OUTPUT_DIR/raw_naabu_active_mapped.txt" || true)
 
-log "[+] 主动扫描映射完成，共 $ACTIVE_MAPPED_COUNT 条记录"
+log "$(t main.scanner.mapping_done ACTIVE_MAPPED_COUNT=$ACTIVE_MAPPED_COUNT)"
 
 else
-    log "[!] TCP 端口信息收集默认关闭，跳过 naabu 被动 + 主动扫描（传 -all 启用）"
+    log "$(t main.scanner.tcp_disabled)"
     : > "$OUTPUT_DIR/raw_naabu_passive.txt"
     : > "$OUTPUT_DIR/raw_naabu_active.txt"
     : > "$OUTPUT_DIR/raw_naabu_active_mapped.txt"
@@ -531,7 +535,7 @@ fi
 # The fingerprint is redone by the `-j -title -td -hash` of stage 8, so the final
 # stored form does not change.
 # ==============================================================================
-log "[*] 阶段 5: httpx 主动探测..."
+log "$(t main.scanner.stage5_httpx)"
 
 # build the <sub>,<ip>:<port> input (a direct connection to the cached IP + the per-target
 # Host header)
@@ -557,7 +561,7 @@ done < "$OUTPUT_DIR/pure_ips_to_scan.txt"
 sort -u "$OUTPUT_DIR/non_cdn_domain_ports.txt" -o "$OUTPUT_DIR/non_cdn_domain_ports.txt"
 
 DOMAIN_PORT_COUNT=$(wc -l < "$OUTPUT_DIR/non_cdn_domain_ports.txt" | tr -d ' ')
-log "[+] <sub>,<ip>:<port> 组合数: $DOMAIN_PORT_COUNT"
+log "$(t main.scanner.sub_ip_port_combos DOMAIN_PORT_COUNT=$DOMAIN_PORT_COUNT)"
 
 # Note: -p is not passed - the input already holds the port, and -p would expand it
 # again and overwrite the URL port (runner.go UpdatePort)
@@ -574,7 +578,7 @@ log "[+] <sub>,<ip>:<port> 组合数: $DOMAIN_PORT_COUNT"
 
 ACTIVE_COUNT=$(wc -l < "$OUTPUT_DIR/raw_httpx_active_ips.txt" | tr -d ' ')
 
-log "[+] 主动探测发现 $ACTIVE_COUNT 个存活端口"
+log "$(t main.scanner.alive_ports ACTIVE_COUNT=$ACTIVE_COUNT)"
 
 # ==============================================================================
 # stage 6: the Host virtual host mapping
@@ -588,7 +592,7 @@ log "[+] 主动探测发现 $ACTIVE_COUNT 个存活端口"
 #       See appendix C of the README. Before you touch the stage 5/6, read the "todo /
 #       future improvements" of appendix C.
 # ==============================================================================
-log "[*] 阶段 6: URL 清洗（输入已是 domain:port,无需 IP 反查）..."
+log "$(t main.scanner.stage6_clean)"
 
 : > "$OUTPUT_DIR/pure_domains.txt"
 
@@ -617,7 +621,7 @@ sort -u "$OUTPUT_DIR/raw_mapped_ports.txt" \
 # ==============================================================================
 # stage 7: the data fusion (the passive + the active + the httpx mapping + the CDN/LB)
 # ==============================================================================
-log "[*] 阶段 7: 数据融合..."
+log "$(t main.scanner.stage7_fusion)"
 
 cat "$OUTPUT_DIR/raw_naabu_passive.txt" \
     "$OUTPUT_DIR/raw_naabu_active_mapped.txt" \
@@ -630,12 +634,12 @@ cat "$OUTPUT_DIR/raw_naabu_passive.txt" \
 
 ALL_COUNT=$(grep -c . "$OUTPUT_DIR/non_cdn_all_ports.txt" || true)
 
-log "[+] 融合后共 $ALL_COUNT 个端口（被动+主动+httpx+CDN/LB）"
+log "$(t main.scanner.fused_ports ALL_COUNT=$ALL_COUNT)"
 
 # ==============================================================================
 # stage 8: the Web survivor confirmation
 # ==============================================================================
-log "[*] 阶段 8: Web存活确认..."
+log "$(t main.scanner.stage8_web)"
 
 # httpx -l "$OUTPUT_DIR/non_cdn_all_ports.txt" \
 #       -sc \                         # [status] shows the status code (200, 404, etc.)
@@ -677,17 +681,17 @@ done < "$OUTPUT_DIR/non_cdn_all_ports.txt"
 sort -u "$OUTPUT_DIR/non_cdn_web_inputs.txt" -o "$OUTPUT_DIR/non_cdn_web_inputs.txt"
 
 INPUT_COUNT=$(wc -l < "$OUTPUT_DIR/non_cdn_web_inputs.txt" | tr -d ' ')
-log "[+] stage 8 <sub>,<ip>:<port> 组合数: $INPUT_COUNT"
+log "$(t main.scanner.stage8_combos INPUT_COUNT=$INPUT_COUNT)"
 
 "$HTTPX_BIN" -l "$OUTPUT_DIR/non_cdn_web_inputs.txt" -sc -cl -title -hash mmh3,simhash -random-agent -follow-redirects -max-redirects 3  -td -rate-limit 50 -timeout 5 -silent -no-color -json -irr < /dev/null 2>/dev/null > "$OUTPUT_DIR/non_cdn_web_summary.json"
 WEB_COUNT=$(grep -c . "$OUTPUT_DIR/non_cdn_web_summary.json" || true)
 
-log "[+] Web资产数: $WEB_COUNT"
+log "$(t main.scanner.web_count WEB_COUNT=$WEB_COUNT)"
 
 # ==============================================================================
 # stage 9: the final format alignment and the separation of the TCP ports
 # ==============================================================================
-log "[*] 正在标准化格式并分离 TCP 端口..."
+log "$(t main.scanner.stage9_split)"
 
 # the IP:port of the web survivors - it is extracted from the host (the resolved IP) +
 # the port field of the httpx json.
@@ -732,9 +736,9 @@ cat "$OUTPUT_DIR/raw_naabu_passive.txt" \
 | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$' \
 | sort -u -o "$OUTPUT_DIR/tmp_all_ip_ports.txt"
 
-log "[!] web IP:端口列表:"
+log "$(t main.scanner.web_ip_port_list)"
 cat "$OUTPUT_DIR/tmp_web_ip_ports.txt" | while read l; do log "    $l"; done
-log "[!] 全部 IP:端口列表:"
+log "$(t main.scanner.all_ip_port_list)"
 cat "$OUTPUT_DIR/tmp_all_ip_ports.txt" | while read l; do log "    $l"; done
 
 # the non-web TCP ports = the full set - web
@@ -748,7 +752,7 @@ rm -f "$OUTPUT_DIR/tmp_web_ip_ports.txt" \
 
 TCP_COUNT=$(wc -l < "$OUTPUT_DIR/non_cdn_tcp_ports.txt" | tr -d ' ')
 
-log "[+] 阶段 9 完成，纯 TCP 端口数: $TCP_COUNT"
+log "$(t main.scanner.stage9_done TCP_COUNT=$TCP_COUNT)"
 
 # ==============================================================================
 # the cleanup of the temporary files
@@ -771,51 +775,51 @@ rm -f \
 # the final report
 # ==============================================================================
 log "[+] ======================================================================"
-log "[+] 流水线执行完成"
+log "$(t main.scanner.pipeline_done)"
 log "[+] ======================================================================"
 
-log "[✔] 输入域名数              : $DOMAIN_COUNT"
-log "[✔] dnsx输出行数            : $DNSX_OUTPUT_COUNT"
-log "[✔] awk提取映射数           : $AWK_EXTRACT_COUNT"
-log "[✔] 唯一IP数                : $UNIQUE_IP_COUNT"
-log "[✔] CNAME/NS识别CDN域名数   : $CNAME_NS_CDN_COUNT"
-log "[✔] cdncheck命中IP数        : $CDNCHECK_HIT_COUNT"
-log "[✔] 最终CDN IP总数          : $CDN_IP_COUNT"
-log "[✔] 最终CDN域名总数         : $CDN_DOMAIN_COUNT"
-log "[✔] 非CDN IP数              : $NON_CDN_IP_COUNT"
-log "[✔] 非CDN域名数             : $NON_CDN_DOMAIN_COUNT"
-log "[✔] LB核心IP数              : $LB_IP_COUNT"
-log "[✔] 过滤LB IP数             : $FILTERED_LB"
-log "[✔] CDN+LB合并IP数          : $CDN_LB_TOTAL"
-log "[✔] CDN+LB Web存活数        : $CDN_LB_WEB_COUNT"
-log "[✔] 进入扫描IP数            : $SCAN_IP_COUNT"
-log "[✔] naabu被动发现端口数     : $NAABU_COUNT"
-log "[✔] naabu主动扫描端口数     : $NAABU_ACTIVE_COUNT"
-log "[✔] 主动扫描映射记录数      : $ACTIVE_MAPPED_COUNT"
-log "[✔] httpx存活端口数         : $ACTIVE_COUNT"
-log "[✔] 融合端口总数            : $ALL_COUNT"
-log "[✔] Web资产数               : $WEB_COUNT"
-log "[✔] TCP端口数               : $TCP_COUNT"
-log "[✔] naabu扫描模式           : $SCAN_MODE"
+log "$(t main.scanner.sum_input_domains DOMAIN_COUNT=$DOMAIN_COUNT)"
+log "$(t main.scanner.sum_dnsx_rows DNSX_OUTPUT_COUNT=$DNSX_OUTPUT_COUNT)"
+log "$(t main.scanner.sum_awk_mappings AWK_EXTRACT_COUNT=$AWK_EXTRACT_COUNT)"
+log "$(t main.scanner.sum_unique_ips UNIQUE_IP_COUNT=$UNIQUE_IP_COUNT)"
+log "$(t main.scanner.sum_cname_ns_cdn CNAME_NS_CDN_COUNT=$CNAME_NS_CDN_COUNT)"
+log "$(t main.scanner.sum_cdncheck_hits CDNCHECK_HIT_COUNT=$CDNCHECK_HIT_COUNT)"
+log "$(t main.scanner.sum_final_cdn_ips CDN_IP_COUNT=$CDN_IP_COUNT)"
+log "$(t main.scanner.sum_final_cdn_domains CDN_DOMAIN_COUNT=$CDN_DOMAIN_COUNT)"
+log "$(t main.scanner.sum_noncdn_ips NON_CDN_IP_COUNT=$NON_CDN_IP_COUNT)"
+log "$(t main.scanner.sum_noncdn_domains NON_CDN_DOMAIN_COUNT=$NON_CDN_DOMAIN_COUNT)"
+log "$(t main.scanner.sum_lb_core_ips LB_IP_COUNT=$LB_IP_COUNT)"
+log "$(t main.scanner.sum_filtered_lb FILTERED_LB=$FILTERED_LB)"
+log "$(t main.scanner.sum_cdn_lb_merged CDN_LB_TOTAL=$CDN_LB_TOTAL)"
+log "$(t main.scanner.sum_cdn_lb_web CDN_LB_WEB_COUNT=$CDN_LB_WEB_COUNT)"
+log "$(t main.scanner.sum_scan_ips SCAN_IP_COUNT=$SCAN_IP_COUNT)"
+log "$(t main.scanner.sum_naabu_passive NAABU_COUNT=$NAABU_COUNT)"
+log "$(t main.scanner.sum_naabu_active NAABU_ACTIVE_COUNT=$NAABU_ACTIVE_COUNT)"
+log "$(t main.scanner.sum_active_mapping ACTIVE_MAPPED_COUNT=$ACTIVE_MAPPED_COUNT)"
+log "$(t main.scanner.sum_httpx_alive ACTIVE_COUNT=$ACTIVE_COUNT)"
+log "$(t main.scanner.sum_fused_ports ALL_COUNT=$ALL_COUNT)"
+log "$(t main.scanner.sum_web_assets WEB_COUNT=$WEB_COUNT)"
+log "$(t main.scanner.sum_tcp_ports TCP_COUNT=$TCP_COUNT)"
+log "$(t main.scanner.sum_naabu_mode SCAN_MODE=$SCAN_MODE)"
 
 log "[+] ======================================================================"
 
-log "[✔] Web核心报告:"
+log "$(t main.scanner.report_web)"
 log "    $OUTPUT_DIR/non_cdn_web_summary.json"
 
-log "[✔] CDN+LB Web报告:"
+log "$(t main.scanner.report_cdn_lb_web)"
 log "    $OUTPUT_DIR/cdn_lb_web_summary.txt"
 
-log "[✔] TCP爆破列表:"
+log "$(t main.scanner.report_tcp_brute)"
 log "    $OUTPUT_DIR/non_cdn_tcp_ports.txt"
 
-log "[✔] IP→域名映射字典:"
+log "$(t main.scanner.report_ip_domain_map)"
 log "    $OUTPUT_DIR/tmp_domain_ip_pairs.txt"
 
-log "[✔] 非CDN域名列表:"
+log "$(t main.scanner.report_noncdn_domains)"
 log "    $OUTPUT_DIR/non_cdn_list.txt"
 
-log "[✔] CDN+LB合并IP列表:"
+log "$(t main.scanner.report_cdn_lb_merged)"
 log "    $OUTPUT_DIR/cdn_lb_combined_ips.txt"
 
 log "[+] ======================================================================"

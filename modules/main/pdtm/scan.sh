@@ -27,6 +27,10 @@ source "$(cd "$(dirname "$0")" && pwd)/lib/resolve_tools.sh"
 
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 # ===== the configuration =====
 # The single source of truth: the ./resolvers file. subfinder goes through
@@ -62,11 +66,11 @@ FORCE_ALTERX="${FORCE_ALTERX:-}"
 
 # check python3 (target_glob.py + permutation_cache.py need it)
 command -v python3 >/dev/null 2>&1 || {
-    echo "[-] 缺少 python3 (target_glob / permutation_cache 需要)" >&2
+    echo "$(t main.scan.missing_python3)" >&2
     exit 1
 }
 [ -f "target_glob.py" ] || {
-    echo "[-] 缺少 target_glob.py (在 $(pwd) 下找不到)" >&2
+    echo "$(t main.scan.missing_target_glob)" >&2
     exit 1
 }
 
@@ -115,9 +119,9 @@ if [ -s "$PRECISE_HOSTS" ]; then
     PRECISE_COUNT=$(wc -l < "$PRECISE_HOSTS")
     cat "$PRECISE_HOSTS" >> "$DNSX_OUT"
     if [ "$WWW_COUNT" -gt 0 ]; then
-        echo "[*] 精确子域(无 *, 共 ${PRECISE_COUNT} 条, 其中 ${WWW_COUNT} 条 1-dot 自动加 www. 前缀) 直接 cat 进 DNSX_OUT,跳过 enumerate/dnsx"
+        echo "$(t main.scan.precise_direct PRECISE_COUNT=${PRECISE_COUNT} WWW_COUNT=${WWW_COUNT})"
     else
-        echo "[*] 精确子域(无 *, 共 ${PRECISE_COUNT} 条) 直接 cat 进 DNSX_OUT,跳过 enumerate/dnsx"
+        echo "$(t main.scan.precise_direct_short PRECISE_COUNT=${PRECISE_COUNT})"
     fi
 fi
 rm -f "$PRECISE_HOSTS"
@@ -135,20 +139,21 @@ if [ ! -s "$GLOB_HOSTS" ]; then
     # reads it; empty file is fine (returns no bases, falls into
     # the "no glob base" skip path below).
     [ -s "$DNSX_OUT" ] && sort -u "$DNSX_OUT" -o "$DNSX_OUT"
-    echo "[+] 精确快路径:$(wc -l < "$DNSX_OUT") 条已入 DNSX_OUT,继续跑 dnsx"
+    _i18n_val=$(wc -l < "$DNSX_OUT")
+    echo "$(t main.scan.precise_fast_path count="$_i18n_val")"
     # 2026-10-03: the dnsx path is resolved through resolve_tools.sh (env override > the conf injection > the default)
     DNSX_BIN=$(resolve_tool dnsx "$HOME/.pdtm/go/bin/dnsx")
     [ -x "$DNSX_BIN" ] || DNSX_BIN=$(command -v dnsx || echo /opt/srcradar/bin/dnsx)
     [ -x "$DNSX_BIN" ] || DNSX_BIN=$(command -v dnsx || true)
     if [ -x "$DNSX_BIN" ]; then
-        echo "[*] dnsx (精确快路径) ..."
+        echo "$(t main.scan.dnsx_precise)"
         "$DNSX_BIN" -rl 100 -t 150 -retry 2 -o "$ALIVE" -r "$RESOLVERS_CSV" < "$DNSX_OUT" || true
         LINES=$(wc -l < "$ALIVE")
-        echo "[*] alive: $LINES 条"
+        echo "$(t main.scan.alive_count LINES=$LINES)"
         # the alive ones are appended to DNSX_OUT (the stage 1 of scanner.sh reads DNSX_OUT)
         [ -s "$ALIVE" ] && cat "$ALIVE" >> "$DNSX_OUT" && sort -u "$DNSX_OUT" -o "$DNSX_OUT"
     else
-        echo "[!] 跳过 dnsx (找不到 binary),精确子域无 alive 数据"
+        echo "$(t main.scan.skip_dnsx_no_binary)"
     fi
     # the rest of the exact fast path: it does not run alterx/permutation/wildcard
     # (those are for the glob patterns),
@@ -160,7 +165,7 @@ if [ ! -s "$GLOB_HOSTS" ]; then
 fi
 
 # ===== the rest: the glob flow (ERE compilation -> subfinder -> alterx -> permutation_cache -> wildcard) =====
-echo "[*] 编译 target / exclude glob ..."
+echo "$(t main.scan.compile_globs)"
 
 python3 target_glob.py targets-ere  --input "$TARGET"  > targets.regex
 python3 target_glob.py excludes-ere --input "$EXCLUDE" > excludes.regex
@@ -179,7 +184,7 @@ BASES=$(python3 target_glob.py all-bases --input "$GLOB_HOSTS" || true)
 if [ -z "$BASES" ] && [ -s "$DNSX_OUT" ]; then
     : # precise fast-path; continue
 elif [ -z "$BASES" ]; then
-    echo "[-] target.txt 里没有可用的 glob base" >&2; exit 1
+    echo "$(t main.scan.no_glob_base)" >&2; exit 1
 fi
 rm -f "$GLOB_HOSTS"
 
@@ -201,11 +206,11 @@ fi
 if [ -n "$WILDCARD_BASES" ]; then
     EXCLUDED=$(echo "$WILDCARD_BASES" | wc -l)
     BASES=$(comm -23 <(echo "$BASES" | sort -u) <(echo "$WILDCARD_BASES" | sort -u))
-    echo "[*] 剔除 $EXCLUDED 个泛解析 base（阶段 6 单独覆盖），alterx 不再处理"
+    echo "$(t main.scan.excluded_wildcard_bases EXCLUDED=$EXCLUDED)"
 fi
 
 # ===== 1) the subdomain enumeration: grouped by base, one subfinder per base =====
-echo "[*] subfinder (按 base 聚合) ..."
+echo "$(t main.scan.subfinder_by_base)"
 # ALTERX_TMPDIR is created in stage 3, it is declared early so that the EXIT trap can refer to it (it starts empty -> it does not delete . by mistake)
 ALTERX_TMPDIR=
 SUBS_TMP="$(mktemp)"
@@ -249,7 +254,7 @@ else
 fi
 
 LINES=$(wc -l < "$ALIVE")
-echo "[*] alive: $LINES 条 (已 grep target + -v exclude)"
+echo "$(t main.scan.alive_filtered LINES=$LINES)"
 
 # ===== the cadence gate: it decides whether the alterx derivation runs this round =====
 # Inside the period (it should be skipped) -> ALTERX_OUT stays empty and stage 4
@@ -262,9 +267,9 @@ if python3 alterx_runs.py should-run \
         --cadence-days "$ALTERX_CADENCE_DAYS" \
         ${FORCE_ALTERX:+--force}; then
     ALTERX_RUN_THIS_TURN=1
-    echo "[*] alterx 节奏闸门:本轮跑 alterx 派生"
+    echo "$(t main.scan.alterx_gate_run)"
 else
-    echo "[*] alterx 节奏闸门:本轮跳过 alterx 派生 (cadence=${ALTERX_CADENCE_DAYS}d),仅 subfinder 入 dnsx"
+    echo "$(t main.scan.alterx_gate_skip ALTERX_CADENCE_DAYS=${ALTERX_CADENCE_DAYS})"
 fi
 
 # ===== 3) alterx generates the candidates (split by base, to avoid the cross-base
@@ -288,7 +293,7 @@ fi
 # re-estimates, until it is <= the threshold. The -enrich and the
 # non -enrich branch estimate separately (the word lists differ, so the candidate
 # counts differ).
-echo "[*] alterx enrichment (按 base 拆分) ..."
+echo "$(t main.scan.alterx_enrich)"
 if [ "$ALTERX_RUN_THIS_TURN" = "1" ] && [ "$LINES" -gt 0 ]; then
     ALTERX_TMPDIR=$(mktemp -d)
     BASES_CSV=$(printf '%s' "$BASES" | tr '\n' ',' | sed 's/,$//')
@@ -326,12 +331,12 @@ if [ "$ALTERX_RUN_THIS_TURN" = "1" ] && [ "$LINES" -gt 0 ]; then
             lines=$(wc -l < "$cur")
             half=$(( (lines + 1) / 2 ))
             if [ "$half" -lt 1 ] || [ "$half" -ge "$lines" ]; then
-                echo "[alterx] WARNING: ${enrich_flag:-no-enrich} 输入 $lines 行但 est=$est 仍超阈值,放弃减半" >&2
+                echo "$(t main.scan.alterx_est_still_high enrich_flag=${enrich_flag:-no-enrich} lines=$lines est=$est)" >&2
                 break
             fi
             halved="$ALTERX_TMPDIR/halved.$$.$RANDOM"
             if ! shuf -n "$half" "$cur" > "$halved" 2>/dev/null; then
-                echo "[alterx] WARNING: shuf 减半失败,放弃" >&2
+                echo "$(t main.scan.alterx_shuf_failed)" >&2
                 rm -f "$halved"
                 break
             fi
@@ -340,7 +345,7 @@ if [ "$ALTERX_RUN_THIS_TURN" = "1" ] && [ "$LINES" -gt 0 ]; then
             cur="$halved"
         done
         if [ "$attempts" -gt 0 ]; then
-            echo "[alterx] ${enrich_flag:-no-enrich} 减半 $attempts 次,最终 est=$est (输入 $orig)" >&2
+            echo "$(t main.scan.alterx_halved enrich_flag=${enrich_flag:-no-enrich} attempts=$attempts est=$est orig=$orig)" >&2
         fi
         echo "$cur"
     }
@@ -393,18 +398,18 @@ fi
 # ===== 3.8) the shuffledns brute (the dictionary brute force, with a business size aware sampling, in parallel with alterx) =====
 # The minimal implementation: the Top + Rolling modes share the sample size, and the 30 day cadence lines up with alterx
 # brute computes its own base: target_glob.py all-bases runs on $TARGET (both the exact and the glob ones are supported)
-echo "[*] brute 节奏闸门 ..."
+echo "$(t main.scan.brute_gate)"
 BRUTE_RUN_THIS_TURN=0
 if [ -n "${SKIP_BRUTE:-}" ]; then
-    echo "[*] brute 跳过 (SKIP_BRUTE env)"
+    echo "$(t main.scan.brute_skipped_env)"
 elif python3 brute_runs.py should-run \
         --db "$DB" --business-id "$BUSINESS_ID" \
         --cadence-days "${BRUTE_CADENCE_DAYS:-30}" \
         ${FORCE_BRUTE:+--force}; then
     BRUTE_RUN_THIS_TURN=1
-    echo "[*] brute 节奏闸门:本轮跑 brute"
+    echo "$(t main.scan.brute_gate_run)"
 else
-    echo "[*] brute 节奏闸门:本轮跳过 brute (cadence=${BRUTE_CADENCE_DAYS:-30}d)"
+    echo "$(t main.scan.brute_gate_skip BRUTE_CADENCE_DAYS=${BRUTE_CADENCE_DAYS:-30})"
 fi
 
 if [ "$BRUTE_RUN_THIS_TURN" = "1" ] && [ -s "$TARGET" ]; then
@@ -412,13 +417,13 @@ if [ "$BRUTE_RUN_THIS_TURN" = "1" ] && [ -s "$TARGET" ]; then
     [ -x "$SHUFFLEDNS_BIN" ] || SHUFFLEDNS_BIN=$(command -v shuffledns || true)
 
     if [ ! -x "$SHUFFLEDNS_BIN" ]; then
-        echo "[!] shuffledns 缺失,跳过 brute 阶段"
+        echo "$(t main.scan.shuffledns_missing)"
     else
         # 0) brute computes its own base (from $TARGET, both the exact and the glob ones are supported)
         # shuffledns -d does not accept a newline, so it is converted to CSV (the same handling as the dnsx RESOLVERS_CSV)
         BRUTE_BASES=$(python3 target_glob.py all-bases --input "$TARGET" 2>/dev/null | tr "\n" "," | sed "s/,$//" || true)
         if [ -z "$BRUTE_BASES" ]; then
-            echo "[!] brute 无法从 $TARGET 提取 base,跳过"
+            echo "$(t main.scan.brute_no_base TARGET=$TARGET)"
         else
             BRUTE_TMPDIR=$(mktemp -d)
             BRUTE_MODE="${BRUTE_MODE:-top}"
@@ -448,10 +453,10 @@ if [ "$BRUTE_RUN_THIS_TURN" = "1" ] && [ -s "$TARGET" ]; then
             done
 
             if [ ! -f "$BASE_WL" ]; then
-                echo "[!] wordlist 缺失: $BASE_WL,跳过 brute"
+                echo "$(t main.scan.wordlist_missing BASE_WL=$BASE_WL)"
             else
                 BRUTE_BASE_COUNT=$(echo "$BRUTE_BASES" | wc -l)
-                echo "[*] brute 提取 base: $BRUTE_BASE_COUNT 个 (mode=$BRUTE_MODE)"
+                echo "$(t main.scan.brute_base_count BRUTE_BASE_COUNT=$BRUTE_BASE_COUNT BRUTE_MODE=$BRUTE_MODE)"
 
                 # the wordlist preparation
                 BRUTE_WORDLIST="$BRUTE_TMPDIR/brute_wordlist.txt"
@@ -493,7 +498,7 @@ if [ "$BRUTE_RUN_THIS_TURN" = "1" ] && [ -s "$TARGET" ]; then
                 # the hash of the wordlist content is used as the -R seed, so the same wordlist -> the same sample
                 WL_LINES=$(wc -l < "$BRUTE_WORDLIST")
                 if [ "$WL_LINES" -gt "$SAMPLE_SIZE" ]; then
-                    echo "[*] wordlist 抽样: $WL_LINES -> $SAMPLE_SIZE"
+                    echo "$(t main.scan.wordlist_sampled WL_LINES=$WL_LINES SAMPLE_SIZE=$SAMPLE_SIZE)"
                     WL_SEED=$(sha256sum "$BRUTE_WORDLIST" | cut -c1-8)
                     # sort -R uses a stable seed; --random-source=/dev/urandom + head -n
                     # combined give a stable sample (the same WL -> the same sample, a different WL -> a different sample)
@@ -595,19 +600,19 @@ fi
 # (a-foo.b.com / d-bar.b.com), and the semantics are exactly the ones of stage 1
 # of scan.sh.
 if [ -s wildcard.txt ]; then
-    echo "[*] wildcard -> subfinder (按 base 去重) ..."
+    echo "$(t main.scan.wildcard_subfinder)"
     WILDCARD_BASES=$(python3 target_glob.py all-bases --input wildcard.txt || true)
     if [ -n "$WILDCARD_BASES" ]; then
         echo "$WILDCARD_BASES" | subfinder -silent -r "$resolvers_file" | \
             grep -E -f targets.regex | \
             grep -v -E -f excludes.regex \
             >> "$DNSX_OUT" || true
-        echo "[*] wildcard 子域已追加"
+        echo "$(t main.scan.wildcard_appended)"
     else
-        echo "[*] wildcard.txt 无可用 base,跳过"
+        echo "$(t main.scan.wildcard_no_base)"
     fi
 else
-    echo "[*] 无 wildcard.txt,跳过"
+    echo "$(t main.scan.no_wildcard_file)"
 fi
 
 # deduplicate the final result
