@@ -10,39 +10,45 @@ Idempotent: each ALTER uses a guard (column/trigger already exists → skip).
 Usage:
     python3 lib/migrate_change_type_urls.py [DB_PATH]
 
-设计要点
+Design notes
 ========
-对齐 web_subdomains 的 change_type bitmask 语义:
+Aligns with the change_type bitmask semantics of web_subdomains:
   0 = clean
-  1 = inserted   (AI 触发)
-  2 = content changed (普通 upsert + 字段差异)
-  4 = reactivated (is_active 0→1 AND OLD.last_seen < 上次成功扫描)
+  1 = inserted   (the AI trigger)
+  2 = content changed (a plain upsert plus a field difference)
+  4 = reactivated (is_active 0→1 AND OLD.last_seen < the last successful scan)
   6 = reactivated + content changed
 
-核心 gate(用户 2026-08-26 拍板):
-  "只有满足当前子域 && 非 js/css 才可能修改 change_type"
-  → AU 触发器 WHEN 子句加 AND NEW.is_static = 0
-  → INSERT 没有 is_static 限制(新行可能是 js/css,需要入库;
-     但永远不会被染色 / 算 changed — 因为它的 change_type=1 也只有
-     在 is_static=0 时触发器才会"维持"它为 1;等等,AI 触发器是无条件的)
-  → 实际:AI 触发器无条件置 1;AU 触发器 gate is_static=0;
-     这样静态行的 change_type 永远是 1(INSERT 时),不会被 diff 标 changed
-     (因为 diff 只对 change_type>0 行做内容 diff 二次校验时会跳过)
+The core gate (decided by the user on 2026-08-26):
+  "only a subdomain that is in scope and is not js/css can have its
+  change_type modified"
+  → the AU trigger gets AND NEW.is_static = 0 in its WHEN clause
+  → INSERT has no is_static restriction (a new row may be js/css and has to
+     be stored; but it is never coloured and never counted as changed —
+     because its change_type=1 is only "kept" at 1 by the trigger while
+     is_static=0; wait, the AI trigger is unconditional)
+  → in practice: the AI trigger sets 1 unconditionally; the AU trigger
+     gates on is_static=0; so a static row keeps change_type = 1 (from the
+     INSERT) and is never marked changed by diff (because the second
+     content-diff check only runs on rows with change_type>0)
 
-复活判定:
+Reactivation test:
   OLD.last_seen < COALESCE(
     (SELECT last_run_at FROM web_subdomain_scan_schedule
        WHERE business_id=NEW.business_id AND subdomain=NEW.subdomain
          AND enabled=1 LIMIT 1),
     OLD.last_seen)
-  → 没有 schedule 行(从未开启每日扫描):永远 OLD.last_seen < OLD.last_seen = FALSE,
-    等价于 0→1 永远是 bulk-deactivate-then-UPSERT 语义,置 0
-    (保持触发器对未启用子域的"无变化"语义,不影响手动 scan-urls)
+  → no schedule row (daily scanning was never enabled for it):
+     always OLD.last_seen < OLD.last_seen = FALSE, which is the same as the
+     0→1 case always following the bulk-deactivate-then-UPSERT semantics, so
+     it stays 0
+     (this keeps the trigger's "no change" semantics for subdomains that
+     are not enabled, and does not affect the manual scan-urls)
 
-内容字段差异(WHEN 子句):
+Content field differences (the WHEN clause):
   status_code / content_length / word_count / title / redirect /
   link_source / risk_flag / is_dangerous / content_type
-  (覆盖三个 source 共有的可变字段;path / url 是 identity,不变)
+  (covers the mutable fields shared by the three sources; path / url are identity and do not change)
 """
 from __future__ import annotations
 
