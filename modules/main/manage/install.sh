@@ -15,6 +15,10 @@
 # Exit codes: 0/1/2/3/4 same as the pdtm module
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -43,7 +47,7 @@ install() {
     if [ ! -f "$SCRIPT_DIR/seeds/.gitkeep" ]; then
         : > "$SCRIPT_DIR/seeds/.gitkeep"
     fi
-    log "已准备 seeds/ 目录"
+    log "$(t main.manage_install.seeds_ready)"
     return 0
 }
 
@@ -57,7 +61,7 @@ verify() {
 
 # ---- uninstall ----
 uninstall() {
-    log "manage 模块无需反安装(seeds/ 与脚本保留)"
+    log "$(t main.manage_install.nothing_to_uninstall)"
     return 0
 }
 

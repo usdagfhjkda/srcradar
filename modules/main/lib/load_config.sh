@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 #
 # load_config.sh — bash wrapper, calls load_config.py to parse config/*.conf
 #
@@ -32,7 +36,7 @@ load_config_set() {
 
     local parsed
     if ! parsed="$(python3 "$lib_dir/load_config.py" "$cfg" 2>/dev/null)"; then
-        echo "[load_config] parse failed for $cfg (config 跳过)" >&2
+        echo "$(t main.load_config.parse_failed cfg=$cfg)" >&2
         return 3
     fi
     [ -z "$parsed" ] && return 3

@@ -30,6 +30,10 @@
 
 set -u
 set -o pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DAILY="$RECON_ROOT/main/daily"
@@ -411,7 +415,7 @@ if [ -x "$ALGO_DIFF_CPP_BIN" ]; then
         fi
     fi
     if [ -n "$HTTPX_BIN_EFF" ] && [ ! -x "$HTTPX_BIN_EFF" ]; then
-        say "step 1.4: WARN httpx 不可执行, 三包取样将降级 (path=$HTTPX_BIN_EFF)"
+        say "$(t main.daily_monitor.httpx_not_executable HTTPX_BIN_EFF=$HTTPX_BIN_EFF)"
         HTTPX_BIN_EFF=""
     fi
     # The 3-package scheme: on by default (2 = 2 extra samples, so 3 packages

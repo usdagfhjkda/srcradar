@@ -21,6 +21,10 @@
 #   3 = katana module self-check failed (key file missing)
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -61,27 +65,27 @@ check_deps() {
 
 install_katana_bin() {
     if command -v katana >/dev/null 2>&1; then
-        log "katana 已在 PATH: $(command -v katana)"
+        log "$(t public.katana_install.already_in_path)"
         return 0
     fi
     log "go install projectdiscovery/katana/v2/cmd/katana@latest"
     if ! go install github.com/projectdiscovery/katana/v2/cmd/katana@latest; then
-        err "go install 失败;检查 GOPATH / GOBIN / 网络"
+        err "$(t public.katana_install.go_install_failed)"
         return 1
     fi
     # katana installs to $(go env GOPATH)/bin by default; PATH usually already includes it, echo it once explicitly
     local gobin
     gobin="$(go env GOPATH)/bin"
     if [ -x "${gobin}/katana" ] && ! command -v katana >/dev/null 2>&1; then
-        warn "katana 已装到 ${gobin},但不在 PATH — 加到 ~/.bashrc 或设 KATANA_BIN"
+        warn "$(t public.katana_install.not_in_path gobin=${gobin})"
     fi
 }
 
 write_example() {
     if [ -f "$EXAMPLE_CONF" ]; then
-        log "example 已存在: $EXAMPLE_CONF"
+        log "$(t public.katana_install.example_exists EXAMPLE_CONF=$EXAMPLE_CONF)"
     else
-        log "写入 example: $EXAMPLE_CONF"
+        log "$(t public.katana_install.writing_example EXAMPLE_CONF=$EXAMPLE_CONF)"
         mkdir -p "$(dirname "$EXAMPLE_CONF")"
         cat > "$EXAMPLE_CONF" <<'CONFEOF'
 # katana module config placeholder template
@@ -115,15 +119,15 @@ CONFEOF
 uninstall() {
     # do not delete the katana binary (the user may have installed it globally)
     rm -f "$TARGET_CONF"
-    log "已删 $TARGET_CONF(真值;example 保留)"
-    log "katana 二进制未删;如需: rm \$(go env GOPATH)/bin/katana"
+    log "$(t public.katana_install.conf_removed TARGET_CONF=$TARGET_CONF)"
+    log "$(t public.katana_install.binary_not_removed)"
 }
 
 # ---- main ----
 MODE="${1:-install}"
 case "$MODE" in
     --check)
-        log "检查依赖 + 自检..."
+        log "$(t public.katana_install.checking)"
         check_deps
         rc=$?
         [ $rc -eq 0 ] && log "自检通过"
@@ -134,16 +138,16 @@ case "$MODE" in
         exit 0
         ;;
     install|--yes|"")
-        log "检查依赖..."
+        log "$(t public.katana_install.checking_deps)"
         if ! check_deps; then
-            err "依赖不满足,exit"
+            err "$(t public.katana_install.deps_not_met)"
             exit 2
         fi
         install_katana_bin
         write_example
-        log "自检..."
+        log "$(t public.katana_install.self_test)"
         check_deps >/dev/null
-        log "OK. 用法: bash katana_enrich.sh --help"
+        log "$(t public.katana_install.usage)"
         exit 0
         ;;
     *)

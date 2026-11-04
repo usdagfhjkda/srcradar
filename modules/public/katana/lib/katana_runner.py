@@ -46,6 +46,14 @@ from pathlib import Path
 
 from risks import crawl_out_scope_pattern, is_dangerous_url  # noqa: E402
 from schema_map import map_row  # noqa: E402
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 SOURCE = "katana"
 
@@ -457,15 +465,15 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="katana URL 资产扫描 → web_hash_urls",
+        description=t("public.katana_runner.description"),
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("enrich", help="对一组 host 跑 katana 并入库")
-    p.add_argument("--db", required=True, help="recon.sqlite3 路径")
-    p.add_argument("--business", required=True, help="业务名(businesses.business_name)")
-    p.add_argument("--hosts-file", required=True, help="子域列表文件,一行一个")
-    p.add_argument("--dry-run", action="store_true", help="只跑 katana,不写库")
+    p = sub.add_parser("enrich", help=t("public.katana_runner.help_run"))
+    p.add_argument("--db", required=True, help=t("public.katana_runner.help_db"))
+    p.add_argument("--business", required=True, help=t("public.katana_runner.help_business"))
+    p.add_argument("--hosts-file", required=True, help=t("public.katana_runner.help_hosts"))
+    p.add_argument("--dry-run", action="store_true", help=t("public.katana_runner.help_dryrun"))
 
     return parser.parse_args(argv)
 

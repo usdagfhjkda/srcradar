@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 # run_one_business.sh - run selected stages for a single business.
 #
 # Usage: run_one_business.sh -type <stages> <business_name>
@@ -443,7 +447,7 @@ fi
 
 if has_stage pdtm; then
     if [ -n "${GUARD_BIZ_ID:-}" ] && [ "${GUARD_SCOPE_COUNT:-0}" = "0" ]; then
-        log "biz='$BIZ' exists (id=$GUARD_BIZ_ID) but has 0 可测资产 scopes → needs_onboarding; skipping pdtm"
+        log "$(t main.run_one_business.needs_onboarding BIZ=$BIZ GUARD_BIZ_ID=$GUARD_BIZ_ID)"
         if [ -n "${WARNINGS_FILE:-}" ]; then
             printf '%s\tneeds_onboarding (no 可测资产 scope; run pipeline.sh -b %s -i <input_dir>)\n' \
                 "$BIZ" "$BIZ" >> "$WARNINGS_FILE"

@@ -23,6 +23,15 @@ import argparse
 import os
 import sqlite3
 import sys
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 DEFAULT_DB = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "db", "recon.sqlite3")
@@ -105,16 +114,17 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
         before = row_counts(con, order)
         print(f"db: {db_path}")
         print(f"journal_mode: {con.execute('PRAGMA journal_mode').fetchone()[0]}")
-        print("计划删除顺序（叶子表先删）:")
+        print(_t("main.truncate_recon_db.plan"))
         for i, t in enumerate(order, 1):
             print(f"  {i:2}. {t:<22} rows={before[t]}")
         print(
             f"包含 service_type_map: {'yes' if include_type_map else 'no (保留 runner 累积的类型映射)'}"
         )
         if vacuum:
-            print("完成后会跑 VACUUM（回收磁盘，可能较慢）")
+            print(_t("main.truncate_recon_db.vacuum_note"))
         if dry_run:
-            print("\nDRYRUN: 未做任何修改。")
+            print()
+            print(_t("main.truncate_recon_db.dryrun"))
             return 0
 
         # checkpoint before the write (so that no stale data stays in the WAL)
@@ -137,7 +147,8 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
             con.execute("VACUUM")
 
         after = row_counts(con, order)
-        print("\n删除完成:")
+        print()
+        print(_t("main.truncate_recon_db.done"))
         for t in order:
             mark = "" if before[t] else " (空表)"
             print(f"  {t:<22} {before[t]:>8} -> {after[t]:>8}{mark}")
@@ -148,36 +159,36 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="清空 recon.sqlite3 中所有数据，保留表结构。",
+        description=_t("main.truncate_recon_db.summary"),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     ap.add_argument(
         "-d", "--db",
         default=os.environ.get("RECON_DB", DEFAULT_DB),
-        help=f"sqlite 路径（默认: {DEFAULT_DB}，也读 $RECON_DB）",
+        help=_t("main.truncate_recon_db.arg_db", {"DEFAULT_DB": DEFAULT_DB}),
     )
-    ap.add_argument("-n", "--dry-run", action="store_true", help="只打印计划，不动数据")
+    ap.add_argument("-n", "--dry-run", action="store_true", help=_t("main.truncate_recon_db.arg_plan_only"))
     ap.add_argument(
         "--all",
         action="store_true",
-        help="同时清 service_type_map（默认保留 runner 累积的 type_<N> 命名）",
+        help=_t("main.truncate_recon_db.arg_also_service_type"),
     )
     ap.add_argument(
-        "--vacuum", action="store_true", help="删除后 VACUUM 回收磁盘（较慢）"
+        "--vacuum", action="store_true", help=_t("main.truncate_recon_db.arg_vacuum")
     )
-    ap.add_argument("-y", "--yes", action="store_true", help="跳过交互确认")
+    ap.add_argument("-y", "--yes", action="store_true", help=_t("main.truncate_recon_db.arg_skip_confirm"))
     args = ap.parse_args()
 
     print(f"即将清空: {args.db}")
-    print("  （表结构、索引、PRAGMA 设置保持不变；AUTOINCREMENT 计数重置）")
+    print(_t("main.truncate_recon_db.arg_keeps"))
     if not args.yes and not args.dry_run:
         try:
             ans = input("确认执行？[y/N] ").strip().lower()
         except EOFError:
             ans = ""
         if ans not in ("y", "yes"):
-            print("已取消。")
+            print(_t("main.truncate_recon_db.cancelled"))
             return 1
 
     sys.exit(truncate(

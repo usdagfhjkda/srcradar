@@ -47,6 +47,10 @@
 #     which protects against a later operator edit.
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 # The pdtm tool paths are hardcoded (as in scan.sh: the head of the Ubuntu
 #  .bashrc returns early in the `case $-` branch, so sourcing ~/.bashrc never
@@ -110,13 +114,13 @@ done
 [ -n "$NAME" ] || { echo "[-n <业务名>] is required" >&2; usage 1; }
 [ -f "$DB" ]  || { echo "[-d] db not found: $DB" >&2; exit 1; }
 if [ "$AUTO" = "1" ] && [ -n "$INPUT_DIR" ]; then
-    echo "[--auto] 与 [-i/--input] 互斥, 只能用一个" >&2; exit 1
+    echo "$(t main.add_business.auto_and_input_exclusive)" >&2; exit 1
 fi
 if [ "$KEEP_INPUT" = "1" ] && [ "$AUTO" = "1" ]; then
-    echo "[--keep-input] 与 [--auto] 互斥: --auto 走 mktemp 临时目录,本就用完即删,无 keep 必要" >&2; exit 1
+    echo "$(t main.add_business.keep_input_auto_exclusive)" >&2; exit 1
 fi
 if [ "$KEEP_INPUT" = "1" ] && [ -z "$INPUT_DIR" ]; then
-    echo "[--keep-input] 仅在 [-i/--input] 下生效; 未指定 -i 时忽略" >&2
+    echo "$(t main.add_business.keep_input_needs_input)" >&2
 fi
 
 # ---- step 1+2: business row + config bootstrap ----
@@ -142,7 +146,7 @@ PY
 )
 echo "[add_biz] step 1-2: business id=$BID name='$NAME' config=enabled=$CUR_ENABLED,web=$CUR_WEB,tcp=$CUR_TCP,icp=$CUR_ICP"
 if [ "$CUR_ENABLED" != "$ENABLED" ] || [ "$CUR_WEB" != "$WEB" ] || [ "$CUR_TCP" != "$TCP" ] || [ "$CUR_ICP" != "$ICP" ]; then
-    echo "[add_biz]   (注: 已有 config 行, 你给的 flag 未应用; 改用 manage/set_config.sh)"
+    echo "$(t main.add_business.config_exists)"
 fi
 
 # ---- step 3: seed companies (optional) ----
@@ -192,7 +196,7 @@ if [ "$AUTO" = "1" ]; then
     AUTO_TARGET="$AUTO_INPUT_DIR/target.txt"
     trap 'rm -rf "$AUTO_INPUT_DIR"' EXIT
 
-    echo "[add_biz] step 3.5: ymicp /query/web 搜 '$NAME' (base=$YMICP_BASE, pages=$YMICP_PAGES)"
+    echo "$(t main.add_business.ymicp_query NAME=$NAME YMICP_BASE=$YMICP_BASE YMICP_PAGES=$YMICP_PAGES)"
 
     # icp_mapp_query.py --endpoint web --out-domains <file>:
     #   - calls /query/web (the website filing, not the mini program /query/mapp)
@@ -207,19 +211,19 @@ if [ "$AUTO" = "1" ]; then
 
     if ! printf '%s\n' "$NAME" | python3 "$YMICP_SCRIPT" "${YMICP_ARGS[@]}"; then
         rc=$?
-        echo "[--auto] icp_mapp_query.py --endpoint web 失败 (exit=$rc)" >&2
-        echo "[--auto] 临时目录已保留: $AUTO_INPUT_DIR" >&2
+        echo "$(t main.add_business.ymicp_failed rc=$rc)" >&2
+        echo "$(t main.add_business.temp_dir_kept AUTO_INPUT_DIR=$AUTO_INPUT_DIR)" >&2
         trap - EXIT
         exit $rc
     fi
 
     if [ ! -s "$AUTO_TARGET" ]; then
-        echo "[--auto] target.txt 为空 (ymicp /query/web 返回 0 个 domain); step 4 拒绝入 scopes"
-        echo "[--auto] 临时目录已保留: $AUTO_INPUT_DIR (供排查)"
+        echo "$(t main.add_business.target_empty)"
+        echo "$(t main.add_business.temp_dir_kept_debug AUTO_INPUT_DIR=$AUTO_INPUT_DIR)"
         trap - EXIT  # 保留临时目录, 让用户能 cat
     else
         n=$(wc -l < "$AUTO_TARGET")
-        echo "[--auto] target.txt: $n 个域名"
+        echo "$(t main.add_business.target_count n=$n)"
     fi
 fi
 

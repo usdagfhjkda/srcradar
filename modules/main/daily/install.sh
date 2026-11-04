@@ -16,6 +16,10 @@
 # Exit codes: 0/1/2/3/4, the same as the pdtm module
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -43,21 +47,21 @@ check_deps() {
 # ---- prepare the runtime directories ----
 install() {
     mkdir -p "$SCRIPT_DIR/logs" "$SCRIPT_DIR/reports" "$SCRIPT_DIR/snapshots"
-    log "已准备 logs/ reports/ snapshots/ 目录"
+    log "$(t main.daily_install.dirs_ready)"
     return 0
 }
 
 # ---- register the cron ----
 register_cron() {
     if ! command -v crontab >/dev/null 2>&1; then
-        warn "无 crontab,跳过 cron 注册"
+        warn "$(t main.daily_install.no_crontab)"
         return 0
     fi
-    log "注册 cron (调 install_cron.sh)"
+    log "$(t main.daily_install.registering_cron)"
     if [ -x "$SCRIPT_DIR/install_cron.sh" ]; then
         bash "$SCRIPT_DIR/install_cron.sh"
     else
-        warn "install_cron.sh 缺失,跳过"
+        warn "$(t main.daily_install.cron_script_missing)"
     fi
     return 0
 }
@@ -74,10 +78,10 @@ verify() {
 # ---- uninstall ----
 uninstall() {
     if command -v crontab >/dev/null 2>&1; then
-        log "尝试移除 daily 相关 cron 行"
+        log "$(t main.daily_install.removing_cron)"
         crontab -l 2>/dev/null | grep -v "daily/daily_monitor.sh" | crontab - 2>/dev/null || true
     fi
-    log "已清理 cron 注册(代码与日志保留)"
+    log "$(t main.daily_install.cron_cleaned)"
     return 0
 }
 
