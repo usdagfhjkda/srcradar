@@ -39,6 +39,14 @@ import sys
 import time
 from pathlib import Path
 from collections.abc import Iterable
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 # the paths that are relative to this module
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -649,19 +657,19 @@ def render_body(findings: list[Finding], subject_prefix: str, date_ph: str) -> s
 def _cli() -> int:
     p = argparse.ArgumentParser(
         prog="health_check.py",
-        description="5 项健康检查 + 报告渲染;--dryrun 不调 notify_send.sh",
+        description=t("public.health_check.cli_description"),
     )
     p.add_argument("--config", default=str(DEFAULT_CONFIG),
-                   help=f"conf 路径(默认 {DEFAULT_CONFIG},缺时用 DEFAULT_THRESHOLDS)")
-    p.add_argument("--dryrun", action="store_true", help="只生成报告,不调 notify")
+                   help=t("public.health_check.cli_config_help", {"DEFAULT_CONFIG": DEFAULT_CONFIG}))
+    p.add_argument("--dryrun", action="store_true", help=t("public.health_check.cli_dryrun_help"))
     p.add_argument("--run-id", default=time.strftime("%Y%m%d-%H%M%S"), help="run_id")
-    p.add_argument("--date-ph", default="%Y-%m-%d", help="date 占位符")
+    p.add_argument("--date-ph", default="%Y-%m-%d", help=t("public.health_check.cli_date_placeholder"))
     p.add_argument("--out", default=str(LOG_DIR / "health_report.md"),
                    help=f"报告输出路径(默认 {LOG_DIR / 'health_report.md'})")
     p.add_argument("--notify-script", default=str(NOTIFY_SEND),
-                   help="notify_send.sh 路径(可改)")
+                   help=t("public.health_check.cli_notify_script_help"))
     p.add_argument("--repo-root", default=str(REPO_ROOT),
-                   help="项目根,影响 cron / dashboard 路径解析")
+                   help=t("public.health_check.cli_repo_root_help"))
     args = p.parse_args()
 
     cfg_path = Path(args.config)
@@ -669,9 +677,9 @@ def _cli() -> int:
     if cfg_path.is_file():
         user_dict = parse_config(cfg_path)
         if user_dict is None:
-            print(f"[health] WARN conf parse 失败,回退 DEFAULT: {cfg_path}", file=sys.stderr)
+            print(t("public.health_check.conf_parse_failed", {"cfg_path": cfg_path}), file=sys.stderr)
     else:
-        print(f"[health] INFO conf 不存在({cfg_path}),用 DEFAULT_THRESHOLDS", file=sys.stderr)
+        print(t("public.health_check.conf_missing", {"cfg_path": cfg_path}), file=sys.stderr)
 
     thresholds = merge_with_defaults(user_dict)
 
@@ -693,16 +701,16 @@ def _cli() -> int:
     print(f"[health] findings: alert={n_alert} warn={n_warn} ok={sum(1 for f in findings if f.severity == 'ok')}")
 
     if args.dryrun:
-        print("[health] --dryrun: 跳过 notify_send.sh")
+        print(t("public.health_check.dryrun_skips_notify"))
         return 0
 
     if n_alert == 0 and n_warn == 0:
-        print("[health] 全 OK,不调 notify_send.sh")
+        print(t("public.health_check.all_ok_no_notify"))
         return 0
 
     notify = Path(args.notify_script)
     if not notify.is_file():
-        print(f"[health] WARN notify_send.sh 缺失({notify});跳过推送", file=sys.stderr)
+        print(t("public.health_check.notify_script_missing", {"notify": notify}), file=sys.stderr)
         return 0
 
     # the way it is called is exactly the same as daily_monitor:

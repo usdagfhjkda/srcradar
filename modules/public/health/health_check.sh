@@ -33,6 +33,10 @@
 #
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -83,10 +87,10 @@ main() {
     EFFECTIVE_CONFIG="$CONFIG_FILE"
     if [ ! -f "$CONFIG_FILE" ]; then
         if [ -f "$EXAMPLE_CONF" ]; then
-            warn "config/health.conf 不存在,用 example 作占位(实际阈值用 DEFAULT)"
+            warn "$(t public.health_check.config_missing_example_used)"
             EFFECTIVE_CONFIG="$EXAMPLE_CONF"
         else
-            warn "config 全部缺失,health_check.py 会回退到 DEFAULT_THRESHOLDS"
+            warn "$(t public.health_check.config_all_missing)"
             EFFECTIVE_CONFIG="${SCRIPT_DIR}/lib/thresholds.py"  # 任意存在的路径,trigger DEFAULT 分支
         fi
     fi
@@ -96,7 +100,7 @@ main() {
 
     log "run health_check.py ..."
     if ! python3 "$HEALTH_CHECK_PY" "${ARGS[@]}" 2>>"$HEALTH_LOG"; then
-        err "health_check.py 失败,详见 $HEALTH_LOG"
+        err "$(t public.health_check.check_failed HEALTH_LOG=$HEALTH_LOG)"
         exit 3
     fi
     log "report: ${LOG_DIR}/health_report.md"

@@ -21,6 +21,10 @@
 #
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -52,9 +56,9 @@ check_deps() {
 # ---- write the example placeholder (if missing) ----
 write_example() {
     if [ -f "$EXAMPLE_CONF" ]; then
-        log "example 已存在: $EXAMPLE_CONF"
+        log "$(t public.install.notify_example_exists EXAMPLE_CONF=$EXAMPLE_CONF)"
     else
-        log "写入 example: $EXAMPLE_CONF"
+        log "$(t public.install.notify_example_written EXAMPLE_CONF=$EXAMPLE_CONF)"
         mkdir -p "$(dirname "$EXAMPLE_CONF")"
         cat > "$EXAMPLE_CONF" <<'EOF'
 # notify module config placeholder template
@@ -87,36 +91,36 @@ verify() {
     if command -v gpg >/dev/null 2>&1; then
         printf "  OK gpg: %s\n" "$(command -v gpg)"
     else
-        err "gpg 缺失"; rc=1
+        err "$(t public.install.gpg_missing)"; rc=1
     fi
     if command -v curl >/dev/null 2>&1; then
         printf "  OK curl: %s\n" "$(command -v curl)"
     else
-        err "curl 缺失"; rc=1
+        err "$(t public.install.curl_missing)"; rc=1
     fi
     if command -v python3 >/dev/null 2>&1; then
         printf "  OK python3: %s\n" "$(command -v python3)"
     else
-        err "python3 缺失"; rc=1
+        err "$(t public.install.python3_missing)"; rc=1
     fi
     # key point: under a TTY the example has normally already been copied to notify.conf by the operator.
     # non-TTY (--check) does not require the real values to exist, but the example must be there.
     if [ -t 0 ]; then
         if [ -f "$TARGET_CONF" ]; then
-            printf "  OK 真值配置存在: %s\n" "$TARGET_CONF"
+            printf "$(t public.install.notify_real_config_ok)" "$TARGET_CONF"
         else
-            warn "config/notify.conf 不存在(--check / docker 默认忽略,真值由 operator 维护)"
+            warn "$(t public.install.notify_real_config_missing)"
         fi
     fi
     if [ -f "$EXAMPLE_CONF" ]; then
-        printf "  OK example 模板存在\n"
+        printf "$(t public.install.notify_example_template_ok)"
     else
-        err "example 模板缺失"; rc=1
+        err "$(t public.install.notify_example_template_missing)"; rc=1
     fi
     if python3 "${SCRIPT_DIR}/lib/notify_config.py" --help >/dev/null 2>&1; then
-        printf "  OK notify_config.py --help 输出\n"
+        printf "$(t public.install.notify_config_help_ok)"
     else
-        err "notify_config.py --help 失败"; rc=1
+        err "$(t public.install.notify_config_help_failed)"; rc=1
     fi
     # RESEND_API_KEY format reminder (printed only on the --check path, not enforced)
     if [ -f "$TARGET_CONF" ]; then
@@ -124,11 +128,11 @@ verify() {
             local key
             key="$(sed -n 's/^RESEND_API_KEY=//p' "$TARGET_CONF" | head -1)"
             if [[ "$key" == REPLACE_WITH_* ]] || [ -z "$key" ]; then
-                warn "RESEND_API_KEY 仍是占位符,真值未填"
+                warn "$(t public.install.resend_api_key_placeholder)"
             elif [[ "$key" != re_* ]]; then
-                warn "RESEND_API_KEY 不以 re_ 开头(Resend 标准格式)"
+                warn "$(t public.install.resend_api_key_prefix)"
             elif [ "${#key}" -lt 20 ]; then
-                warn "RESEND_API_KEY 长度 < 20 字符(疑似无效)"
+                warn "$(t public.install.resend_api_key_too_short)"
             fi
         fi
     fi
@@ -141,7 +145,7 @@ verify() {
 
 uninstall() {
     # only remove the files that install.sh may have created; leave the operator's notify.conf alone
-    log "保留 example 模板与 operator 自填的真值 config;无可清理项"
+    log "$(t public.install.notify_uninstall_nothing_to_clean)"
     return 0
 }
 
@@ -151,7 +155,7 @@ main() {
             check_deps || exit $?
             write_example
             verify || exit $?
-            log "notify 模块依赖 OK"
+            log "$(t public.install.notify_module_deps_ok)"
             exit 0
             ;;
         --uninstall) uninstall ;;

@@ -24,6 +24,10 @@
 #
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -82,9 +86,9 @@ check_notify_dep() {
 # write the example placeholder (if missing)
 write_example() {
     if [ -f "$EXAMPLE_CONF" ]; then
-        log "example 已存在: $EXAMPLE_CONF"
+        log "$(t public.install.health_example_exists EXAMPLE_CONF=$EXAMPLE_CONF)"
     else
-        log "写入 example: $EXAMPLE_CONF"
+        log "$(t public.install.health_example_written EXAMPLE_CONF=$EXAMPLE_CONF)"
         mkdir -p "$(dirname "$EXAMPLE_CONF")"
         cat > "$EXAMPLE_CONF" <<'EOF'
 # health module config placeholder template
@@ -137,14 +141,14 @@ verify() {
     [ -f "$SCRIPT_DIR/install_cron.sh" ] && printf "  OK install_cron.sh\n" || { err "install_cron.sh 缺失"; rc=1; }
 
     if [ -f "$NOTIFY_SEND" ]; then
-        printf "  OK notify_send.sh (依赖): %s\n" "$NOTIFY_SEND"
+        printf "$(t public.install.health_notify_send_ok)" "$NOTIFY_SEND"
     else
-        err "依赖缺失: $NOTIFY_SEND"; rc=1
+        err "$(t public.install.health_notify_send_missing NOTIFY_SEND=$NOTIFY_SEND)"; rc=1
     fi
     if [ -f "$NOTIFY_CONFIG_PY" ]; then
-        printf "  OK lib/notify_config.py (依赖)\n"
+        printf "$(t public.install.health_notify_config_ok)"
     else
-        err "依赖缺失: $NOTIFY_CONFIG_PY"; rc=1
+        err "$(t public.install.health_notify_config_missing NOTIFY_CONFIG_PY=$NOTIFY_CONFIG_PY)"; rc=1
     fi
 
     [ -f "$EXAMPLE_CONF" ] && printf "  OK config/health.conf.example\n" \
@@ -152,22 +156,22 @@ verify() {
 
     # the real conf is optional; hint about it but do not fail verify
     if [ -f "$TARGET_CONF" ]; then
-        printf "  OK 真值配置存在: %s\n" "$TARGET_CONF"
+        printf "$(t public.install.health_real_config_ok)" "$TARGET_CONF"
     else
-        warn "config/health.conf 不存在(--check / docker 默认忽略,真值由 operator 维护)"
+        warn "$(t public.install.health_real_config_missing)"
     fi
 
     # self-check the conf parsing
     if python3 "${SCRIPT_DIR}/lib/health_config.py" --help >/dev/null 2>&1; then
         printf "  OK health_config.py --help\n"
     else
-        err "health_config.py --help 失败"; rc=1
+        err "$(t public.install.health_config_help_failed)"; rc=1
     fi
     # self-check the thresholds parsing
     if python3 "${SCRIPT_DIR}/lib/thresholds.py" >/dev/null 2>&1; then
-        printf "  OK thresholds.py DEFAULT 输出\n"
+        printf "$(t public.install.health_thresholds_default_ok)"
     else
-        err "thresholds.py 自身 import 失败"; rc=1
+        err "$(t public.install.health_thresholds_import_failed)"; rc=1
     fi
 
     # logs/ directory is writable
@@ -178,7 +182,7 @@ verify() {
     local bash_major
     bash_major="${BASH_VERSINFO[0]:-0}"
     if [ "$bash_major" -lt 4 ]; then
-        err "bash >= 4 推荐 (当前 $BASH_VERSION)"
+        err "$(t public.install.bash_version_recommended BASH_VERSION=$BASH_VERSION)"
         rc=1
     else
         printf "  OK bash: %s\n" "$BASH_VERSION"
@@ -188,11 +192,11 @@ verify() {
 }
 
 uninstall() {
-    log "尝试移除 health 相关 cron 行"
+    log "$(t public.install.health_cron_removal_attempt)"
     if [ -x "$SCRIPT_DIR/install_cron.sh" ] && command -v crontab >/dev/null 2>&1; then
         bash "$SCRIPT_DIR/install_cron.sh" uninstall || true
     fi
-    log "已清理 cron 注册(代码与日志保留)"
+    log "$(t public.install.health_cron_registration_cleaned)"
     return 0
 }
 
@@ -203,7 +207,7 @@ main() {
             check_notify_dep || true
             write_example
             verify || exit $?
-            log "health 模块依赖 OK"
+            log "$(t public.install.health_module_deps_ok)"
             exit 0
             ;;
         --uninstall) uninstall ;;

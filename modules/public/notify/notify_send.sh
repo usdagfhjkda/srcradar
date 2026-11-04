@@ -46,6 +46,10 @@
 #
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -82,15 +86,15 @@ parse_args() {
     done
     SUMMARY="$1"; BUSINESS="$2"; RUN_ID="$3"; DATE_PH="$4"
     if [ -z "${SUMMARY:-}" ] || [ -z "${BUSINESS:-}" ] || [ -z "${RUN_ID:-}" ] || [ -z "${DATE_PH:-}" ]; then
-        err "用法: notify_send.sh [--dryrun] [--config <conf>] [--text-file <path>] <summary.md> <business_name> <run_id> <date_placeholder>"
+        err "$(t public.notify_send.usage)"
         exit 1
     fi
     if [ ! -f "$SUMMARY" ]; then
-        err "summary.md 不存在: $SUMMARY"
+        err "$(t public.notify_send.summary_missing SUMMARY=$SUMMARY)"
         exit 1
     fi
     if [ -n "${TEXT_FILE:-}" ] && [ ! -f "$TEXT_FILE" ]; then
-        err "--text-file 指向的文件不存在: $TEXT_FILE"
+        err "$(t public.notify_send.text_file_missing TEXT_FILE=$TEXT_FILE)"
         exit 1
     fi
 }
@@ -98,16 +102,16 @@ parse_args() {
 # read config/notify.conf through lib/notify_config.py
 load_conf() {
     if [ ! -f "$CONFIG_FILE" ]; then
-        err "config/notify.conf 不存在,请复制 example 并填真值:"
+        err "$(t public.notify_send.config_missing)"
         err "  cp $EXAMPLE_CONF $CONFIG_FILE && chmod 600 $CONFIG_FILE"
         exit 2
     fi
     # shellcheck disable=SC1090
     parsed="$(python3 "${SCRIPT_DIR}/lib/notify_config.py" "$CONFIG_FILE" 2>/dev/null)" || {
-        err "notify_config.py parse 失败,config 跳过"; exit 2;
+        err "$(t public.notify_send.config_parse_failed)"; exit 2;
     }
     if [ -z "$parsed" ]; then
-        err "notify.conf 为空或解析失败"; exit 2
+        err "$(t public.notify_send.config_empty)"; exit 2
     fi
     while IFS= read -r line; do
         key="${line%%=*}"
@@ -123,12 +127,12 @@ load_conf() {
     for k in RESEND_API_KEY FROM_ADDR TO_ADDR SUBJECT GPG_RECIPIENT; do
         v="${!k:-}"
         if [ -z "$v" ] || [[ "$v" == REPLACE_WITH_* ]]; then
-            err "notify.conf 字段未填真值: $k"
+            err "$(t public.notify_send.config_field_not_filled k=$k)"
             missing=1
         fi
     done
     if [ "$missing" = "1" ]; then
-        err "请编辑 $CONFIG_FILE(参考 $EXAMPLE_CONF)"
+        err "$(t public.notify_send.config_edit_hint CONFIG_FILE=$CONFIG_FILE EXAMPLE_CONF=$EXAMPLE_CONF)"
         exit 2
     fi
 }
@@ -206,7 +210,7 @@ build_resend_payload() {
 # push_resend: curl POST to the Resend HTTP API
 push_resend() {
     if [ "$DRYRUN" = "1" ]; then
-        log "--dryrun: 跳过 curl 调用(payload.json 已生成)"
+        log "$(t public.notify_send.dryrun_skips_curl)"
         return 0
     fi
     # shellcheck disable=SC2154  # RESEND_API_KEY set by load_conf via printf -v
