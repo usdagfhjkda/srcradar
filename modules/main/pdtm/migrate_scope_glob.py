@@ -15,6 +15,15 @@ import argparse
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 
 def now() -> str:
@@ -23,11 +32,11 @@ def now() -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("--db", required=True, help="SQLite 数据库路径")
+    ap.add_argument("--db", required=True, help=t("main.migrate_scope_glob.arg_db"))
     ap.add_argument(
         "--apply",
         action="store_true",
-        help="真正写库 (默认 dry-run, 只打印会改的内容)",
+        help=t("main.migrate_scope_glob.arg_apply"),
     )
     args = ap.parse_args()
 
@@ -67,7 +76,7 @@ def main() -> int:
         conn.commit()
         print(f"\n[migrate] applied ({len(plan)} rows updated at {ts})")
     else:
-        print("\n[migrate] dry-run, 加 --apply 真正执行")
+        print(t("main.migrate_scope_glob.dry_run"))
 
     conn.close()
     return 0

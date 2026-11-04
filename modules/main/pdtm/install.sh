@@ -22,6 +22,10 @@
 #   4   an artifact is missing
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -45,7 +49,7 @@ check_go() {
         go_bin=/opt/homebrew/bin/go
     fi
     if [ -z "$go_bin" ]; then
-        err "缺 go:装 Go >= 1.25 (https://go.dev/dl/)"
+        err "$(t main.pdtm_install.missing_go)"
         return 2
     fi
     log "go: $($go_bin version)"
@@ -55,13 +59,13 @@ check_go() {
 # ---- install the pdtm orchestrator (go install into ~/go/bin/) ----
 install_pdtm_bin() {
     if command -v pdtm >/dev/null 2>&1 || [ -x "$HOME/go/bin/pdtm" ]; then
-        log "pdtm 已存在,跳过 ($HOME/go/bin/pdtm)"
+        log "$(t main.pdtm_install.already_present HOME=$HOME)"
         return 0
     fi
     log "go install pdtm -> $HOME/go/bin/pdtm"
     (cd /tmp && go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest)
     [ -x "$HOME/go/bin/pdtm" ] || { err "go install 后 $HOME/go/bin/pdtm 缺失"; return 3; }
-    log "pdtm 已装"
+    log "$(t main.pdtm_install.installed)"
     return 0
 }
 
@@ -81,7 +85,7 @@ install_pdtm_tools() {
     local miss=0
     for t in dnsx httpx subfinder alterx naabu; do
         if [ ! -x "$HOME/.pdtm/go/bin/$t" ]; then
-            warn "$t 未在 $HOME/.pdtm/go/bin/(pdtm -ia 可能跳过)"
+            warn "$(t main.pdtm_install.tool_missing t=$t HOME=$HOME)"
         else
             printf "  OK %s\n" "$t"
         fi
@@ -96,15 +100,15 @@ install_cdnmatch() {
     local bin="$SCRIPT_DIR/bin/cdnmatch"
 
     if [ ! -d "$cdn_dir" ]; then
-        err "pdtm/cdnmatch 目录缺失: $cdn_dir"
+        err "$(t main.pdtm_install.cdn_dir_missing cdn_dir=$cdn_dir)"
         return 3
     fi
     if [ -x "$bin" ]; then
-        log "cdnmatch 已存在: $bin (跳过 rebuild)"
+        log "$(t main.pdtm_install.cdnmatch_exists bin=$bin)"
         return 0
     fi
     if [ ! -d "$vendor_dir" ]; then
-        log "git clone cdncheck (vendor, 不入仓) -> $vendor_dir"
+        log "$(t main.pdtm_install.cloning_cdncheck vendor_dir=$vendor_dir)"
         git clone --depth 1 https://github.com/projectdiscovery/cdncheck.git "$vendor_dir"
     fi
     (
@@ -114,7 +118,7 @@ install_cdnmatch() {
         go build -o "$bin" .
     )
     [ -x "$bin" ] || { err "cdnmatch build 完但 $bin 缺失"; return 4; }
-    log "cdnmatch 已装: $bin"
+    log "$(t main.pdtm_install.cdnmatch_installed bin=$bin)"
     return 0
 }
 
@@ -124,13 +128,13 @@ verify() {
     if [ -x "$SCRIPT_DIR/bin/cdnmatch" ]; then
         printf "  OK cdnmatch\n"
     else
-        warn "cdnmatch 未装;用 --cdnmatch-only 装"
+        warn "$(t main.pdtm_install.cdnmatch_not_installed)"
         rc=1
     fi
     if command -v pdtm >/dev/null 2>&1 || [ -x "$HOME/go/bin/pdtm" ]; then
         printf "  OK pdtm\n"
     else
-        warn "pdtm 未装;用 --pdtm-only 装"
+        warn "$(t main.pdtm_install.pdtm_not_installed)"
         rc=1
     fi
     return $rc
@@ -145,7 +149,8 @@ install_massdns() {
         mkdir -p "$(dirname "$dst")"
     fi
     if [ -x "$dst" ] || command -v massdns >/dev/null 2>&1; then
-        log "massdns 已存在: $(command -v massdns || echo "$dst")"
+        _i18n_val=$(command -v massdns || echo "$dst")
+        echo "$(t main.pdtm_install.massdns_exists path="$_i18n_val")"
         return 0
     fi
     log "git clone massdns -> /tmp/massdns"
@@ -154,7 +159,7 @@ install_massdns() {
     cp /tmp/massdns/bin/massdns "$dst"
     rm -rf /tmp/massdns
     [ -x "$dst" ] || { err "massdns install failed: $dst"; return 3; }
-    log "massdns 已装: $dst"
+    log "$(t main.pdtm_install.massdns_installed dst=$dst)"
     return 0
 }
 
@@ -213,18 +218,20 @@ install_wordlists() {
 
     if [ -n "$src_top" ]; then
         cp "$src_top" "$dst/"
-        log "Top wordlist 已装: subdomains-top1million-20000.txt ($(wc -l < "$dst/subdomains-top1million-20000.txt") 行)"
+        _i18n_val=$(wc -l < "$dst/subdomains-top1million-20000.txt")
+        echo "$(t main.pdtm_install.top_wordlist_installed count="$_i18n_val")"
     else
-        warn "SecLists 词表缺失,Top 模式 brute 不可用"
+        warn "$(t main.pdtm_install.top_wordlist_missing)"
     fi
 
     if [ -n "$src_rolling" ] && [ "$src_rolling" != "$dst/dns-Jhaddix-clean.txt" ]; then
         cp "$src_rolling" "$dst/"
     fi
     if [ -f "$dst/dns-Jhaddix-clean.txt" ]; then
-        log "Rolling wordlist 已装: dns-Jhaddix-clean.txt ($(wc -l < "$dst/dns-Jhaddix-clean.txt") 行)"
+        _i18n_val=$(wc -l < "$dst/dns-Jhaddix-clean.txt")
+        echo "$(t main.pdtm_install.rolling_wordlist_installed count="$_i18n_val")"
     else
-        warn "Rolling 词表缺失,Rolling 模式 brute 不可用"
+        warn "$(t main.pdtm_install.rolling_wordlist_missing)"
     fi
 
     # write the dst it really landed in into the wordlists_dir= field of
@@ -294,8 +301,8 @@ EOF
 uninstall() {
     # shellcheck disable=SC2115
     rm -rf -- "$SCRIPT_DIR/bin" "$SCRIPT_DIR/cdncheck"
-    log "已清理 pdtm/bin/ 与 pdtm/cdncheck/(vendor)"
-    log "pdtm 编排器仍需 go install 卸载:$HOME/go/bin/pdtm"
+    log "$(t main.pdtm_install.cleaned)"
+    log "$(t main.pdtm_install.orchestrator_stays HOME=$HOME)"
     return 0
 }
 
@@ -303,7 +310,7 @@ main() {
     case "${1:-}" in
         --check)
             check_go || exit 2
-            log "pdtm 模块依赖 OK"
+            log "$(t main.pdtm_install.deps_ok)"
             exit 0
             ;;
         --cdnmatch-only) install_cdnmatch || exit $? ;;

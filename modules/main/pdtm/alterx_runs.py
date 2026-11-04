@@ -17,6 +17,15 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 DEFAULT_CADENCE_DAYS = 30
 
@@ -97,18 +106,18 @@ def _upsert_on_conn(conn: sqlite3.Connection, business_id: int,
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="alterx 节奏控制")
+    p = argparse.ArgumentParser(description=t("main.alterx_runs.cadence_control"))
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    ps = sub.add_parser("should-run", help="判断本轮是否跑 alterx")
+    ps = sub.add_parser("should-run", help=t("main.alterx_runs.should_run_help"))
     ps.add_argument("--db", required=True)
     ps.add_argument("--business-id", type=int, required=True)
     ps.add_argument("--cadence-days", type=int,
                     default=int(os.environ.get("ALTERX_CADENCE_DAYS", DEFAULT_CADENCE_DAYS)))
     ps.add_argument("--force", action="store_true",
-                    help="强制返回 run,忽略节奏(env FORCE_ALTERX=1 也开)")
+                    help=t("main.alterx_runs.force_help"))
 
-    pm = sub.add_parser("mark", help="写回 last_ran_at")
+    pm = sub.add_parser("mark", help=t("main.alterx_runs.mark_help"))
     pm.add_argument("--db", required=True)
     pm.add_argument("--business-id", type=int, required=True)
     pm.add_argument("--wordlist-hash", required=True)
@@ -120,7 +129,7 @@ def main() -> int:
     if args.cmd == "should-run":
         forced = args.force or os.environ.get("FORCE_ALTERX") == "1"
         if forced:
-            print("[alterx_runs] FORCE_ALTERX 强制本轮跑", file=sys.stderr)
+            print(t("main.alterx_runs.forced"), file=sys.stderr)
             return 0
         run, reason = should_run(args.db, args.business_id, args.cadence_days)
         print(f"[alterx_runs] {reason}", file=sys.stderr)

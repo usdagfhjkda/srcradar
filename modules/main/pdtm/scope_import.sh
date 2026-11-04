@@ -29,6 +29,10 @@
 #   - quick data loading while debugging the schema / the DB
 #
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -92,8 +96,8 @@ else
     : > "exclude.txt"
 fi
 
-echo "[*] 业务: $BUSINESS"
-echo "[*] 输入目录: $INPUT_PATH"
+echo "$(t main.scope_import.business BUSINESS=$BUSINESS)"
+echo "$(t main.scope_import.input_dir INPUT_PATH=$INPUT_PATH)"
 
 # check_wildcard: probe whether the domains in target.txt resolve as a wildcard;
 # the result goes to wildcard.txt / no_wildcard.txt.
@@ -103,16 +107,16 @@ echo "[*] 输入目录: $INPUT_PATH"
 TMP_LOG=$(mktemp)
 if [ -z "$SKIP_WILDCARD" ]; then
     if ! ./check_wildcard.sh "target.txt" > "$TMP_LOG" 2>&1; then
-        echo "[!] check_wildcard 失败 (详细见 $TMP_LOG):" >&2
+        echo "$(t main.scope_import.wildcard_failed TMP_LOG=$TMP_LOG)" >&2
         tail -10 "$TMP_LOG" >&2
         exit 1
     fi
     W_N=$(wc -l < "$WILDCARD_OUT" 2>/dev/null || echo 0)
     N_N=$(wc -l < "$NO_WILDCARD_OUT" 2>/dev/null || echo 0)
-    echo "[*] check_wildcard: $W_N 个泛解析, $N_N 个非泛解析"
+    echo "$(t main.scope_import.wildcard_counts W_N=$W_N N_N=$N_N)"
 else
     : > "$WILDCARD_OUT"
-    echo "[*] --skip-check-wildcard: 跳过, 所有 is_wildcard=0"
+    echo "$(t main.scope_import.wildcard_skipped)"
 fi
 
 # ===== prepare the scope data =====
@@ -125,7 +129,7 @@ cleanup() {
     rm -f "$TMP_T" "$TMP_E" "$TMP_LOG"
     if [ "$rc" -ne 0 ]; then
         if [ "$INPUT_GENERATED" = "1" ]; then
-            echo "[!] 失败 (exit=$rc), 保留 target.txt / exclude.txt / wildcard.txt / no_wildcard.txt 供排查 (--keep-files 同效)" >&2
+            echo "$(t main.scope_import.failed rc=$rc)" >&2
         fi
         return 0
     fi
@@ -135,7 +139,7 @@ cleanup() {
     fi
     if [ "$INPUT_GENERATED" = "1" ]; then
         rm -f target.txt exclude.txt "$WILDCARD_OUT" "$NO_WILDCARD_OUT"
-        echo "[+] 已清理本地 target.txt / exclude.txt / wildcard.txt / no_wildcard.txt (--keep-files 可保留)"
+        echo "$(t main.scope_import.cleaned_local)"
         # v0.1.0: also rm INPUT_PATH/target.txt + exclude.txt if INPUT_PATH is
         # an external dir (not cwd inode). Failure path above does NOT do
         # this - see README §8-14. Pass --keep-files to retain both.
@@ -145,11 +149,11 @@ cleanup() {
             else
                 if [ -f "$INPUT_PATH/target.txt" ]; then
                     rm -f "$INPUT_PATH/target.txt"
-                    echo "[+] 已清理外部目录的 target.txt: $INPUT_PATH/target.txt"
+                    echo "$(t main.scope_import.cleaned_external_target INPUT_PATH=$INPUT_PATH)"
                 fi
                 if [ -f "$INPUT_PATH/exclude.txt" ]; then
                     rm -f "$INPUT_PATH/exclude.txt"
-                    echo "[+] 已清理外部目录的 exclude.txt: $INPUT_PATH/exclude.txt"
+                    echo "$(t main.scope_import.cleaned_external_exclude INPUT_PATH=$INPUT_PATH)"
                 fi
                 # rmdir if now empty (best-effort; not fatal if non-empty)
                 rmdir "$INPUT_PATH" 2>/dev/null &&                     echo "[+] 已清理空目录: $INPUT_PATH"
@@ -189,16 +193,16 @@ T_LINES=$(wc -l < "$TMP_T")
 E_LINES=$(wc -l < "$TMP_E")
 
 if [ "$T_LINES" -eq 0 ]; then
-    echo "[!] target.txt 为空,拒绝入库 (新增业务至少需要 1 条可测资产)" >&2
+    echo "$(t main.scope_import.target_empty)" >&2
     exit 1
 fi
 
 if [ -n "$DRY_RUN" ]; then
-    echo "[*] --dry-run: 以下为预览, 未写库, 未查 businesses 表"
-    echo "    可测资产 (target.txt): $T_LINES 条"
-    echo "    非可测资产 (exclude.txt): $E_LINES 条"
+    echo "$(t main.scope_import.dry_run)"
+    echo "$(t main.scope_import.dry_run_measurable T_LINES=$T_LINES)"
+    echo "$(t main.scope_import.dry_run_not_measurable E_LINES=$E_LINES)"
     echo "    DB: $DB"
-    echo "[+] dry-run 完成 (本地 target.txt / exclude.txt 仍会被 trap 清理, --keep-files 可保留)"
+    echo "$(t main.scope_import.dry_run_done)"
     exit 0
 fi
 
@@ -275,4 +279,4 @@ print(
 )
 PY
 
-echo "[+] 完成 - 仅入库 scope, 未扫描"
+echo "$(t main.scope_import.done)"

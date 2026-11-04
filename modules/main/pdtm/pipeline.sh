@@ -53,6 +53,10 @@
 #   pipeline.sh -b example.com --tcp                   enable the TCP port scan
 #
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -132,12 +136,12 @@ done
 # which would attach the subdomain of another business to this business. A non-empty
 # directory makes it refuse to run and asks for a manual cleanup.
 if [ -d "$SCAN_DIR" ] && [ -n "$(ls -A "$SCAN_DIR" 2>/dev/null)" ]; then
-    echo "[-] 检测到 $SCAN_DIR/ 残留文件:" >&2
+    echo "$(t main.pipeline.leftover_detected SCAN_DIR=$SCAN_DIR)" >&2
     ls -la "$SCAN_DIR/" >&2
     echo "" >&2
-    echo "    这通常是上一次 pipeline 用 --debug 1 或手动跑留下的;" >&2
-    echo "    如果直接跑本次,import 会把里面所有 host(包括别业务的)挂到 $BUSINESS 名下。" >&2
-    echo "    请先手动清理:" >&2
+    echo "$(t main.pipeline.leftover_usually)" >&2
+    echo "$(t main.pipeline.leftover_attaches BUSINESS=$BUSINESS)" >&2
+    echo "$(t main.pipeline.leftover_clean_first)" >&2
     echo "      rm -rf $SCAN_DIR && mkdir -p $SCAN_DIR" >&2
     exit 2
 fi
@@ -160,14 +164,14 @@ for f in dnsx_output.txt dnsx_output.txt.try alive.txt alterx.txt \
     [ -e "$f" ] && POLLUTED+=("$f")
 done
 if [ "${#POLLUTED[@]}" -gt 0 ]; then
-    echo "[-] 检测到 pdtm CWD 跨 run 运行时文件残留(下个 run 会被 scanner 当输入):" >&2
+    echo "$(t main.pipeline.cwd_leftover)" >&2
     for f in "${POLLUTED[@]}"; do
         echo "    $f" >&2
     done
     echo "" >&2
-    echo "    这通常是上一次 pipeline KEEP_OUTPUT=1 / ctrl-c / 中途失败留下的," >&2
-    echo "    或上一次跑的不是本业务的内容。如果直接跑,scanner 会把别业务的" >&2
-    echo "    子域当成本业务的扫描输入。处理方式:" >&2
+    echo "$(t main.pipeline.cwd_usually)" >&2
+    echo "$(t main.pipeline.cwd_other_business)" >&2
+    echo "$(t main.pipeline.cwd_what_to_do)" >&2
     echo "      rm -f ${POLLUTED[*]}" >&2
     exit 2
 fi
@@ -238,13 +242,13 @@ PY
 )
         if [ -z "$BIZ_ID" ]; then
             rm -f "$TMP_T" "$TMP_E"
-            echo "DB 中无业务 '$BUSINESS' (businesses.business_name),请先插入或用 -i 提供输入" >&2
+            echo "$(t main.pipeline.business_not_in_db BUSINESS=$BUSINESS)" >&2
             exit 1
         fi
 
         if [ ! -s "$TMP_T" ]; then
             rm -f "$TMP_T" "$TMP_E"
-            echo "DB 中业务 '$BUSINESS' 没有可测资产 (scopes.scope_name='可测资产')" >&2
+            echo "$(t main.pipeline.no_measurable_scope BUSINESS=$BUSINESS)" >&2
             exit 1
         fi
 
@@ -275,7 +279,7 @@ cleanup_input() {
         return 0
     fi
     if [ $rc -ne 0 ] && [ -n "$KEEP_ON_FAIL" ]; then
-        echo "[!] 流水线失败 (exit=$rc),保留中间文件供排查"
+        echo "$(t main.pipeline.failed rc=$rc)"
         return 0
     fi
 
@@ -298,11 +302,11 @@ cleanup_input() {
 
     if [ -d "$SCAN_DIR" ]; then
         rm -rf "$SCAN_DIR"
-        echo "[+] 清理: $SCAN_DIR/"
+        echo "$(t main.pipeline.cleaned_scan_dir SCAN_DIR=$SCAN_DIR)"
     fi
 
     if [ "$INPUT_GENERATED" = 1 ]; then
-        echo "[+] 清理临时输入: $TARGET_FILE, $EXCLUDE_FILE"
+        echo "$(t main.pipeline.cleaned_temp_input TARGET_FILE=$TARGET_FILE EXCLUDE_FILE=$EXCLUDE_FILE)"
         # v0.1.0: also rm INPUT_PATH/target.txt + exclude.txt when INPUT_PATH
         # is an external dir. Mirrors scope_import.sh behaviour. Failed
         # runs already rm these by virtue of unconditional trap.
@@ -697,7 +701,7 @@ bootstrap_db
 echo "[1/4] check_wildcard"; [ -z "$SKIP_WILDCARD" ] && check_wildcard || echo "  跳过"
 echo "[2/4] scan";           [ -z "$SKIP_SCAN" ]      && scan           || echo "  跳过"
 if [ -z "$SKIP_SCAN" ] && [ -n "$SKIP_BRUTE" ]; then
-    echo "    (brute 阶段: --skip-brute,alterx 仍跑)"
+    echo "$(t main.pipeline.brute_skipped_note)"
 fi
 echo "[3/4] scanner";        [ -z "$SKIP_SCANNER" ]   && scanner        || echo "  跳过"
 if [ -z "$SKIP_IMPORT" ]; then
@@ -705,7 +709,7 @@ if [ -z "$SKIP_IMPORT" ]; then
     import
     IMPORT_RAN=1
 else
-    echo "[4/5] import  跳过 (--skip-import,数据未入库,不清理临时输入)"
+    echo "$(t main.pipeline.import_skipped)"
 fi
 
 # re-check the assets that really went inactive after today's scan, covering the
@@ -718,10 +722,10 @@ if [ -z "$SKIP_REVERIFY" ] && [ "$IMPORT_RAN" = 1 ]; then
     HTTPX_BIN=$(resolve_tool httpx "$HOME/.pdtm/go/bin/httpx")
     export HTTPX_BIN
     if ! reverify; then
-        echo "[!] reverify 失败 (非致命,继续 finalize_scope)"
+        echo "$(t main.pipeline.reverify_failed)"
     fi
 else
-    echo "[4.5/5] reverify  跳过"
+    echo "$(t main.pipeline.reverify_skipped)"
 fi
 
 # the last step: upsert the scope once more and commit, to make sure the scope is in the DB before the input files are deleted
@@ -730,4 +734,4 @@ if [ "$IMPORT_RAN" = 1 ] && [ -z "$DRY_RUN_IMPORT" ]; then
     finalize_scope
 fi
 
-echo "[+] 流水线完成"
+echo "$(t main.pipeline.done)"

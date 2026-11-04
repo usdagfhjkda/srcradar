@@ -16,6 +16,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "db" / "recon.sqlite3"
@@ -134,14 +142,14 @@ def _normalize_tech(v: Any) -> Any:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="scanner.sh 结果入库工具")
-    parser.add_argument("--business", required=True, help="业务名称")
-    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help="SQLite 数据库路径")
-    parser.add_argument("--scan-dir", default=str(DEFAULT_SCAN_DIR), help="scanner 输出目录")
-    parser.add_argument("--target-file", default="target.txt", help="可测资产文件")
-    parser.add_argument("--exclude-file", default="exclude.txt", help="非可测资产文件")
-    parser.add_argument("--wildcard-file", default="wildcard.txt", help="泛解析域文件,这些域在 scopes 表里 is_wildcard=1")
-    parser.add_argument("--dry-run", action="store_true", help="只解析和统计，不写数据库、不删除文件")
+    parser = argparse.ArgumentParser(description=t("main.import_scan_results.description"))
+    parser.add_argument("--business", required=True, help=t("main.import_scan_results.arg_business"))
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=t("main.import_scan_results.arg_db"))
+    parser.add_argument("--scan-dir", default=str(DEFAULT_SCAN_DIR), help=t("main.import_scan_results.arg_scan_dir"))
+    parser.add_argument("--target-file", default="target.txt", help=t("main.import_scan_results.arg_measurable"))
+    parser.add_argument("--exclude-file", default="exclude.txt", help=t("main.import_scan_results.arg_not_measurable"))
+    parser.add_argument("--wildcard-file", default="wildcard.txt", help=t("main.import_scan_results.arg_wildcard"))
+    parser.add_argument("--dry-run", action="store_true", help=t("main.import_scan_results.arg_dry_run"))
     return parser.parse_args()
 
 
@@ -1159,13 +1167,13 @@ def main() -> int:
     print(f"可测范围: {len(targets)}，非可测范围: {len(excludes)}，泛解析域: {len(wildcards)}")
     print(f"Web 记录: {len(web)}，TCP 记录: {len(tcp)}，缺少 hash 的 Web: {missing_hash}")
     if not web and not tcp:
-        print("错误: 没有找到可入库的 Web 或 TCP 结果", file=sys.stderr)
+        print(t("main.import_scan_results.no_results"), file=sys.stderr)
         return 1
     if missing_hash:
-        print("错误: 存在缺少 httpx response hash 的 Web 记录，拒绝提交", file=sys.stderr)
+        print(t("main.import_scan_results.missing_hash"), file=sys.stderr)
         return 1
     if args.dry_run:
-        print("dry-run：未写入数据库，未删除扫描文件")
+        print(t("main.import_scan_results.dry_run_note"))
         return 0
 
     db_path = Path(args.db).expanduser().resolve()
@@ -1177,12 +1185,12 @@ def main() -> int:
             web_count, tcp_count = persist(conn, args.business, targets, excludes, web, tcp, wildcards)
     except (sqlite3.Error, OSError, ValueError, KeyError) as exc:
         conn.rollback()
-        print(f"入库失败，扫描文件已保留: {exc}", file=sys.stderr)
+        print(t("main.import_scan_results.store_failed", {"exc": exc}), file=sys.stderr)
         return 1
     finally:
         conn.close()
 
-    print(f"入库成功: Web {web_count} 条，TCP {tcp_count} 条")
+    print(t("main.import_scan_results.store_ok", {"web_count": web_count, "tcp_count": tcp_count}))
     return 0
 
 
@@ -1199,12 +1207,12 @@ def _parse_scan_onesite_args(argv: list[str]) -> argparse.Namespace:
     """The argparse setup for the scan-onesite subcommand. Not shared with the parse_args() in main()."""
     parser = argparse.ArgumentParser(
         prog="import_scan_results.py scan-onesite",
-        description="仅扫描增量域名并入库（同业务其它 is_active=1 行不动）",
+        description=t("main.import_scan_results.onesite_desc"),
     )
-    parser.add_argument("--business", required=True, help="业务名")
+    parser.add_argument("--business", required=True, help=t("main.import_scan_results.onesite_arg_business"))
     parser.add_argument("--hosts-file", required=True, type=Path,
-                        help="一行一个域名的输入文件，可写 # 注释")
-    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help="SQLite 数据库路径")
+                        help=t("main.import_scan_results.onesite_arg_hosts"))
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=t("main.import_scan_results.onesite_arg_db"))
     return parser.parse_args(argv)
 
 

@@ -23,6 +23,14 @@ import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 
 def extract_base(pattern: str) -> str:
@@ -186,14 +194,14 @@ def partition_alive_hosts(alive_path: str, bases: list[str], output_dir: str) ->
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="target.txt / exclude.txt glob 编译器")
+    ap = argparse.ArgumentParser(description=t("main.target_glob.description"))
     ap.add_argument(
         "mode",
         choices=["targets-ere", "excludes-ere", "base", "all-bases", "all-glob-check", "partition-alive"],
     )
-    ap.add_argument("--input", required=True, help="scope 文件 / alive.txt 路径")
-    ap.add_argument("--bases", default="", help="partition-alive 用,逗号分隔 base 列表")
-    ap.add_argument("--output-dir", default="", help="partition-alive 用,分桶输出目录")
+    ap.add_argument("--input", required=True, help=t("main.target_glob.arg_scope_files"))
+    ap.add_argument("--bases", default="", help=t("main.target_glob.arg_bases"))
+    ap.add_argument("--output-dir", default="", help=t("main.target_glob.arg_out_dir"))
     args = ap.parse_args()
 
     if args.mode == "partition-alive":

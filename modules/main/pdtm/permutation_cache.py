@@ -16,6 +16,15 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from alterx_runs import mark_ran_with_conn
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 CACHE_DAYS = 30  # nxdomain retry window
 
@@ -135,25 +144,25 @@ def record_permutations(db_path: str, business_id: int, wordlist_hash: str,
     if rows:
         print(f"[permutation_cache] 写回 {len(rows)} 条 (alterx_runs 同事务标记)", file=sys.stderr)
     else:
-        print("[permutation_cache] 无候选,但仍标记 alterx_runs 以重置节奏时钟", file=sys.stderr)
+        print(t("main.permutation_cache.no_candidates"), file=sys.stderr)
     return len(rows)
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="alterx 排列状态缓存")
+    p = argparse.ArgumentParser(description=t("main.permutation_cache.description"))
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pf = sub.add_parser("filter", help="过滤已解析/缓存未到期的 permutation")
+    pf = sub.add_parser("filter", help=t("main.permutation_cache.arg_filter"))
     pf.add_argument("--db", required=True)
     pf.add_argument("--business-id", type=int, required=True)
     pf.add_argument("--wordlist-hash", required=True)
 
-    pr = sub.add_parser("record", help="写回 dnsx 解析结果")
+    pr = sub.add_parser("record", help=t("main.permutation_cache.arg_writeback"))
     pr.add_argument("--db", required=True)
     pr.add_argument("--business-id", type=int, required=True)
     pr.add_argument("--wordlist-hash", required=True)
-    pr.add_argument("--candidates", required=True, help="alterx 输出文件")
-    pr.add_argument("--resolved", required=True, help="dnsx 解析后输出文件")
+    pr.add_argument("--candidates", required=True, help=t("main.permutation_cache.arg_alterx_out"))
+    pr.add_argument("--resolved", required=True, help=t("main.permutation_cache.arg_dnsx_out"))
 
     args = p.parse_args()
 

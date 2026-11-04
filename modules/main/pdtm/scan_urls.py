@@ -54,6 +54,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "db" / "recon.sqlite3"
 
@@ -811,11 +819,11 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
 def _main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="scan_urls.py",
-        description="URL 资产扫描(ffuf / URLFinder / gau)→ web_hash_urls 表",
+        description=t("main.scan_urls.description"),
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("scan-urls", help="dashboard 调入口:扫描指定 hosts 的 URL 资产")
+    p = sub.add_parser("scan-urls", help=t("main.scan_urls.dashboard_entry"))
     p.add_argument("--db", required=True)
     p.add_argument("--business", required=True)
     p.add_argument("--hosts-file", required=True)

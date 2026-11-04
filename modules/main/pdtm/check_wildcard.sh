@@ -17,6 +17,10 @@
 #   no_wildcard.txt  -> no wildcard DNS / exact single subdomain (no check needed)
 #
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 # ---- load config/pdtm.conf (priority: env > config > script default) ----
 SCRIPT_DIR_CW="$(cd "$(dirname "$0")" && pwd)"
@@ -35,7 +39,7 @@ PROBES=3
 
 # ---- dependency check ----
 command -v dnsx >/dev/null 2>&1 || {
-  echo "[!] 未找到 dnsx，请先安装：go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest" >&2
+  echo "$(t main.check_wildcard.dnsx_missing)" >&2
   exit 1
 }
 
@@ -76,18 +80,20 @@ while IFS= read -r line || [ -n "$line" ]; do
 
   if [ "$is_wildcard" = "yes" ]; then
     echo "$line" >> "$WILDCARD_OUT"
-    echo "[泛解析]   $line"
+    echo "$(t main.check_wildcard.wildcard_line line=$line)"
   else
     echo "$line" >> "$NORMAL_OUT"
     if [[ "$line" == *\** ]]; then
-      echo "[非泛解析] $line"
+      echo "$(t main.check_wildcard.normal_line line=$line)"
     else
-      echo "[精确单域] $line"
+      echo "$(t main.check_wildcard.precise_line line=$line)"
     fi
   fi
 done < "$INPUT"
 
 echo
-echo "[+] 完成。"
-echo "    泛解析 glob  -> $WILDCARD_OUT ($(wc -l < "$WILDCARD_OUT") 个)"
-echo "    非泛解析/精确 -> $NORMAL_OUT ($(wc -l < "$NORMAL_OUT") 个)"
+echo "$(t main.check_wildcard.done)"
+_i18n_val=$(wc -l < "$WILDCARD_OUT")
+echo "$(t main.check_wildcard.wildcard_out count="$_i18n_val")"
+_i18n_val=$(wc -l < "$NORMAL_OUT")
+echo "$(t main.check_wildcard.normal_out count="$_i18n_val")"
