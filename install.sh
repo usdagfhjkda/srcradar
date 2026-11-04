@@ -234,6 +234,7 @@ ask_checklist() {
         case "$1" in
             main/daily)   echo "日度 cron 03:00 + dashboard(默认不勾,免登 crontab)" ;;
             main/db)      echo "DB schema + 末尾建空 DB" ;;
+            main/i18n)    echo "语言模块 (zh/en 词表, 输出语言可配置)" ;;
             main/lib)     echo "共享 Python 工具库(load_config 等)" ;;
             main/manage)  echo "业务管理(register target / set_config)" ;;
             main/pdtm)    echo "主动测绘核心 dnsx+httpx+naabu+cdnmatch" ;;

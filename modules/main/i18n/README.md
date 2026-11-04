@@ -1,0 +1,183 @@
+# modules/main/i18n — language module
+
+> **Module role**: i18n infrastructure, **always installed**. It provides
+> two message tables and a single language-resolution entry point, so the
+> user-visible output of the CLI, the dashboard, the reports and the
+> notification emails can be rendered in Chinese or English.
+>
+> This module carries **no business copy** — the message tables are data,
+> and every caller looks its own strings up.
+
+## Contents
+
+- **This document**: §Module boundary / §Language resolution / §Usage / §Message table format / §Configuration / §File reference
+- **Upstream dependencies**: none — no dependency on daily / pdtm / db, no DB writes, no network access
+- **Binary dependencies**: `python3` (>= 3.12, same baseline as the other python modules in the repo) + `bash` >= 4 (associative arrays)
+- **Depended on by**: the `srcradar` dispatcher, `daily` (dashboard / diff / reports), `notify` (email body), `health` (check reports), and every shell script with user-visible output
+
+---
+
+## 1. Module boundary
+
+| Item | Scope | License |
+|---|---|---|
+| `i18n.py` | python side: locate the repository root / resolve the language / look up the table | Apache-2.0 |
+| `i18n.sh` | shell side: the same, loading every key into an associative array in one step | Apache-2.0 |
+| `locales/zh.json` / `locales/en.json` | message table data | Apache-2.0 |
+| `install.sh` | write `config/lang.conf` and validate the message tables | Apache-2.0 |
+| `python3` | OS / language runtime | PSF |
+| `bash` | OS / shell | GPL-3.0 |
+
+**srcradar does not maintain**: python or bash itself. The message table
+content is maintained by srcradar.
+
+---
+
+## 2. Language resolution
+
+Every tool follows this one chain:
+
+```
+1. SRCDAR_LANG environment variable   highest priority, for CI and
+                                     temporary overrides
+2. the lang field in config/lang.conf  the operator's persistent choice
+3. zh as the default                   the fallback when no config exists
+```
+
+Language aliases accepted by `SRCDAR_LANG` and by `lang.conf`:
+
+| Input | Normalised to |
+|---|---|
+| `zh` / `zh-CN` / `zh_CN` / `zh-Hans` / `cn` / `chinese` | `zh` |
+| `en` / `en-US` / `en_US` / `english` | `en` |
+| anything else | treated as unset, resolution continues |
+
+**The default is `zh`** — that matches the behaviour before this module
+existed, so existing deployments see no change.
+
+---
+
+## 3. Usage
+
+### python side
+
+```python
+import sys
+from pathlib import Path
+
+# Put the i18n directory on sys.path (each caller computes its own depth)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "i18n"))
+from i18n import t
+
+print(t("dashboard.tab.status"))
+print(t("install.module_ok", {"area": "main", "name": "pdtm"}))
+```
+
+`t()` resolves a missing key by trying the active language, then the
+default language (`zh`), and finally the key name itself.
+
+### shell side
+
+```bash
+source /path/to/srcradar/modules/main/i18n/i18n.sh
+
+t dashboard.tab.status
+t install.module_ok area=main name=pdtm
+traw dashboard.tab.status        # the same without a trailing newline
+i18n_lang                         # print the active language
+```
+
+The shell side **loads the message table on the first `t` call** (one
+python fork exports every key/value pair), so later calls only do bash
+string substitution and never fork again.
+
+---
+
+## 4. Message table format
+
+`locales/<lang>.json` is a **flat object** with string keys and string
+values:
+
+```json
+{
+  "dashboard.tab.status": "任务状态",
+  "install.module_ok": "[{area}/{name}] OK"
+}
+```
+
+### Placeholders
+
+A value may contain `{name}`; the caller passes `name=value` on the shell
+side and `{"name": value}` on the python side.
+
+The python side also accepts the positional form `{0}` / `{1}` when
+several non-dict arguments are given.
+
+### Key naming
+
+`<domain>.<subdomain>.<key>`, all lowercase, dot separated. Current
+domains:
+
+| Domain | Covers |
+|---|---|
+| `common.*` | shared words (OK / failed / none / unknown ...) |
+| `install.*` | the checklist and install results of the top-level `install.sh` |
+| `check.*` | the environment check output of `check.sh` |
+| `i18n.*` | this module itself |
+| `dashboard.*` | dashboard tabs, table headers and hints |
+| `daily.summary.*` | the daily report `summary.md` |
+| `notify.body.*` | the notification email body |
+| `health.report.*` / `health.check.*` | the health check report |
+
+### Adding a new string
+
+1. Add the same key to **both** `locales/zh.json` and `locales/en.json`
+2. Replace the hardcoded string at the call site with `t("key", {...})`
+3. Run `bash modules/main/i18n/install.sh --check` to confirm both tables
+   are still valid JSON
+
+**The two tables must stay in sync** — a missing key falls back to `zh`
+without raising an error, which shows up as mixed Chinese and English
+rather than as a failure.
+
+---
+
+## 5. Configuration
+
+`config/lang.conf` is generated by `modules/main/i18n/install.sh` on the
+first install:
+
+```
+lang=zh
+```
+
+The file lives under `.gitignore` (`config/*`) and is not tracked — the
+language is a **deployment-side choice**, not part of the code. Delete it
+and a later install regenerates it.
+
+`write_db_conf()` in the top-level `install.sh` writes `config/db.conf`,
+while this module's `install.sh` writes `config/lang.conf`; both follow
+the same convention.
+
+### Switching language
+
+```bash
+# persistent switch
+sed -i 's/^lang=.*/lang=en/' config/lang.conf
+
+# temporary switch (highest priority)
+SRCDAR_LANG=en ./srcradar daily daily_monitor
+```
+
+---
+
+## 6. File reference
+
+| File | Purpose |
+|---|---|
+| `i18n.py` | python side: `t()` / `resolve_lang()` / `load_table()` / `set_lang()` |
+| `i18n.sh` | shell side: `t()` / `traw()` / `i18n_lang()` / `i18n_load()` |
+| `locales/zh.json` | Chinese message table |
+| `locales/en.json` | English message table |
+| `install.sh` | validate the message tables and write `config/lang.conf` |
+| `README.md` | this document |
