@@ -41,6 +41,11 @@ import os
 import sys
 from pathlib import Path
 
+# The bootstrap module holds the single definition of "where is the
+# repository root", shared with the shell side.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bootstrap import find_repo_root  # noqa: E402
+
 MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_LANG = "zh"
 KNOWN_LANGS = ("zh", "en")
@@ -66,11 +71,12 @@ def normalize_lang(value):
 
 
 def repo_root():
-    """Walk up to the directory holding both modules/ and install.sh."""
-    for d in Path(__file__).resolve().parents:
-        if (d / "modules").is_dir() and (d / "install.sh").is_file():
-            return d
-    return None
+    """The repository root, or None when it cannot be located.
+
+    Delegates to bootstrap.py so the python and shell sides agree on what
+    the root is.
+    """
+    return find_repo_root()
 
 
 def config_dir():
@@ -177,7 +183,14 @@ def set_lang(lang):
 
 def dump_shell(lang):
     """Emit the shell assignment block: the active language's table plus
-    the default language as a fallback (the active language wins)."""
+    the default language as a fallback (the active language wins).
+
+    Values are escaped so that each entry occupies exactly one line:
+    a newline becomes the two-character sequence backslash-n, and a
+    backslash is doubled. The shell side reverses this after eval. This
+    matters because the loader reads the block one line at a time, and a
+    raw multi-line value would reach eval with an unterminated quote.
+    """
     lines = []
     seen = set()
     for table in (load_table(lang), load_table(DEFAULT_LANG)):
@@ -186,8 +199,26 @@ def dump_shell(lang):
                 continue
             seen.add(key)
             lines.append("I18N['" + key.replace("'", SQ) + "']='"
-                         + value.replace("'", SQ) + "'")
+                         + _shell_escape(value) + "'")
     return NL.join(lines) + NL
+
+
+# Sentinel used to carry a newline through the one-line shell assignment
+# format. JSON forbids raw control characters in string values, so a table
+# value can never contain one; using a sentinel keeps the restore step on
+# the shell side unambiguous.
+SHELL_NEWLINE = "\\x01"
+
+
+def _shell_escape(value):
+    """Escape a value for the one-line shell assignment format.
+
+    A backslash is doubled and a newline becomes the sentinel sequence.
+    The shell side reverses this after eval.
+    """
+    out = value.replace("\\", "\\\\")
+    out = out.replace("\n", SHELL_NEWLINE)
+    return out.replace("'", SQ)
 
 
 def main(argv):

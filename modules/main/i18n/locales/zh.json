@@ -90,5 +90,6 @@
   "i18n.locale_check_done": "check 模式完成; 未写文件",
   "i18n.load_failed": "词表载入失败 (lang={lang})",
   "i18n.load_empty": "词表为空 (lang={lang})",
-  "i18n.no_python3": "python3 not found in PATH (i18n 需要它来解析词表)"
+  "i18n.no_python3": "python3 not found in PATH (i18n 需要它来解析词表)",
+  "help.srcradar.usage": "用法:\n  ./srcradar <模块> <脚本> [参数...]\n  ./srcradar --list\n  ./srcradar -h|--help\n\n示例:\n  ./srcradar manage add_business -n <业务名>\n  ./srcradar pdtm scan -b <业务名>\n  ./srcradar db init_db\n  ./srcradar daily daily_monitor\n  ./srcradar ymicp icp_mapp_query -b <业务名>\n\n模块查找顺序: modules/private > modules/main > modules/public\n  (内部模块覆盖 public 与默认安装的模块)\n脚本查找顺序: <脚本>.sh > <脚本>.py\n  (.sh 需要可执行位, .py 不需要)"
 }

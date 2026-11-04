@@ -23,6 +23,8 @@
 |---|---|---|
 | `i18n.py` | python side: locate the repository root / resolve the language / look up the table | Apache-2.0 |
 | `i18n.sh` | shell side: the same, loading every key into an associative array in one step | Apache-2.0 |
+| `bootstrap.py` | repository-root lookup shared by both sides | Apache-2.0 |
+| `../lib/i18n.sh`, `../lib/i18n.py` | thin forwarders for callers under `modules/main/` | Apache-2.0 |
 | `locales/zh.json` / `locales/en.json` | message table data | Apache-2.0 |
 | `install.sh` | write `config/lang.conf` and validate the message tables | Apache-2.0 |
 | `python3` | OS / language runtime | PSF |
@@ -177,6 +179,9 @@ SRCDAR_LANG=en ./srcradar daily daily_monitor
 |---|---|
 | `i18n.py` | python side: `t()` / `resolve_lang()` / `load_table()` / `set_lang()` |
 | `i18n.sh` | shell side: `t()` / `traw()` / `i18n_lang()` / `i18n_load()` |
+| `bootstrap.py` | repository-root lookup, shared by the python side |
+| `../lib/i18n.sh` | thin forwarder so `modules/main/` callers use the short `../lib/` path |
+| `../lib/i18n.py` | thin forwarder for the python callers under `modules/main/` |
 | `locales/zh.json` | Chinese message table |
 | `locales/en.json` | English message table |
 | `install.sh` | validate the message tables and write `config/lang.conf` |

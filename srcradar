@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# srcradar — root-level dispatcher for all module scripts.
+#
+# srcradar - root-level dispatcher for all module scripts.
 #
 # Resolves <module> <script> from modules/{main,public,private}/ and
-# exec's the target. Zero business logic in this file; everything
-# lives in the submodule scripts.
+# exec's the target. Zero business logic in this file; everything lives
+# in the submodule scripts.
 #
 # Usage:
 #   ./srcradar <module> <script> [args...]
@@ -11,23 +12,36 @@
 #   ./srcradar -h|--help
 #
 # Examples:
-#   ./srcradar manage add_business -n ExampleCo
-#   ./srcradar pdtm scan -b ExampleCo
+#   ./srcradar manage add_business -n <business>
+#   ./srcradar pdtm scan -b <business>
 #   ./srcradar db init_db
 #   ./srcradar daily daily_monitor
-#   ./srcradar ymicp icp_mapp_query -b ExampleCo
+#   ./srcradar ymicp icp_mapp_query -b <business>
 #
 # Module resolution order: modules/private > modules/main > modules/public
 # (internal modules override public / default-installed modules)
 # Script resolution order: <script>.sh > <script>.py
 # (executable bit required for .sh, optional for .py)
+#
+# The help text lives in the message table (see modules/main/i18n/), so
+# --help renders in the configured language. This header is the
+# developer-facing description and is not what --help prints.
+#
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ---- i18n: message tables and language resolution ----
+# Locate the repository root by walking up, then reach the i18n module.
+# The same snippet works from any directory depth.
+_i18n_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && while [ ! -d modules/main/i18n ] && [ "$PWD" != "/" ]; do cd ..; done && pwd)/modules/main/i18n/i18n.sh"
+# The path is resolved at runtime, so shellcheck cannot follow it.
+# shellcheck source=modules/main/i18n/i18n.sh
+[ -f "$_i18n_self" ] && source "$_i18n_self"
+
 usage() {
-    sed -n '2,18p' "${BASH_SOURCE[0]}"
+    t help.srcradar.usage
     exit "${1:-0}"
 }
 

@@ -90,5 +90,6 @@
   "i18n.locale_check_done": "check mode finished; no file written",
   "i18n.load_failed": "Failed to load the message table (lang={lang})",
   "i18n.load_empty": "Message table is empty (lang={lang})",
-  "i18n.no_python3": "python3 not found in PATH (i18n needs it to parse the message table)"
+  "i18n.no_python3": "python3 not found in PATH (i18n needs it to parse the message table)",
+  "help.srcradar.usage": "Usage:\n  ./srcradar <module> <script> [args...]\n  ./srcradar --list\n  ./srcradar -h|--help\n\nExamples:\n  ./srcradar manage add_business -n <business>\n  ./srcradar pdtm scan -b <business>\n  ./srcradar db init_db\n  ./srcradar daily daily_monitor\n  ./srcradar ymicp icp_mapp_query -b <business>\n\nModule resolution order: modules/private > modules/main > modules/public\n  (internal modules override public / default-installed modules)\nScript resolution order: <script>.sh > <script>.py\n  (executable bit required for .sh, optional for .py)"
 }

@@ -29,12 +29,27 @@
 # The I18N associative array requires bash 4+; load_config.sh already uses
 # the same mechanism.
 #
+# ---------------------------------------------------------------------------
+# How a caller sources this file
+# ---------------------------------------------------------------------------
+# Every caller uses the same snippet, which walks up from the caller's own
+# directory until it finds the repository root. The root is the directory
+# that holds both install.sh and modules/. This works from any depth and
+# survives moving a file:
+#
+#   _i18n_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && while [ ! -d modules/main/i18n ] && [ "$PWD" != "/" ]; do cd ..; done && pwd)/modules/main/i18n/i18n.sh"
+#   [ -f "$_i18n_self" ] && source "$_i18n_self"
+#
+# ---------------------------------------------------------------------------
 
 # ---- locate the repository root ----
 # Walk up until a directory holds both modules/ and install.sh.
+# The optional argument is the directory to start from; it defaults to
+# this file's own directory.
+# shellcheck disable=SC2120
 _i18n_find_root() {
-    local d
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local d="${1:-}"
+    [ -n "$d" ] || d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     while [ "$d" != "/" ]; do
         if [ -d "$d/modules" ] && [ -f "$d/install.sh" ]; then
             printf '%s' "$d"
@@ -47,6 +62,11 @@ _i18n_find_root() {
 
 I18N_ROOT="${I18N_ROOT:-$(_i18n_find_root || true)}"
 I18N_DIR="${I18N_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
+# Print the path of this file, for callers that need to source it.
+i18n_locate() {
+    printf '%s' "${I18N_DIR}/i18n.sh"
+}
 
 # ---- language resolution ----
 i18n_config_dir() {
@@ -142,7 +162,9 @@ i18n_load() {
     fi
 
     # The export uses the I18N['key']='value' form; eval it in bulk to
-    # fill the associative array.
+    # fill the associative array. Each entry is exactly one line: the
+    # python side escapes newlines as backslash-n so that eval always
+    # sees a terminated quote.
     local line
     while IFS= read -r line; do
         [ -n "$line" ] || continue
@@ -151,6 +173,21 @@ i18n_load() {
 
     I18N_LOADED="$lang"
     return 0
+}
+
+# Reverse the escaping applied by i18n.py when it exports the table:
+# a literal backslash-n becomes a real newline, and a doubled backslash
+# becomes a single one. The backslash handling runs first so that a
+# value that genuinely contains backslash-n keeps both characters.
+_i18n_unescape() {
+    local s="$1"
+    # Undo the backslash doubling first.
+    s="${s//\\\\/\\}"
+    # Then restore the newline sentinel. A table value can never
+    # contain a raw control character, so this cannot fire on a
+    # literal backslash-n that was part of the original text.
+    s="${s//\\x01/$'\n'}"
+    printf '%s' "$s"
 }
 
 # ---- translation ----
@@ -167,6 +204,7 @@ t() {
     fi
 
     local text="${I18N[$key]:-$key}"
+    text="$(_i18n_unescape "$text")"
 
     # Placeholder substitution: {name} -> value
     local pair name value
@@ -192,6 +230,7 @@ traw() {
     fi
 
     local text="${I18N[$key]:-$key}"
+    text="$(_i18n_unescape "$text")"
     local pair name value
     for pair in "$@"; do
         name="${pair%%=*}"
