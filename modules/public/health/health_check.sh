@@ -1,29 +1,35 @@
 #!/usr/bin/env bash
 #
-# modules/public/health/health_check.sh — 主入口
+# modules/public/health/health_check.sh — the main entry point
 #
-# 调用方式:
+# How to call it:
 #   bash health_check.sh [--dryrun] [--config <conf>]
 #
-# 行为:
-#   1) 调 lib/health_check.py 跑 5 项 check
-#      - 生成 logs/health_report.md (完整版,含数值 / 路径,作为附件明文)
-#      - 生成 logs/health_report.body.md (脱敏版,只摘要 + 计数)
-#   2) 若任一异常(warn/alert) → 调 ../notify/notify_send.sh 发邮件
-#      - 复用 modules/public/notify/config/notify.conf 的凭据
-#      - gpg 加密附件 + 邮件正文(text 字段) → Resend HTTP API
-#   3) 全 OK → 只写 INFO 到 logs/health.log,不发邮件
+# What it does:
+#   1) calls lib/health_check.py to run the 5 checks
+#      - writes logs/health_report.md (the full version, with the numbers and
+#        the paths, used as the plaintext attachment)
+#      - writes logs/health_report.body.md (the redacted version, summary and
+#        counts only)
+#   2) if anything is off (warn/alert) -> calls ../notify/notify_send.sh to
+#      send the mail
+#      - reuses the credentials from modules/public/notify/config/notify.conf
+#      - encrypts the attachment with gpg + the mail body (the text field) ->
+#        the Resend HTTP API
+#   3) all OK -> writes only an INFO line to logs/health.log, no mail
 #
-# 安全:
-#   - 真配置(config/health.conf / notify.conf)由 operator 自填,
-#     都在 .gitignore 内,不入仓
-#   - 任何 push 失败都用 || true 兜底,不影响健康结论本身
-#   - 不持久化 token / 不写 ~/.bashrc / 不调任何云 API(只复用 notify)
+# Safety:
+#   - the real configs (config/health.conf / notify.conf) are filled in by the
+#     operator and are both in .gitignore, so they never enter the repo
+#   - any push failure is absorbed with || true, so it cannot change the
+#     health verdict itself
+#   - no token is persisted, ~/.bashrc is not written and no cloud API is
+#     called (only notify is reused)
 #
-# 退出码:
-#   0 = 全 OK 或 异常已通知(不论 push 成败)
-#   1 = 参数错
-#   2 = 依赖缺失(python3 / lib/health_check.py)
+# Exit codes:
+#   0 = all OK, or the anomaly was notified (regardless of the push result)
+#   1 = bad arguments
+#   2 = a dependency is missing (python3 / lib/health_check.py)
 #
 
 set -euo pipefail
@@ -69,10 +75,11 @@ main() {
     mkdir -p "$LOG_DIR"
     touch "$HEALTH_LOG" 2>/dev/null || true
 
-    # INFO 行由 health_check.sh 在跑完后写(含时间戳 + findings 摘要);
-    # stderr 异常信息由 health_check.py 用 2>>"$HEALTH_LOG" 收集
+    # the INFO line is written by health_check.sh after the run (with the timestamp
+    # and a summary of the findings); the stderr anomalies are collected by
+    # health_check.py with 2>> on the health log
 
-    # conf 缺时回退 example(只是为了让 --dryrun 也能跑通;真凭据在 notify.conf)
+    # falls back to the example when the conf is missing (only so that --dryrun can run too; the real credentials are in notify.conf)
     EFFECTIVE_CONFIG="$CONFIG_FILE"
     if [ ! -f "$CONFIG_FILE" ]; then
         if [ -f "$EXAMPLE_CONF" ]; then
@@ -95,15 +102,17 @@ main() {
     log "report: ${LOG_DIR}/health_report.md"
     [ "$DRYRUN" = "1" ] && log "--dryrun: 已生成报告,未发邮件"
 
-    # 写 INFO 行到 health.log(每次跑留痕;失败也不影响主流程)
-    # 提取 overall + findings 计数,无需 re-parse 整份 report
+    # write the INFO line to health.log (a trace of every run; a failure here
+    # does not affect the main flow)
     if [ -f "${LOG_DIR}/health_report.md" ]; then
-        # report.md 的 overall 行实际格式是 "- overall: **ALERT**",grep 锚点要带 "- ";
-        # grep 无匹配时 rc=1,在 set -euo pipefail 下会 abort main,必须 || true 兜底
+        # the overall line of report.md is actually "- overall: **ALERT**", so the
+        # grep anchor needs the "- "; when grep finds nothing rc=1, which would
+        # abort main under set -euo pipefail, so it must be absorbed with || true
         OVERALL="$(grep -m1 "^- overall:" "${LOG_DIR}/health_report.md" 2>/dev/null \
             | sed -e 's/^- overall:\s*//' -e 's/\s*$//' || true)"
-        # grep -c 无匹配时 rc=1,会让 cmd sub 在 set -euo pipefail 下失败;
-# 加 || true 兑底(不要 || echo 0,那会双输出 "0\n0")。
+        # grep -c returns rc=1 when there is no match, which makes the command
+        # substitution fail under set -euo pipefail; absorb it with || true (do
+        # not use || echo 0, that would print the count twice).
 COUNT="$(grep -c "^| " "${LOG_DIR}/health_report.md" 2>/dev/null || true)"
         printf "[%s] overall=%s findings_rows=%s dryrun=%d\n" \
             "$(date '+%Y-%m-%d %H:%M:%S %z')" "${OVERALL:-UNKNOWN}" "${COUNT}" "$DRYRUN" \

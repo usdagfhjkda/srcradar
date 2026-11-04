@@ -14,18 +14,19 @@
 # Cron: 0 3 * * *  flock -n .lock daily_monitor.sh -type pdtm[,icp[,enscan]]
 #
 # Stages (single comma-separated -type; default = pdtm if none given):
-#   pdtm   — ../pdtm/pipeline.sh             (子域 / 端口 / 指纹扫描)
-#   icp    — ../ymicp/icp_mapp_query.py      (小程序 / 公众号 备案刷新)
-#   enscan — ../db_align/bin/db_align        (主体 / 子公司 / 资产 拉新)
+#   pdtm   — ../pdtm/pipeline.sh             (subdomain / port / fingerprint scan)
+#   icp    — ../ymicp/icp_mapp_query.py      (mini program / WeChat filing refresh)
+#   enscan — ../db_align/bin/db_align        (pull the entity / the subsidiaries / the new assets)
 #
 # Manual:
 #   ./daily_monitor.sh                       # -type pdtm (default)
 #   ./daily_monitor.sh dryrun                # skip all stages; just run diff
 #   ./daily_monitor.sh -type pdtm,icp        # two stages per business
 #   ./daily_monitor.sh -type pdtm,icp,enscan # three stages
-#   ./daily_monitor.sh -type pdtm,icp,daily-url   # +每日 URL 扫描(用户 2026-08-26)
+#   ./daily_monitor.sh -type pdtm,icp,daily-url   # + the daily URL scan (user 2026-08-26)
 #
-# daily-url 不在 cron 里(用户拍板)。enscan 同理不在 cron 里(仅手动)。
+# daily-url is not in the cron (the user decided so). enscan is not in the cron
+# either (manual only).
 
 set -u
 set -o pipefail
@@ -111,14 +112,17 @@ say "run_id=$RUN_ID db=$DB report=$REPORT_DIR"
 RUN_START_AT="$(date '+%Y-%m-%dT%H:%M:%S%:z')"
 export RUN_START_AT
 
-# ---- 0-pre. final_url schema 迁移 (2026-10-28) ----
-# 给 web_subdomains / web_subdomains_pre 加 final_url 列: httpx 跟随重定向后
-# 的最终落点。T4 的 STEP 1 快字段比较用它替代不稳定的 url 列 (url 的形态
-# 逐日会在 域名 <-> IP 之间翻转, 补进去会把形态抖动误判成变更)。
+# ---- 0-pre. the final_url schema migration (2026-10-28) ----
+# Adds the final_url column to web_subdomains / web_subdomains_pre: where
+# httpx lands after following the redirects. The STEP 1 fast field comparison of
+# T4 uses it instead of the unstable url column (the form of url
+# flips day to day between a domain and an IP, and adding it would misread the
+# form jitter as a change).
 #
-# 必须跑在 step 0 快照之前: 快照的 INSERT/SELECT 显式引用 final_url 列,
-# 列不存在时 sqlite3 报 "no such column", 整个快照失败。
-# 幂等: 缺列才 ALTER TABLE。
+# It must run before the step 0 snapshot: the INSERT/SELECT of the snapshot
+# name the final_url column explicitly, and without the column sqlite3 reports
+# "no such column" and the whole snapshot fails.
+# Idempotent: the table is only altered when the column is missing.
 if [ -f "$(dirname "$DB")/migrate_final_url.py" ]; then
     if python3 "$(dirname "$DB")/migrate_final_url.py" --db "$DB" --apply \
             2>>"$LOG_FILE"; then
@@ -128,14 +132,18 @@ if [ -f "$(dirname "$DB")/migrate_final_url.py" ]; then
     fi
 fi
 
-# ---- 0-pre. technologies 形态回填 (2026-10-29) ----
-# 把历史存量里 Python list 字面量形态的 technologies ("['X']") 回填成规范
-# 形式 ("X"): 导入侧已直接写规范形式, 但存量未回填时新旧行形态不一致,
-# STEP 1 的 technologies 快字段比较会误判成变更 (body 其实逐字节相同)。
+# ---- 0-pre. the technologies form backfill (2026-10-29) ----
+# Backfills the technologies of the existing rows that still hold the Python
+# list literal form ("['X']") into the canonical form ("X"): the import side
+# already writes the canonical form, but while the old rows are not backfilled
+# the old and the new rows differ in form, and
+# the STEP 1 technologies fast field comparison reads that as a change (the body
+# is in fact byte-for-byte identical).
 #
-# 必须跑在 step 0 快照之前: 快照把主表整表复制到快照表, 回填要在复制
-# 之前完成, 否则快照表里仍是旧形态。
-# 幂等: 已是规范形态的行不会被再次改动。
+# It must run before the step 0 snapshot: the snapshot copies the whole main
+# table into the snapshot table, so the backfill has to
+# finish before the copy, otherwise the snapshot table still holds the old form.
+# Idempotent: a row that is already in the canonical form is not touched again.
 if [ -f "$(dirname "$DB")/migrate_tech_normalize.py" ]; then
     if python3 "$(dirname "$DB")/migrate_tech_normalize.py" --db "$DB" --apply \
             2>>"$LOG_FILE"; then
@@ -145,12 +153,14 @@ if [ -f "$(dirname "$DB")/migrate_tech_normalize.py" ]; then
     fi
 fi
 
-# ---- 0. web_subdomains_pre 快照 (2026-10-08) ----
-# 触发时机: daily_monitor 开始, step 1 (per-business) 之前。
-# 把当前 web_subdomains 整表 truncate + INSERT 到 web_subdomains_pre。
-# _pre 只保留"最近一次 snapshot",不堆历史。
-# 失败 || true 兜底, snapshot 不阻塞主流程。
-# sqlite3 CLI 在 daily_monitor 已有依赖 (system init / 检查路径), 直接 sqlite3 调用。
+# ---- 0. the web_subdomains_pre snapshot (2026-10-08) ----
+# When it runs: at the start of daily_monitor, before step 1 (per-business).
+# It truncates the current web_subdomains and INSERTs the whole table into
+# web_subdomains_pre.
+# _pre only keeps "the most recent snapshot", it does not pile up history.
+# A failure is absorbed with || true, the snapshot does not block the main flow.
+# The sqlite3 CLI is already a dependency of daily_monitor (the system init /
+# the check path), so it is called directly.
 if command -v sqlite3 >/dev/null 2>&1; then
     SNAP_START="$(date '+%s.%N')"
     if sqlite3 "$DB" <<SQL 2>>"$LOG_FILE"
@@ -235,9 +245,9 @@ PY
         # Per-business config gate (recon_business_config). Drives both the
         # master enable and per-stage eligibility:
         #   web/tcp → pdtm stage (pipeline.sh runs subdomain + port scans)
-        #   icp     → icp stage  (ymicp refreshes 小程序/公众号 备案)
+        #   icp     → icp stage  (ymicp refreshes the mini program / WeChat filing)
         #   enscan  → ungated    (db_align is a data-refresh, not a scan)
-        # Missing config row = opt-out (all-zero), so a newly added business
+        # A missing config row means opt-out (all-zero), so a newly added business
         # stays silent until an operator explicitly enables it.
         CONFIG_LINE="$(python3 - "$DB" "$biz_name" <<'PY' 2>/dev/null
 import sqlite3, sys
@@ -315,19 +325,25 @@ PY
     done
 fi
 
-# ---- 1.5. schema migration (idempotent, 2026-10-01) ----
-# 触发时机: 各业务 scan + 入库完成 (含 _apply_reverify_hits),
-# 但 diff.py 还没读 ct 之前。schema 必须先 apply,否则 scan_count
-# 列不存在的 diff.py 守卫会 SQL ERROR。
-# Bug fix (2026-10-02): 之前用 $DB_DIR 但脚本里没定义,导致 set -u 下
-# 直接 exit。今天 03:00 cron 跑就因此死在 line 228, diff/notify 全没跑。
-# 改用 dirname "$DB" 取脚本所在目录 (与 DB 文件同级)。
+# ---- 1.5. the schema migration (idempotent, 2026-10-01) ----
+# When it runs: after the scan + the import of each business (including
+# _apply_reverify_hits),
+# but before diff.py reads the ct. The schema has to be applied first, otherwise
+# the guard in diff.py raises a SQL ERROR because the scan_count
+# column does not exist.
+# Bug fix (2026-10-02): it used $DB_DIR, which the script never defined, so
+# set -u exited right away. The 03:00 cron run today died on line 228 for that
+# reason, and diff/notify never ran.
+# It now takes the directory of the script from dirname "$DB" (the same level as
+# the DB file).
 
-# ---- 1.3b. 3 包 schema 迁移 (2026-10-25) ----
-# 必须跑在 step 1.4 (algo_diff_cpp) 之前: algo_diff_cpp 的 T4 会读
-# web_subdomains.curr_body_1 / curr_body_2 两列 (三包样本)。列不存在时它
-# 虽然会降级到 2 包路径, 但那样 3 包方案就完全不生效。
-# 幂等: 缺列才 ALTER TABLE。
+# ---- 1.3b. the 3-package schema migration (2026-10-25) ----
+# It must run before step 1.4 (algo_diff_cpp): the T4 of algo_diff_cpp reads
+# the web_subdomains.curr_body_1 / curr_body_2 columns (the 3-package sample).
+# Without them it
+# does fall back to the 2-package path, but then the 3-package scheme does not
+# take effect at all.
+# Idempotent: the table is only altered when the column is missing.
 if [ -f "$(dirname "$DB")/migrate_3pkg_body.py" ]; then
     if python3 "$(dirname "$DB")/migrate_3pkg_body.py" --apply --db "$DB" \
             2>>"$LOG_FILE"; then
@@ -337,31 +353,45 @@ if [ -f "$(dirname "$DB")/migrate_3pkg_body.py" ]; then
     fi
 fi
 
-# ---- 1.4. algo_diff_cpp (T1/T2/T3/T4 change_type decision) ----
-# 触发时机: step 1 (per-business scanner + import) 之后, schema migration 之前.
-# 关键: 必须跑在 import_scan_results.py reset change_type=0 之后,
-# 让 algo_diff_cpp 处理刚 import 的新 row (ct=0 → ct=10 → T4 → 终态 0/2/4/6/8).
-# 早期版本这里叫 step 0.5 (在 snapshot 后, scanner 前), 但那时 cur 跟 pre.curr_body
-# 都是 round 1 body, T4 算 ratio=1.0 误判 similar → 0, 错过 ct2 真实变化.
-# algo_diff_cpp 内部循环所有 business, 1 次调用 = 全表.
-# Binary 缺失则跳过 (跟 snapshot 同样的兜底).
-# 失败 || true 兜底, 不阻塞主流程.
+# ---- 1.4. algo_diff_cpp (the T1/T2/T3/T4 change_type decision) ----
+# When it runs: after step 1 (the per-business scanner + import), before the
+# schema migration.
+# Key: it must run after import_scan_results.py resets change_type=0,
+# so that algo_diff_cpp handles the rows that were just imported (ct=0 -> ct=10
+# -> T4 -> the final 0/2/4/6/8).
+# An early version called this step 0.5 (after the snapshot, before the scanner),
+# but back then cur and pre.curr_body
+# were both the round 1 body, so T4 computed ratio=1.0, misjudged similar -> 0
+# and missed the real ct2 changes.
+# algo_diff_cpp loops over every business internally, so 1 call = the whole table.
+# A missing binary is skipped (the same fallback as the snapshot).
+# A failure is absorbed with || true, it does not block the main flow.
 ALGO_DIFF_CPP_BIN="$RECON_ROOT/public/algo_diff_cpp/bin/algo_diff_cpp"
 if [ -x "$ALGO_DIFF_CPP_BIN" ]; then
-    # 默认值必须先解析成普通变量: 前缀赋值 (VAR=x cmd) 只对 fork 出的子进程可见,
-    # shell 自己在同一条命令里展开 "${HTTPX_BIN:-}" 时看不到它, 会传空字符串
-    # (shellcheck SC2097/SC2098)。三包发包靠 --httpx-path 拿路径, 传空就静默失效。
-    # 默认留空: 让 C++ 从 pdtm.conf 读 httpx_bin (单一事实源)。
-    # 原默认值 "/usr/local/bin/httpx" 在本机不存在, 而本命令又显式传了
-    # --httpx-path —— C++ 收到非空路径就不再走 pdtm.conf 兜底, 三包取样
-    # 会去起一个不存在的二进制而静默失败。
+    # The default has to be resolved into a plain variable first: a prefix
+    # assignment (VAR=x cmd) is only visible to the forked child process, so
+    # when the shell itself expands "${HTTPX_BIN:-}" in the same command it
+    # sees nothing and passes an empty string
+    # (shellcheck SC2097/SC2098). The 3-package sampling gets its path through
+    # --httpx-path, so an empty value fails silently.
+    # The default stays empty: let the C++ read httpx_bin from pdtm.conf (the
+    # single source of truth).
+    # The old default "/usr/local/bin/httpx" does not exist on this machine, and
+    # this command passes
+    # --httpx-path explicitly — so the C++ sees a non-empty path, does not fall
+    # back to pdtm.conf any more, and the 3-package sampling
+    # tries to start a binary that does not exist and fails silently.
     # PATCH-3PKG-HTTPX-2026-10-27
-    # httpx 路径从 config/pdtm.conf 解析 (单一事实源), 解析链与 scanner.sh 一致:
-    #   env HTTPX_BIN > conf httpx_bin > 默认 ~/.pdtm/go/bin/httpx
-    # 用 lib 里现成的 load_config.sh (解析 conf) + resolve_tools.sh (优先级),
-    # 不自己手搓 conf 解析。
-    # 解析不出可执行文件时留空: C++ 侧会继续走自己的 pdtm.conf 兜底,
-    # 两边都拿不到才降级 2 包 (并打日志), 不会静默。
+    # The httpx path is resolved from config/pdtm.conf (the single source of truth),
+    # with the same resolution chain as scanner.sh:
+    #   env HTTPX_BIN > conf httpx_bin > the default ~/.pdtm/go/bin/httpx
+    # It uses the load_config.sh (parses the conf) + resolve_tools.sh (the
+    # priority) that already exist in lib, instead of
+    # hand-rolling the conf parsing.
+    # When no executable can be resolved it stays empty: the C++ side keeps its
+    # own pdtm.conf fallback, and only when
+    # neither side finds one does it degrade to 2 packages (and it logs that),
+    # so it never fails silently.
     HTTPX_BIN_EFF="${HTTPX_BIN:-}"
     PDTMCONF_EFF="${PDTMCONF:-$RECON_ROOT/../config/pdtm.conf}"
     RESOLVERS_EFF="${RESOLVERS_FILE:-}"
@@ -371,7 +401,7 @@ if [ -x "$ALGO_DIFF_CPP_BIN" ]; then
         source "$RECON_ROOT/main/lib/load_config.sh"
         # shellcheck disable=SC1090
         source "$RECON_ROOT/main/pdtm/lib/resolve_tools.sh"
-        # 把 conf 里的 httpx_bin / resolvers_file 注入本脚本 scope
+        # inject the httpx_bin / resolvers_file from the conf into the scope of this script
         load_config_set "$PDTMCONF_EFF" "$RECON_ROOT/main/lib"
         if [ -z "$HTTPX_BIN_EFF" ]; then
             HTTPX_BIN_EFF="$(resolve_tool httpx "$HOME/.pdtm/go/bin/httpx")"
@@ -384,10 +414,13 @@ if [ -x "$ALGO_DIFF_CPP_BIN" ]; then
         say "step 1.4: WARN httpx 不可执行, 三包取样将降级 (path=$HTTPX_BIN_EFF)"
         HTTPX_BIN_EFF=""
     fi
-    # 三包方案: 默认开启 (2 = 额外取样 2 次, 连同原扫描样本共 3 包)。
-    # 用"位置对应覆盖率"判定动态噪声, 不依赖 anchors —— anchors 的锚点数
-    # 会随 body 内容偶然变化而波动, 同一资产可能在 ct=0 / ct=2 之间翻转。
-    # 设 FETCH_SAMPLES=0 可临时关闭 (走 2 包路径)。
+    # The 3-package scheme: on by default (2 = 2 extra samples, so 3 packages
+    # together with the original scan sample).
+    # Dynamic noise is judged by the "positional coverage rate", without relying
+    # on the anchors — the number of anchors
+    # fluctuates with an incidental change in the body, so the same asset could
+    # flip between ct=0 and ct=2.
+    # Setting FETCH_SAMPLES=0 turns it off for a while (the 2-package path).
     FETCH_SAMPLES_EFF="${FETCH_SAMPLES:-2}"
     if (cd "$(dirname "$ALGO_DIFF_CPP_BIN")" && \
          PDTMCONF="$PDTMCONF_EFF" \
@@ -414,15 +447,19 @@ if [ -f "$(dirname "$DB")/migrate_business_scan_count.py" ]; then
 fi
 
 # ---- 2. diff (SQL-direct, atomic) ----
-# DEPRECATED 2026-10-08: 临时关闭 monitor 中的 diff / algo_diff 调度。
-# 调度逻辑(compile 关掉, 调用脚本仍存在, 可被外部 CLI / 测试直接调用):
+# DEPRECATED 2026-10-08: the diff / algo_diff scheduling in the monitor is
+# turned off for the time being.
+# The scheduling logic (the compile part is off, the scripts it calls still exist
+# and can be called directly by an external CLI / a test):
 #   diff.py          modules/main/daily/lib/diff.py
 #   algo_diff/run.py modules/main/daily/lib/algo_diff/run.py
 #   algo_diff/rescan.py modules/main/daily/lib/algo_diff/rescan.py
-# 改回原状: 把下面三个 if ! ... fi && 之间的注释去掉即可。
+# To restore it: remove the comments between the three if ! ... fi blocks.
 # step 2 (diff.py):
-# 2026-10-12: 解除 10-08 临时 DEPRECATED, 恢复自动调度.
-# 冷启动守护 (scan_count > 3 才写 ct) 继续保留, 不会假报.
+# 2026-10-12: the temporary DEPRECATED of 10-08 is lifted and the automatic
+# scheduling is back.
+# The cold start guard (the ct is only written once scan_count > 3) stays, so
+# there are no false reports.
 mkdir -p "$REPORT_DIR"
 PER_BIZ_WARNINGS=""
 if [ -s "$PER_BIZ_WARN_FILE" ]; then
@@ -441,36 +478,46 @@ fi
 # Reads body from web_subdomains.raw_json (written by import_scan_results.py
 # during [4/5] import step). Async second-pass (rescan) is a separate stage
 # scheduled after this main run completes.
-# DEPRECATED 2026-10-08: 临时关闭 algo_diff main pass 调度。
+# DEPRECATED 2026-10-08: the algo_diff main pass scheduling is turned off for
+# the time being.
 # say "step 3/4: algo_diff main pass"
 # if ! python3 "$DAILY/lib/algo_diff/run.py" "$DB" 2>>"$LOG_FILE"; then
 #     say "algo_diff main pass failed (rc=$?); non-fatal, continuing"
 # fi
 
-# ---- 4. algo_diff async second pass ----
-# DEPRECATED 2026-10-08: 临时关闭 algo_diff rescan 调度。
+# ---- 4. the algo_diff async second pass ----
+# DEPRECATED 2026-10-08: the algo_diff rescan scheduling is turned off for the
+# time being.
 # say "step 4/4: algo_diff async rescan"
 # if ! python3 "$DAILY/lib/algo_diff/rescan.py" "$DB" --batch 200 2>>"$LOG_FILE"; then
 #     say "algo_diff rescan failed (rc=$?); non-fatal, pending rows persist for next run"
 # fi
 
-# ---- 5. optional notify 推送(只总变更 > 0 时;失败 || true 兜底) ----
-# modules/public/notify 是可选插件;模块不存在 / install.sh 没跑 / config
-# 没填真值 → 全部静默跳过。notify_send.sh 内部已经处理 REPLACE_WITH_* 拒发。
-# 注意:hook 插在 algo_diff rescan 之后,因为 diff.py:write_report 是 aggregate 报告,
-# 跟 algo_diff 各自处理不同表,顺序不影响语义,但 notify 应该在所有数据写入完成后跑。
+# ---- 5. the optional notify push (only when the total change is > 0; a failure
+# is absorbed with || true) ----
+# modules/public/notify is an optional plugin; when the module does not exist /
+# install.sh never ran / the config
+# has no real values -> everything is skipped silently. notify_send.sh already
+# handles the REPLACE_WITH_* refusal.
+# Note: the hook comes after the algo_diff rescan, because diff.py:write_report is
+# the aggregate report,
+# while algo_diff handles a different table each, so the order does not change
+# the semantics, but notify should run once every write is done.
 NOTIFY_SEND="$RECON_ROOT/public/notify/notify_send.sh"
 SUMMARY_MD="$REPORT_DIR/summary.md"
 if [ -x "$NOTIFY_SEND" ] && [ -f "$SUMMARY_MD" ]; then
     DIFF_TOTAL="$(grep -oE '本次变更总数: \*\*[0-9]+\*\*' "$SUMMARY_MD" 2>/dev/null         | grep -oE '[0-9]+' | head -1)"
     DIFF_TOTAL="${DIFF_TOTAL:-0}"
     if [ "${DIFF_TOTAL:-0}" -gt 0 ]; then
-        # 用户 2026-09-28:如果只有 deactivated ↘ 行(没有 added + ↻ + ✎),
-        # 视为噪声(全是 persist 全清场导致),不发邮件。
-        # summary.md 段头格式: `## <table>  (+N / ↻N / ↘N / ✎N)`
-        # 2026-10-02: 原 grep '+[0-9]+' 等太宽松,会把 summary 里其它位置
-        # (response_hash / run_id / 时间戳里的数字) 都算入,ADDED 错算。
-        # 改用 Python 锚定段头格式严格求和。
+        # User 2026-09-28: when there are only deactivated ↘ rows (no added + ↻ + ✎),
+        # it is treated as noise (it all comes from the persist clearing the
+        # stage), so no mail is sent.
+        # The summary.md section header format: `## <table>  (+N / ↻N / ↘N / ✎N)`
+        # 2026-10-02: the old grep '+[0-9]+' was too loose, it also counted the
+        # numbers in the other places of the summary
+        # (the response_hash / run_id / the timestamps), so ADDED was miscounted.
+        # The sum is now taken strictly by anchoring on the section header format
+        # in Python.
         read -r ADDED_TOTAL REACT_TOTAL DEACT_TOTAL CHANGED_TOTAL < <(
             python3 - "$SUMMARY_MD" <<'PYEOF'
 import re, sys

@@ -31,7 +31,7 @@ import sqlite3
 import sys
 
 # SQLite GLOB is bytewise — use the CJK Unified Ideographs block as a
-# character class. [一-龥] covers U+4E00 to U+9FA5 (basic CJK only — no
+# character class. The CJK range covers U+4E00 to U+9FA5 (basic CJK only — no
 # extension A/B). That covers ~99% of titles we'd see in practice. If we
 # later want extension blocks, add another GLOB branch in the SQL.
 _CJK_GLOB = "*[一-龥]*"

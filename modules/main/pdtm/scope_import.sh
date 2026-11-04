@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
-# scope_import.sh - 仅入库 scope (可测/非可测) + 业务行, 不跑流水线
+# scope_import.sh - import only the scope (measurable / not measurable) + the
+# business row, without running the pipeline
 #
-# 用法:
+# Usage:
 #   ./scope_import.sh -b example.com -i ./input/
 #   ./scope_import.sh -b example.com -i ./input/ --dry-run
 #   ./scope_import.sh -b example.com -i ./input/ --keep-files
 #   ./scope_import.sh -b example.com -i ./input/ --skip-check-wildcard
 #
-# 行为:
-#   - 必须 -i 提供目录(含 target.txt, exclude.txt 可选)
-#   - cp 到本地 target.txt / exclude.txt (mirror pipeline.sh prepare_input)
-#   - 默认跑 check_wildcard.sh → 命中泛解析的 is_wildcard=1, 否则 0
-#       --skip-check-wildcard 跳过, 全部 is_wildcard=0
-#   - bootstrap businesses + scopes 表, INSERT OR IGNORE 业务行
-#   - upsert scope (可测资产 → target.txt; 非可测资产 → exclude.txt),
-#     命中泛解析的覆写 is_wildcard (与 import_scan_results.upsert_scope 一致)
-#   - 不跑 scan / scanner / import / finalize
-#   - trap cleanup: 默认清理本地 target.txt / exclude.txt / wildcard.txt / no_wildcard.txt;
-#       --keep-files 强制保留; 失败默认保留 (供排查)
+# What it does:
+#   - -i is required and gives the directory (it holds target.txt, exclude.txt
+#     is optional)
+#   - copies to the local target.txt / exclude.txt (mirrors pipeline.sh prepare_input)
+#   - runs check_wildcard.sh by default -> is_wildcard=1 for a wildcard hit, 0
+#       otherwise; --skip-check-wildcard skips it and leaves every
+#       is_wildcard at 0
+#   - bootstraps the businesses + scopes tables, INSERT OR IGNORE the business row
+#   - upserts the scope (measurable assets -> target.txt; not measurable ->
+#     exclude.txt) and overwrites is_wildcard for a wildcard hit (the same as
+#     import_scan_results.upsert_scope)
+#   - does not run scan / scanner / import / finalize
+#   - trap cleanup: by default the local target.txt / exclude.txt / wildcard.txt /
+#       no_wildcard.txt are removed; --keep-files forces them to stay; a
+#       failure keeps them by default (for the investigation)
 #
-# 适用场景:
-#   - 只想登记业务和范围, 暂不扫描
-#   - 调试 schema / DB 时, 快速灌入数据
+# When it fits:
+#   - only the business and the scope should be registered, without scanning yet
+#   - quick data loading while debugging the schema / the DB
 #
 set -euo pipefail
 
@@ -30,7 +35,7 @@ cd "$SCRIPT_DIR"
 
 BUSINESS=
 INPUT_PATH=
-# DB:env var > RECON_DB > ../db/recon.sqlite3 默认(兼容 docker / 裸跑)
+# DB: the env var > RECON_DB > the default ../db/recon.sqlite3 (works both in docker and bare)
 DB="${DB:-${RECON_DB:-../db/recon.sqlite3}}"
 DRY_RUN=
 KEEP_FILES=
@@ -39,7 +44,7 @@ INPUT_GENERATED=0
 WILDCARD_OUT=wildcard.txt
 NO_WILDCARD_OUT=no_wildcard.txt
 
-# ===== 参数 =====
+# ===== arguments =====
 while [ $# -gt 0 ]; do
     case "$1" in
         -b|--business)            BUSINESS="$2"; shift 2 ;;
@@ -62,12 +67,15 @@ done
 DB_DIR="$(dirname "$DB")"
 mkdir -p "$DB_DIR"
 
-# cp 到本地 working dir (mirror pipeline.sh prepare_input).
-# -ef 检查避免「cp 同源/目标」报错. 在 INPUT_PATH 已通过 -d 校验的前提下:
-#   - INPUT_PATH/target.txt 存在 → -ef 在「./ 就是 INPUT_PATH」时为真,跳过 cp
-#   - 其他情况 cp 到 pdtm/ 本地
-# -ef 检查保留为兜底(避免 cp 同源报错); 但 docker mount bind 场景下
-# -ef 误判,强制 cp -f. --keep-files 才能正常保留 target.txt.
+# copied to the local working dir (mirrors pipeline.sh prepare_input).
+# the -ef check avoids a "copy from the same source / to the same target"
+# error. Given that INPUT_PATH already passed the -d validation:
+#   - INPUT_PATH/target.txt exists -> -ef is true when "./ is INPUT_PATH", so
+#     the copy is skipped
+#   - in every other case it is copied to the local pdtm/
+# the -ef check stays as a fallback (it avoids the same-source copy error), but
+# under a docker bind mount it misjudges, so the copy is forced with cp -f.
+# --keep-files is then needed to keep target.txt.
 if [ "$INPUT_PATH/target.txt" -ef "target.txt" ]; then
     cp -f "$INPUT_PATH/target.txt" "target.txt"
 else
@@ -87,9 +95,11 @@ fi
 echo "[*] 业务: $BUSINESS"
 echo "[*] 输入目录: $INPUT_PATH"
 
-# check_wildcard: 探测 target.txt 里的域是否泛解析, 结果写到 wildcard.txt / no_wildcard.txt.
-# 默认跑 (用 dnsx 三探针/域, 不涉及 subfinder/alterx, 仍有「不算扫描」语义);
-# 跳过的 - 可能用 --skip-check-wildcard 让 is_wildcard 留 0.
+# check_wildcard: probe whether the domains in target.txt resolve as a wildcard;
+# the result goes to wildcard.txt / no_wildcard.txt.
+# It runs by default (three dnsx probes per domain, no subfinder/alterx, so it
+# still means "not a scan");
+# when it is skipped - use --skip-check-wildcard to leave is_wildcard at 0.
 TMP_LOG=$(mktemp)
 if [ -z "$SKIP_WILDCARD" ]; then
     if ! ./check_wildcard.sh "target.txt" > "$TMP_LOG" 2>&1; then
@@ -105,10 +115,11 @@ else
     echo "[*] --skip-check-wildcard: 跳过, 所有 is_wildcard=0"
 fi
 
-# ===== 准备 scope 数据 =====
+# ===== prepare the scope data =====
 TMP_T=$(mktemp); TMP_E=$(mktemp)
-# 默认清理本地 target.txt / exclude.txt / wildcard.txt / no_wildcard.txt;
-# --keep-files 保留; 失败默认保留 (供排查).
+# by default the local target.txt / exclude.txt / wildcard.txt / no_wildcard.txt
+# are removed; --keep-files keeps them; a failure keeps them by default (for
+# the investigation).
 cleanup() {
     local rc=$?
     rm -f "$TMP_T" "$TMP_E" "$TMP_LOG"
@@ -127,7 +138,7 @@ cleanup() {
         echo "[+] 已清理本地 target.txt / exclude.txt / wildcard.txt / no_wildcard.txt (--keep-files 可保留)"
         # v0.1.0: also rm INPUT_PATH/target.txt + exclude.txt if INPUT_PATH is
         # an external dir (not cwd inode). Failure path above does NOT do
-        # this — see README §八-14. Pass --keep-files to retain both.
+        # this - see README §8-14. Pass --keep-files to retain both.
         if [ -n "$INPUT_PATH" ] && [ -d "$INPUT_PATH" ]; then
             if [ "$INPUT_PATH/target.txt" -ef "target.txt" ]; then
                 : # same inode — already removed by the rm above
@@ -168,7 +179,7 @@ def collect(path):
 
 targets  = collect(Path("target.txt"))
 excludes = collect(Path("exclude.txt"))
-# 写尾换行, 让 wc -l 与 Python len() 一致
+# write the trailing newline, so that wc -l and the Python len() agree
 Path(ft).write_text(("\n".join(targets)  + "\n") if targets  else "", encoding="utf-8")
 Path(fe).write_text(("\n".join(excludes) + "\n") if excludes else "", encoding="utf-8")
 print(f"[scope_read] target={len(targets)} exclude={len(excludes)}")
@@ -191,7 +202,7 @@ if [ -n "$DRY_RUN" ]; then
     exit 0
 fi
 
-# ===== bootstrap + 插入 =====
+# ===== bootstrap + insert =====
 python3 - "$DB" "$BUSINESS" "$TMP_T" "$TMP_E" <<'PY'
 import sys, sqlite3
 from datetime import datetime, timezone
@@ -212,19 +223,19 @@ now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 conn = sqlite3.connect(db)
 conn.execute("PRAGMA foreign_keys = ON")
 
-# 与 pipeline.sh bootstrap_db 行为一致: businesses 表由共享方/上游项目建
+# the same behaviour as pipeline.sh bootstrap_db: the businesses table is created by the shared side / the upstream project
 cols = [r[1] for r in conn.execute("PRAGMA table_info(businesses)").fetchall()]
 if "business_name" not in cols:
     sys.exit(f"[scope_import] 错误: {db} 缺少 businesses 表或缺 business_name 列, 请先在共享库中建好")
 
-# 建 scopes 等本项目私有 schema
+# the private schema of this project, such as scopes
 import_scan_results.create_tables(conn)
 
-# INSERT OR IGNORE 业务行
+# INSERT OR IGNORE the business row
 conn.execute("INSERT OR IGNORE INTO businesses (business_name) VALUES (?)", (biz,))
 bid = int(conn.execute("SELECT id FROM businesses WHERE business_name=?", (biz,)).fetchone()[0])
 
-# 读 check_wildcard 输出的 wildcard.txt, 建泛解析域 set (host normalization: strip trailing dot, lower)
+# read the wildcard.txt that check_wildcard wrote and build the set of wildcard domains (host normalization: strip the trailing dot, lower)
 wp = Path("wildcard.txt")
 if wp.exists():
     wildcards = {
@@ -251,7 +262,7 @@ for a in targets:  upsert("可测资产", a)
 for a in excludes: upsert("非可测资产", a)
 conn.commit()
 
-# 落库后回查, 输出确认数
+# read the row back after the insert and print the confirmed count
 counts = {row[0]: row[1] for row in conn.execute(
     "SELECT scope_name, COUNT(*) FROM scopes WHERE business_id=? GROUP BY scope_name",
     (bid,),

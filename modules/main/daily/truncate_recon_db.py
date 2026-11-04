@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""truncate_recon_db.py — 清空 recon.sqlite3 中所有数据，保留表结构与索引。
+"""truncate_recon_db.py — delete every row from recon.sqlite3, keeping the table
+structure and the indexes.
 
-按外键依赖逆序删除：先删叶子表（web_subdomains / mapp_records /
-permutation_state / scopes / tcp_assets / web_hashes），最后删 businesses。
-service_type_map 默认保留（存的是 runner 累积的 service_type 命名映射，
-不是业务数据）；用 --all 一并清。
+The leaf tables are deleted first, in reverse foreign key order: web_subdomains /
+mapp_records / permutation_state / scopes / tcp_assets / web_hashes, and
+businesses last. service_type_map is kept by default (it holds the service_type
+name mapping that the runners accumulate, not business data); --all clears it
+as well.
 
-用法:
-  ./truncate_recon_db.py                  # 默认 ../db/recon.sqlite3
-  ./truncate_recon_db.py -d /tmp/x.db     # 指定 db
-  ./truncate_recon_db.py -n               # dry-run：只打印计划
-  ./truncate_recon_db.py --all            # 同时清 service_type_map
-  ./truncate_recon_db.py --vacuum         # 删除后 VACUUM（回收磁盘）
-  ./truncate_recon_db.py -y               # 跳过确认
+Usage:
+  ./truncate_recon_db.py                  # the default ../db/recon.sqlite3
+  ./truncate_recon_db.py -d /tmp/x.db     # a specific db
+  ./truncate_recon_db.py -n               # dry-run: only print the plan
+  ./truncate_recon_db.py --all            # also clear service_type_map
+  ./truncate_recon_db.py --vacuum         # VACUUM after the delete (reclaim disk)
+  ./truncate_recon_db.py -y               # skip the confirmation
 
-依赖: 仅 Python 3 标准库（sqlite3）。
+Dependency: the Python 3 standard library only (sqlite3).
 """
 
 import argparse
@@ -38,9 +40,11 @@ def list_tables(con):
 
 
 def leaf_first_order(con):
-    """外键拓扑序（删除序）：没有别人引用我的表先删。
+    """The foreign key topology order (the delete order): a table that nobody
+    references is deleted first.
 
-    即 Kahn 算法的 in-degree=0 优先：incoming[t] = 引用 t 的表集。
+    That is the in-degree=0 priority of the Kahn algorithm: incoming[t] = the
+    set of tables that reference t.
     """
     cur = con.cursor()
     tables = list_tables(con)
@@ -59,7 +63,7 @@ def leaf_first_order(con):
                 remaining.remove(t)
                 progressed = True
         if not progressed:
-            # FK 循环兜底（实际不会发生）
+            # the FK cycle fallback (it does not actually happen)
             order.append(next(iter(remaining)))
             remaining.remove(order[-1])
     return order
@@ -78,7 +82,7 @@ def checkpoint_wal(con):
 
 
 def reset_sequences(con):
-    """sqlite_sequence 表存在时重置自增计数（AUTOINCREMENT 列）。"""
+    """Reset the auto-increment counter (the AUTOINCREMENT columns) when the sqlite_sequence table exists."""
     cur = con.cursor()
     cur.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'"
@@ -91,7 +95,7 @@ def reset_sequences(con):
 def truncate(db_path, *, include_type_map, vacuum, dry_run):
     if not os.path.exists(db_path):
         sys.exit(f"db 不存在: {db_path}")
-    # uri= 同名时允许读写；不建议加 immutable=True，因为我们就是要写
+    # uri= allows the read and the write on the same file; immutable=True is not advised, because we do want to write
     con = sqlite3.connect(db_path, isolation_level=None)
     try:
         tables = list_tables(con)
@@ -113,7 +117,7 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
             print("\nDRYRUN: 未做任何修改。")
             return 0
 
-        # 写入前 checkpoint（避免 WAL 里残留旧数据）
+        # checkpoint before the write (so that no stale data stays in the WAL)
         checkpoint_wal(con)
 
         con.execute("PRAGMA foreign_keys = OFF")

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# modules/main/daily/install.sh — 装 daily 模块(每日监控)
+# modules/main/daily/install.sh — install the daily module (the daily monitoring)
 #
-# daily 模块组成:
+# The daily module holds:
 #   - daily_monitor.sh / run_one_business.sh / install_cron.sh / truncate_recon_db.py
 #   - bin/    backup_file.sh / dashboard_watchdog.sh
 #   - lib/    dashboard.py / diff.py / log.py / score.py + migrate_*.py + *.sql
 #
-# 用法:
-#   bash install.sh                  # 默认:全装(注册 cron + 写日志目录)
-#   bash install.sh --check          # 只查依赖
-#   bash install.sh --no-cron        # 装代码但跳过 cron 注册
+# Usage:
+#   bash install.sh                  # the default: install everything (register cron + write the log dir)
+#   bash install.sh --check          # only check the dependencies
+#   bash install.sh --no-cron        # install the code but skip the cron registration
 #   bash install.sh --uninstall
 #
-# 退出码:0/1/2/3/4 同 pdtm 模块
+# Exit codes: 0/1/2/3/4, the same as the pdtm module
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ usage() {
     sed -n "2,15p" "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
-# ---- 依赖检查 ----
+# ---- dependency check ----
 check_deps() {
     local rc=0
     command -v python3 >/dev/null 2>&1 || { err "缺 python3"; rc=2; }
@@ -40,14 +40,14 @@ check_deps() {
     return $rc
 }
 
-# ---- 准备运行目录 ----
+# ---- prepare the runtime directories ----
 install() {
     mkdir -p "$SCRIPT_DIR/logs" "$SCRIPT_DIR/reports" "$SCRIPT_DIR/snapshots"
     log "已准备 logs/ reports/ snapshots/ 目录"
     return 0
 }
 
-# ---- 注册 cron ----
+# ---- register the cron ----
 register_cron() {
     if ! command -v crontab >/dev/null 2>&1; then
         warn "无 crontab,跳过 cron 注册"

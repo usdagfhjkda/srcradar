@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 #
-# modules/main/db/install.sh — 装 db 模块(数据库 schema + fixture + init)
+# modules/main/db/install.sh — install the db module (the database schema + fixture + init)
 #
-# db 模块组成:
-#   - schema.sql         14 表 + 索引 + 触发器(权威 schema)
-#   - init_db.py         Python 初始化(支持 PATH 已存在 → 自动备份)
-#   - check_schema.py    schema drift 校对
-#   - _test_init.sqlite3 测试 fixture(进仓)
+# The db module holds:
+#   - schema.sql         14 tables + the indexes + the triggers (the authoritative schema)
+#   - init_db.py         the Python initialiser (it backs up automatically when the path already exists)
+#   - check_schema.py    the schema drift check
+#   - _test_init.sqlite3 the test fixture (it is in the repo)
 #
-# 用法:
-#   bash install.sh                              # 默认:init_db 到 ../db/recon.sqlite3
-#   bash install.sh --path /custom/path.db       # 自定义 db 路径
-#   bash install.sh --check-schema               # 只校对 schema drift
-#   bash install.sh --check                      # 只查依赖
+# Usage:
+#   bash install.sh                              # the default: init_db into ../db/recon.sqlite3
+#   bash install.sh --path /custom/path.db       # a custom db path
+#   bash install.sh --check-schema               # only check the schema drift
+#   bash install.sh --check                      # only check the dependencies
 #   bash install.sh --uninstall
 #
-# 退出码:0/1/2/3/4 同 pdtm 模块
+# Exit codes: 0/1/2/3/4, the same as the pdtm module
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 默认 db 路径:同级目录 db/recon.sqlite3
+# the default db path: db/recon.sqlite3 next to this script
 DEFAULT_DB="$(cd .. && pwd)/db/recon.sqlite3"
 
 log()  { printf "[db] %s\n" "$*"; }
@@ -71,11 +71,11 @@ check_schema() {
     fi
 }
 
-# ---- verify:确认 14 张表存在 ----
+# ---- verify: confirm the 14 tables exist ----
 verify_db() {
     local db_path="$1"
     [ -f "$db_path" ] || { err "db 不存在: $db_path"; return 1; }
-    # init_db.py 完成后等 sqlite 落盘,避免 race
+    # wait for sqlite to flush after init_db.py, to avoid a race
     sleep 0.2
     local n
     n=$(sqlite3 "$db_path" "SELECT count(*) FROM sqlite_master WHERE type='table'" 2>/dev/null || echo 0)
