@@ -8,42 +8,46 @@
 #   pdtm     — ../pdtm/pipeline.sh
 #   icp      — ../ymicp/icp_mapp_query.py
 #   enscan   — ../db_align/bin/db_align
-#   daily-url— ../pdtm/scan_urls.py (按 web_subdomain_scan_schedule 跑)
+#   daily-url— ../pdtm/scan_urls.py (it follows web_subdomain_scan_schedule)
 #
 # Default if no -type given: pdtm.
 #
 # Order matters and is fixed: enscan first (writes scopes), then pdtm
 # (consumes scopes), then icp (only needs companies), then daily-url
-# (only reads web_subdomain_scan_schedule — 与其它阶段无依赖,但放最末
-# 因为依赖 run_markers(由 diff 阶段写入)的复活判定语义)。
-# Caller's -type ordering is ignored — stages always run in this internal order.
+# (only reads web_subdomain_scan_schedule - it does not depend on the other
+#  stages, but it goes last
+#  because it depends on the reactivation semantics of the run_markers (written
+#  by the diff stage)).
+# Caller's -type ordering is ignored - stages always run in this internal order.
 #
 # Onboarding guard: if the business exists in `businesses` but has zero
-# '可测资产' scopes, pdtm is skipped and a "needs_onboarding" line is
+# 'measurable asset' scopes, pdtm is skipped and a "needs_onboarding" line is
 # appended to WARNINGS_FILE (set by daily_monitor.sh). enscan / icp
 # still run, since neither needs scopes to function.
 #
-# Exit code is a 4-bit mask (用户 2026-08-26 加 daily-url):
+# Exit code is a 4-bit mask (the user added daily-url on 2026-08-26):
 #   bit 0 (1) — pdtm failed
 #   bit 1 (2) — enscan (db_align) failed
 #   bit 2 (4) — icp (ymicp) failed
 #   bit 3 (8) — daily-url failed
-#   0 — all requested stages ok / skipped (no error)
+#   0 — all the requested stages succeeded / were skipped (no error)
 #   15 — all four failed
 # needs_onboarding exits 0 (no pdtm run = no pdtm error bit).
-# daily-url 没有 schedule 行的业务 = "空 schedule,无 sub" → 视为 skipped,不设 bit3。
+# A business with no daily-url schedule row = "empty schedule, no sub" -> it is
+# treated as skipped and bit3 is not set.
 # The orchestrator (daily_monitor.sh) decodes the bits per-stage.
 #
-# TYPES env var (space-joined string) is honored when set by the
-# orchestrator; CLI -type wins if TYPES is unset. TYPES is a string
-# (not a bash array) so the env export survives — bash arrays do not
+# The TYPES env var (a space-joined string) is honored when the orchestrator
+# sets it; the CLI -type wins if TYPES is unset. TYPES is a string
+# (not a bash array) so the env export survives - bash arrays do not
 # inherit properly across subshells.
 
 set -u
 
 # Parse single -type with comma-separated value; reject multiple -type.
-# -onesite 是互斥的轻量子命令：跳过 enscan/pdtm/icp 三阶段，直接 subprocess 跑
-# httpx 写 web_hashes + web_subdomains，不清空 is_active=1 其它行。
+# -onesite is a mutually exclusive light subcommand: it skips the enscan/pdtm/icp
+# stages and calls httpx directly through a subprocess to write web_hashes +
+# web_subdomains, without clearing the other is_active=1 rows.
 VALID_TYPES_STR="pdtm icp enscan daily-url"
 TYPE_RAW=""
 TYPE_SEEN=0
@@ -72,7 +76,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# -onesite 与 -type 互斥
+# -onesite and -type are mutually exclusive
 if [ "$ONESITE" = "1" ] && [ -n "$TYPE_RAW" ]; then
     echo "[-onesite] cannot be combined with -type" >&2
     exit 1
@@ -114,15 +118,17 @@ DAILY="$RECON_ROOT/main/daily"
 PDTM="$RECON_ROOT/main/pdtm"
 DBALIGN="$RECON_ROOT/public/db_align"
 YMICP="$RECON_ROOT/public/ymicp"
-# DB:env var > RECON_DB > 默认 RECON_ROOT/main/db/recon.sqlite3
+# DB: the env var > RECON_DB > the default RECON_ROOT/main/db/recon.sqlite3
 DB="${DB:-${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}}"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] [run_one] $*" >&2; }
 
-# ---- -onesite 早返回：跳过 enscan/pdtm/icp 整段，直接 subprocess 调 scan-onesite ----
-# 不动 bit-mask 退出码逻辑；ONESITE 路径独立以 ONESITE_RC 退出（0 = ok，非 0 = 错）。
-# 业务名与原脚本一致：第 1 个 positional arg。
+# ---- the -onesite early return: skip the whole enscan/pdtm/icp section and call
+# scan-onesite directly through a subprocess ----
+# the bit-mask exit code logic is left alone; the ONESITE path is independent and
+# exits with ONESITE_RC (0 = ok, anything else = an error).
+# The business name is the same as in the original script: the 1st positional arg.
 if [ "$ONESITE" = "1" ]; then
     log "onesite begin: biz=$BIZ hosts_file=$ONESITE_HOSTS"
     (cd "$PDTM" && python3 import_scan_results.py scan-onesite \
@@ -158,17 +164,23 @@ run_stage_icp() {
         tee -a "$DAILY/logs/icp_${BIZ}_$(date +%Y%m%d).log"
 }
 
-# ---- daily-url stage (用户 2026-08-26 拍板) ----
-# 读 web_subdomain_scan_schedule 表,按 enabled=1 的 subdomain 跑 scan_urls.py
-# - 每 batch ≤ DAILY_URL_BATCH_MAX 个子域(用户拍板:5万,文档常量)
-# - 失败保留旧 last_run_at;成功才 UPDATE(下次以"上次成功"为基线)
-# - 无 schedule 行 = "空 schedule" → 日志一行 + 返回 0,不算失败
-# - 跟 scan-onesite 不同:scan_urls.py 接多个 subdomain + 自动 batch(每批 50
-#   hosts 上限;此处 DAILY_URL_BATCH_MAX 应远小于此,避免单 subprocess 超时)
+# ---- the daily-url stage (the user decided on 2026-08-26) ----
+# Read the web_subdomain_scan_schedule table and run scan_urls.py for every
+# subdomain with enabled=1
+# - every batch holds <= DAILY_URL_BATCH_MAX subdomains (the user decided on 50k,
+#   the documented constant)
+# - a failure keeps the old last_run_at; only a success UPDATEs it (the next run
+#   uses "the last success" as the baseline)
+# - no schedule row = "empty schedule" -> one log line + return 0, it is not a
+#   failure
+# - it differs from scan-onesite: scan_urls.py takes several subdomains + it
+#   batches automatically (a limit of 50 hosts
+#   per batch; DAILY_URL_BATCH_MAX should be far below that here, so that a single
+#   subprocess does not time out)
 DAILY_URL_BATCH_MAX=50000  # 用户拍板(2026-08-26):见 README"daily-url batch 上限"
 run_stage_daily_url() {
     log "daily-url begin: biz=$BIZ batch_max=$DAILY_URL_BATCH_MAX"
-    # 1) 读 schedule(enabled=1)
+    # 1) read the schedule (enabled=1)
     mapfile -t SCHED_LINES < <(python3 - "$DB" "$BIZ" <<'PY' 2>/dev/null
 import sqlite3, sys
 db, biz = sys.argv[1], sys.argv[2]
@@ -188,26 +200,28 @@ PY
         return 0
     fi
 
-    # 2) 分 batch
+    # 2) split into batches
     n_subs=${#SCHED_LINES[@]}
     n_batches=$(( (n_subs + DAILY_URL_BATCH_MAX - 1) / DAILY_URL_BATCH_MAX ))
     log "daily-url: $n_subs sub(s), $n_batches batch(es)"
 
-    # 3) 写 last_run_at 标记函数(success 才调)
+    # 3) the function that writes the last_run_at marker (only called on a success)
     _mark_run_at() {
-        # 一次性把整个 batch 的 sub 写上 success 时间(写在 orchestrator
-        # 最后,避免单 sub fail 时前面 success 的 sub 不被记录)
+        # the success time of the whole batch is written in one go (it is written by
+        # the orchestrator
+        # at the end, so that a sub that fails does not leave the subs that
+        # succeeded before it unrecorded)
         :
     }
 
-    # 4) 按 batch 跑
+    # 4) run the batches
     local batch_idx=0
     local batch_failed=0
     while [ $batch_idx -lt $n_subs ]; do
         local end=$(( batch_idx + DAILY_URL_BATCH_MAX ))
         [ $end -gt $n_subs ] && end=$n_subs
 
-        # 抽 batch 内的 subdomain + sources
+        # take the subdomains + the sources out of the batch
         local batch_hosts=""
         local batch_sources=""
         local i=$batch_idx
@@ -220,25 +234,29 @@ PY
                 batch_sources="$src"
             else
                 batch_hosts="$batch_hosts"$'\n'"$sub"
-                # sources 在 batch 内不一致 → 暂时以第一个为准(各 sub 独立
-                # source 集合是后期扩展;第一版简化)
+                # the sources differ inside the batch -> for now the first one wins
+                # (a separate source set per sub
+                # is a later extension; the first version simplifies it)
                 :
             fi
             i=$((i + 1))
         done
 
-        # 写 tmpfile 给 scan_urls.py
+        # write the tmpfile for scan_urls.py
         local tmp_hosts
         tmp_hosts="$(mktemp)"
         printf '%s\n' "$batch_hosts" > "$tmp_hosts"
 
         log "daily-url batch: $((batch_idx+1))-$end / $n_subs, sources=$batch_sources"
 
-        # 引擎路由:DAILY_URL_ENGINE = katana(默认) | urlfinder | auto
-        #   - katana  : 走 modules/public/katana/katana_enrich.sh(字段对齐 httpx,body 落库)
-        #   - urlfinder: 走 scan_urls.py 老行为(URLFinder + ffuf + gau,中文敏感信息专用)
-        #   - auto    : katana 失败时 fallback urlfinder(best-effort)
-        # katana 模块不存在 / 二进制没装 / install.sh 没跑 → best-effort 跳过该 batch
+        # the engine routing: DAILY_URL_ENGINE = katana (default) | urlfinder | auto
+        #   - katana  : goes through modules/public/katana/katana_enrich.sh (the
+        #               fields are aligned with httpx, the body is stored)
+        #   - urlfinder: goes through the old scan_urls.py behaviour (URLFinder +
+        #               ffuf + gau, the one with the Chinese sensitive information)
+        #   - auto    : falls back to urlfinder when katana fails (best-effort)
+        # the katana module does not exist / the binary is not installed / install.sh
+        # never ran -> the batch is skipped (best-effort)
         local engine="${DAILY_URL_ENGINE:-katana}"
         local batch_rc=0
         local KATANA_ENRICH="$RECON_ROOT/public/katana/katana_enrich.sh"
@@ -304,7 +322,7 @@ PY
             log "daily-url batch $((batch_idx+1))-$end FAILED (rc=$batch_rc)"
             batch_failed=$((batch_failed + 1))
         else
-            # 成功后:为这个 batch 涉及的所有 sub 写 last_run_at
+            # after the success: write last_run_at for every sub this batch touched
             local i=$batch_idx
             while [ $i -lt $end ]; do
                 local line="${SCHED_LINES[$i]}"
@@ -343,15 +361,16 @@ PY
     return 0
 }
 
-# ---- onboarding guard (pdtm-only) ----
-# If the business exists in `businesses` but has zero '可测资产' scopes,
+# ---- the onboarding guard (pdtm only) ----
+# If the business exists in `businesses` but has zero 'measurable asset' scopes,
 # pdtm is skipped with a "needs_onboarding" warning. enscan and icp
-# don't depend on scopes, so they still run.
+# do not depend on the scopes, so they still run.
 #
-# Also fetch recon_business_config.tcp so we can pass --tcp to pipeline.sh
-# when the operator opted this business into TCP port scanning. The
+# It also fetches recon_business_config.tcp, so that --tcp can be passed to
+# pipeline.sh
+# when the operator opted this business into the TCP port scanning. The
 # orchestrator (daily_monitor.sh) may pre-set ENABLE_TCP; the DB lookup
-# here is the fallback for direct invocations.
+# here is the fallback for the direct invocations.
 if [ -f "$DB" ]; then
     eval "$(python3 - "$DB" "$BIZ" <<'PY' 2>/dev/null
 import sqlite3, sys
@@ -444,11 +463,12 @@ else
 fi
 
 if has_stage icp; then
-    # icp guard: business exists in DB but no companies registered →
-    # icp_mapp_query.py would print "暂无子公司" and exit 1. Treat as
-    # needs_onboarding (skip, don't fail) — same convention as the pdtm
+    # the icp guard: the business exists in the DB but no companies are registered ->
+    # icp_mapp_query.py would print "no subsidiaries yet" and exit 1. It is
+    # treated as
+    # needs_onboarding (skip, do not fail) — the same convention as the pdtm
     # scope guard above. pdtm still runs; icp genuinely has nothing to do
-    # without companies to iterate.
+    # without the companies to iterate.
     if [ -n "${GUARD_BIZ_ID:-}" ] && [ "${GUARD_COMPANY_COUNT:-0}" = "0" ]; then
         log "biz='$BIZ' exists (id=$GUARD_BIZ_ID) but has 0 companies → needs_onboarding_companies; skipping icp"
         if [ -n "${WARNINGS_FILE:-}" ]; then
@@ -469,9 +489,11 @@ else
     ICP_SKIP=1
 fi
 
-# daily-url stage:读 web_subdomain_scan_schedule 跑 URL 资产扫描。
-# 顺序:放最末(enscan→pdtm→icp→daily-url)。无 schedule 行 = "空 schedule,无 sub"
-# → 视为 skipped,不设 bit3。任一 batch 失败 → 设 bit3。
+# the daily-url stage: read the web_subdomain_scan_schedule and run the URL asset
+# scan.
+# The order: it goes last (enscan->pdtm->icp->daily-url). No schedule row =
+# "empty schedule, no sub"
+# -> it is treated as skipped and bit3 is not set. A failing batch -> bit3 is set.
 if has_stage daily-url; then
     if run_stage_daily_url; then
         log "daily-url ok for biz=$BIZ"
@@ -493,11 +515,14 @@ RC=0
 [ "$ICP_RC"  -ne 0 ] && RC=$((RC | 4))
 [ "${URL_RC:-0}" -ne 0 ] && RC=$((RC | 8))
 
-# 2026-10-01: scan_count +1 (冷启动期守护).
-# 只在所有阶段都成功 (RC=0) 时 +1. 失败保留原值,下次 cron 重试时再算.
-# 触发时机: 业务 pipeline 全跑完, BIZ 已经在 DB 里. daily_monitor.sh 不会
-# 再 +1 (已撤回到此处单点),所以 operator 手动 ./srcradar daily run_one_business
-# 也算"一次扫描" -- 与设计目标一致.
+# 2026-10-01: scan_count +1 (the cold start guard).
+# It is only +1 when every stage succeeded (RC=0). A failure keeps the old value
+# and the next cron retry counts it then.
+# When it runs: the business pipeline has finished and the BIZ is already in the DB.
+# daily_monitor.sh does not
+# +1 any more (it was withdrawn back to this single point), so an operator running
+# ./srcradar daily run_one_business by hand
+# also counts as "one scan" — the same as the design goal.
 if [ "$RC" -eq 0 ] && [ -n "${BIZ:-}" ] && [ -n "${DB:-}" ] && [ -f "$DB" ]; then
     python3 - "$DB" "$BIZ" >>"${LOG_FILE:-/dev/null}" 2>&1 <<'PYINCR' || log "scan_count +1 失败 (非致命)"
 import sqlite3, sys

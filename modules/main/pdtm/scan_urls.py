@@ -1,32 +1,43 @@
 #!/usr/bin/env python3
-"""scan_urls.py — URL 级资产扫描(ffuf / URLFinder / gau) → web_hash_urls 表。
+"""scan_urls.py — the URL level asset scan (ffuf / URLFinder / gau) -> the web_hash_urls table.
 
-与 import_scan_results.py 的关系:
-  - 独立模块,不依赖 import_scan_results.py 的内部函数
-  - 入库风格对齐(_s() coerce / now() / PRAGMA foreign_keys / with conn 事务)
-  - 调用方:dashboard subprocess 调 `python3 scan_urls.py scan-urls --...`
+How it relates to import_scan_results.py:
+  - it is a standalone module and does not depend on the internal functions of
+    import_scan_results.py
+  - the way it writes to the database is aligned (_s() coerce / now() / PRAGMA
+    foreign_keys / the with conn transaction)
+  - the caller: the dashboard subprocess calls `python3 scan_urls.py scan-urls --...`
 
-跨项目依赖(用户约束):
-  - daily(dashboard.py) → pdtm(scan_urls.py):单向 subprocess
-  - daily 升级不影响 pdtm;失败吞掉(best-effort,和 import_scan_results → score.py 一致)
+The cross-project dependency (a user constraint):
+  - daily(dashboard.py) -> pdtm(scan_urls.py): a one-way subprocess call
+  - a daily upgrade does not affect pdtm; a failure is swallowed (best-effort, the
+    same as import_scan_results -> score.py)
 
-不接 diff.py / cron:
-  - 不写 change_type 触发器(Q3:仅 dashboard 手动)
-  - 不刷 web_hashes.url_count(由 dashboard 在 reload 前一次性 UPDATE)
+It does not join diff.py / the cron:
+  - it does not write the change_type triggers (Q3: the dashboard only, by hand)
+  - it does not refresh web_hashes.url_count (the dashboard does a single UPDATE
+    before the reload)
 
-字段语义参考 web_subdomains(用户要求"和子域名资产有类似的字段"),
-URL 特有字段(host/scheme/path/url/source/word_count)做补充。
+The field semantics follow web_subdomains (the user asked for "fields similar to
+the subdomain assets"),
+with the URL specific fields (host/scheme/path/url/source/word_count) as the
+addition.
 
-工具二进制路径(运行时探测):
-  - ffuf / URLFinder / gau 均不在标准 PATH,优先读环境变量 FFUF_BIN /
-    URLFINDER_BIN / GAU_BIN;未设则用 shutil.which 探测;都失败则启动时报错。
-  - URLFinder 是中文社区版(pingc0y),GitHub 上无同名官方包,需自行准备。
+The tool binary paths (probed at runtime):
+  - ffuf / URLFinder / gau are all outside the standard PATH, so the environment
+    variables FFUF_BIN /
+    URLFINDER_BIN / GAU_BIN are read first; when they are not set shutil.which is
+    used; when every probe fails it raises at startup.
+  - URLFinder is the Chinese community edition (pingc0y), there is no official
+    package with the same name on GitHub, so it has to be prepared by hand.
 
-默认 wordlist: SecLists Discovery/Web-Content/common.txt
-  - 优先读 SCAN_URLS_WORDLIST 环境变量;未设则按以下顺序探测:
+The default wordlist: SecLists Discovery/Web-Content/common.txt
+  - the SCAN_URLS_WORDLIST environment variable is read first; when it is not set
+    the following order is probed:
       1. $RECON_ROOT/tools/wordlists/SecLists-master/Discovery/Web-Content/common.txt
       2. ~/tools/wordlists/SecLists-master/Discovery/Web-Content/common.txt
-    都失败则报错(让运维明确装位置,而不是静默跑错字典)。
+    when both fail it raises (so that the operator knows where to install it,
+    instead of silently running with the wrong dictionary).
 """
 from __future__ import annotations
 
@@ -46,11 +57,11 @@ from urllib.parse import urlparse
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "db" / "recon.sqlite3"
 
-# 工具二进制:env > PATH > 报错(不再硬编码 /home/ubuntu/...)
+# the tool binaries: env > PATH > raise (the hardcoded /home/ubuntu/... is gone)
 
 
 def _resolve_bin(env_var: str, fallback_name: str) -> str:
-    """env > shutil.which > 报错。返回绝对路径字符串。"""
+    """env > shutil.which > raise. Returns the absolute path as a string."""
     p = os.environ.get(env_var)
     if p and os.path.isfile(p) and os.access(p, os.X_OK):
         return p
@@ -64,10 +75,11 @@ def _resolve_bin(env_var: str, fallback_name: str) -> str:
 
 
 def _resolve_default_wordlist_path() -> Path:
-    """默认 wordlist 路径(env > $RECON_ROOT/tools/wordlists > ~/tools/wordlists)。
+    """The default wordlist path (env > $RECON_ROOT/tools/wordlists > ~/tools/wordlists).
 
-    不在此处强制要求文件存在 —— 下游 _resolve_wordlist(arg) 在最终都失败时
-    才会报错,给运维留足配置空间。
+    The file is not required to exist here - the downstream _resolve_wordlist(arg)
+    only raises when every
+    probe failed, which leaves the operator room to configure it.
     """
     env = os.environ.get("SCAN_URLS_WORDLIST")
     if env:
@@ -85,67 +97,69 @@ def _resolve_default_wordlist_path() -> Path:
     )
     if candidate2.is_file():
         return candidate2
-    # 都探测不到,仍返回一个"最可能的位置"作占位(下游报错时给出原始路径)
+    # when nothing can be probed it still returns a "most likely location" as a placeholder (the downstream error then shows the original path)
     return candidate2
 
 
-FFUF_BIN: str = ""             # 由 main() 启动时 _resolve_bin() 填充
-URLFINDER_BIN: str = ""        # 由 main() 启动时 _resolve_bin() 填充
-GAU_BIN: str = ""              # 由 main() 启动时 _resolve_bin() 填充
-DEFAULT_WORDLIST: Path = _resolve_default_wordlist_path()  # 占位路径,运行时校验
+FFUF_BIN: str = ""             # filled in by _resolve_bin() at the start of main()
+URLFINDER_BIN: str = ""        # filled in by _resolve_bin() at the start of main()
+GAU_BIN: str = ""              # filled in by _resolve_bin() at the start of main()
+DEFAULT_WORDLIST: Path = _resolve_default_wordlist_path()  # a placeholder path, validated at runtime
 
-# 单次 scan-urls 上限
-MAX_HOSTS = 50                 # 单次手动扫描上限(host 数,防 dashboard 卡死)
-URLFINDER_MAX_URLS = 5000      # 单 host urlfinder 抓取上限
-GAU_MAX_URLS = 5000            # 单 host gau 抓取上限
-FFUF_RATE = 100                # ffuf 速率(每秒请求数),防止对外网乱扫
-FFUF_TIMEOUT = 30              # ffuf 单请求超时(秒)
-FFUF_THREADS = 20              # ffuf 并发
-URLFINDER_TIMEOUT = 1200       # URLFinder 单 host 超时(秒) — 用户 2026-08-28 拍板加到 1200s
-                                # 原因:large-assets.example.com 等大站 300s 抓不完,gau 被动 0 URL,ffuf 字典不全
-                                # → 必须给 urlfinder 足够时间(20 分钟)才能稳定抓到完整 URL 集合
-                                # 也被 run_ffuf() 共用(命名遗留,不影响 ffuf 实际语义)
-GAU_TIMEOUT = 120              # gau 单 host 超时(秒)
-PER_HOST_OVERALL_TIMEOUT = 600 # dashboard subprocess 整体上限(用户拍板)
+# the per-invocation scan-urls limits
+MAX_HOSTS = 50                 # the per manual scan host limit (so the dashboard cannot hang)
+URLFINDER_MAX_URLS = 5000      # the per host urlfinder fetch limit
+GAU_MAX_URLS = 5000            # the per host gau fetch limit
+FFUF_RATE = 100                # the ffuf rate (requests per second), to keep it from scanning the outside world at random
+FFUF_TIMEOUT = 30              # the ffuf per request timeout (seconds)
+FFUF_THREADS = 20              # the ffuf concurrency
+URLFINDER_TIMEOUT = 1200       # the URLFinder per host timeout (seconds) - the user decided on 2026-08-28 to raise it to 1200s
+                                # the reason: a big site such as large-assets.example.com does not finish in 300s, gau passively returns 0 URLs and the ffuf dictionary is incomplete
+                                # -> urlfinder needs enough time (20 minutes) to reliably collect the full URL set
+                                # it is also shared by run_ffuf() (a naming leftover, it does not affect the actual ffuf semantics)
+GAU_TIMEOUT = 120              # the gau per host timeout (seconds)
+PER_HOST_OVERALL_TIMEOUT = 600 # the overall limit of the dashboard subprocess (the user decided)
 
-# hostname 校验(对齐 import_scan_results.py:HOSTNAME_RE)
+# the hostname validation (aligned with import_scan_results.py:HOSTNAME_RE)
 HOSTNAME_RE = re.compile(r"^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$")
 
-# URL schema 后允许的合法 source
+# the legitimate sources after the URL schema
 VALID_SOURCES = ("ffuf", "urlfinder", "gau")
 
-# 危险路由关键词清单(用户决策 Q7:URL 路径里出现即标记 risk_flag)
-# 涵盖:敏感操作 / 鉴权 / 调试 / 数据导出 / 配置 / 文件泄露 / 管理面板 / 框架特定
+# the dangerous route keyword list (user decision Q7: it is flagged as risk_flag as soon as it appears in the URL path)
+# it covers: the sensitive operations / the authentication / the debugging / the data export / the configuration / the file leak / the admin panel / the framework specific
 RISK_KEYWORDS = (
-    # 敏感操作
+    # the sensitive operations
     "delete", "remove", "destroy", "drop", "truncate", "reset", "purge",
     "kill", "shutdown", "terminate",
-    # 鉴权 / 凭据
+    # the authentication / the credentials
     "login", "signin", "signup", "register", "auth", "authenticate",
     "token", "session", "sso", "cas", "oauth", "jwt", "credentials",
-    # 调试 / 内部
+    # the debugging / the internals
     "debug", "trace", "stacktrace", "exception", "errorlog",
     "actuator", "metrics", "healthcheck", "prometheus",
-    # API / 文档暴露
+    # the API / the exposed documentation
     "swagger", "api-docs", "openapi", "graphql",
-    # 数据导出 / 备份 / 凭据泄露
+    # the data export / the backup / the credential leak
     "backup", "dump", "export", "import", "sql", "phpmyadmin",
     "phpinfo", ".env", ".git", "web.config", "htaccess",
-    # 管理面板
+    # the admin panels
     "admin", "administrator", "console", "manager", "dashboard",
     "wp-admin", "wp-login", "backend", "manage",
-    # 命令 / 系统
+    # the commands / the system
     "shell", "cmd", "exec", "system", "runtime",
-    # 框架特有
+    # the framework specific
     "actuator", "jolokia", "env", "config",
 )
 
 
 def _detect_risk_flags(path: str) -> str:
-    """扫描 path(小写)里出现的高危关键词,返回逗号分隔字符串。无 = 空串。
+    """Scan the path (lowercased) for the high risk keywords and return a comma
+    separated string. Nothing found = an empty string.
 
-    仅匹配 path 部分(不含 query string / fragment)。
-    关键词是子串匹配,不要求是完整段(例如 /v1/admin/login 会同时命中 admin 和 login)。
+    Only the path part is matched (no query string / fragment).
+    The keywords match as a substring, they do not have to be a whole segment
+    (for example /v1/admin/login hits both admin and login).
     """
     if not path:
         return ""
@@ -158,16 +172,18 @@ def _detect_risk_flags(path: str) -> str:
 
 
 def _detect_is_static(path: str) -> int:
-    """用户 2026-08-26 拍板:
-      - 取 path 中最后一个 '.' 之后的小写后缀
-      - 没有 '.' → 0 (非静态)
-      - 后缀 == 'js' 或 'css' → 1 (静态)
-      - 其它后缀(.png/.jpg/.svg/.woff 等)→ 0 (非静态,只看 js/css)
-      - 后缀为空(路径以 '.' 结尾,如 /v1/)→ 0 (非静态)
+    """The user decided on 2026-08-26:
+      - take the lowercase suffix after the last "." in the path
+      - no "." -> 0 (not static)
+      - the suffix is "js" or "css" -> 1 (static)
+      - any other suffix (.png/.jpg/.svg/.woff and the like) -> 0 (not static, only js/css count)
+      - an empty suffix (the path ends with ".", for example /v1/) -> 0 (not static)
 
-    触发器 trg_whu_au 用 is_static=0 作 gate — 静态行永远不参与
-    change_type 修改,严格满足"只有满足当前子域 && 非 js/css 才可能
-    修改 change_type"。
+    The trigger trg_whu_au uses is_static=0 as its gate - a static row never
+    takes part in a
+    change_type change, which satisfies "only a subdomain that is in scope and
+    is not js/css can
+    have its change_type modified".
     """
     if not path:
         return 0
@@ -180,7 +196,7 @@ def _detect_is_static(path: str) -> int:
 
 
 # ============================================================
-# 基础工具
+# the basic helpers
 # ============================================================
 
 def now() -> str:
@@ -188,9 +204,10 @@ def now() -> str:
 
 
 def _s(v: Any) -> Any:
-    """Bind-safe coerce,与 import_scan_results._s 对齐。
+    """The bind-safe coerce, aligned with import_scan_results._s.
 
-    httpx / ffuf 字段偶发 title=None / dict / 异常类型,直接 bind 会炸。
+    The httpx / ffuf fields occasionally carry title=None / dict / an odd type,
+    and binding those directly blows up.
     """
     if v is None:
         return None
@@ -200,13 +217,13 @@ def _s(v: Any) -> Any:
 
 
 def _log(stage: str, msg: str) -> None:
-    """stderr 单写;dashboard subprocess 收 stdout,这里只 stderr 不污染。"""
+    """stderr only; the dashboard subprocess reads stdout, so writing to stderr here does not pollute it."""
     sys.stderr.write(f"[scan_urls][{stage}] {msg}\n")
     sys.stderr.flush()
 
 
 # ============================================================
-# 入口解析
+# the entry point parsing
 # ============================================================
 
 def _read_hosts_file(path: Path) -> list[str]:
@@ -222,7 +239,7 @@ def _read_hosts_file(path: Path) -> list[str]:
 
 
 def _resolve_wordlist(arg: str | None) -> Path:
-    """wordlist 优先级:CLI --wordlist > 环境变量 SCAN_WORDLIST > 默认 common.txt"""
+    """The wordlist priority: the CLI --wordlist > the environment variable SCAN_WORDLIST > the default common.txt"""
     if arg:
         p = Path(arg).expanduser()
         if not p.exists():
@@ -242,14 +259,16 @@ def _resolve_wordlist(arg: str | None) -> Path:
 
 
 # ============================================================
-# 三个扫描器
+# the three scanners
 # ============================================================
 
 def run_ffuf(seed_url: str, wordlist: Path) -> list[dict]:
-    """ffuf 单 host 爆破。返回 [{url, status_code, content_type, content_length, word_count}]。
+    """The ffuf brute force for a single host. Returns
+    [{url, status_code, content_type, content_length, word_count}].
 
-    - 只保留"主域名内"的命中(`-fl 0` 过滤掉纯 404 等无响应)
-    - status_code / content_type / length / words 全部来自 ffuf JSON
+    - only the hits "inside the main domain" are kept (`-fl 0` filters out the
+      plain 404 and the other responses with no content)
+    - status_code / content_type / length / words all come from the ffuf JSON
     """
     if not Path(FFUF_BIN).exists():
         raise RuntimeError(f"ffuf 不存在: {FFUF_BIN}")
@@ -262,21 +281,21 @@ def run_ffuf(seed_url: str, wordlist: Path) -> list[dict]:
             FFUF_BIN,
             "-u", f"{seed_url.rstrip('/')}/FUZZ",
             "-w", str(wordlist),
-            "-mc", "200,201,202,204,301,302,307,308,401,403",  # 不扫 5xx
-            "-ac",                                       # 自动 calibration(过滤噪音)
-            "-fl", "0",                                  # 过滤 0 长响应
+            "-mc", "200,201,202,204,301,302,307,308,401,403",  # the 5xx are not scanned
+            "-ac",                                       # the automatic calibration (filters the noise)
+            "-fl", "0",                                  # filters the responses with a length of 0
             "-rate", str(FFUF_RATE),
             "-timeout", str(FFUF_TIMEOUT),
             "-t", str(FFUF_THREADS),
             "-H", "User-Agent: Mozilla/5.0",
             "-of", "json",
             "-o", out_path,
-            "-s",                                         # 静默,只输出 JSON 文件
+            "-s",                                         # silent, it only writes the JSON file
         ]
         subprocess.run(
             cmd, capture_output=True, text=True, timeout=URLFINDER_TIMEOUT, check=False
         )
-        # ffuf 退出码非零大多是 rate-limit 触发,JSON 文件可能仍含部分命中
+        # a non-zero ffuf exit code is mostly a rate limit, the JSON file may still hold some of the hits
         data = json.loads(Path(out_path).read_text(encoding="utf-8"))
         results = data.get("results", [])
     except subprocess.TimeoutExpired:
@@ -299,7 +318,7 @@ def run_ffuf(seed_url: str, wordlist: Path) -> list[dict]:
         out.append({
             "url": url,
             "status_code": r.get("status"),
-            "content_type": None,  # ffuf 不输出 content-type;留 None
+            "content_type": None,  # ffuf does not output the content-type; it stays None
             "content_length": r.get("length"),
             "word_count": r.get("words"),
         })
@@ -307,30 +326,34 @@ def run_ffuf(seed_url: str, wordlist: Path) -> list[dict]:
 
 
 def run_urlfinder(seed_url: str) -> list[dict]:
-    """URLFinder(中文版 by pingc0y)主动爬虫。返回 [{url, status_code, content_length, title}]。
+    """The URLFinder active crawler (the Chinese edition by pingc0y). Returns
+    [{url, status_code, content_length, title}].
 
-    - 命令:`URLFinder -m 3 -s all -o <dir> -u <url>`
-    - 输出 JSON 结构(实测):
+    - the command: `URLFinder -m 3 -s all -o <dir> -u <url>`
+    - the output JSON structure (as measured):
         {
-          "domain": [...],   # 子域名
-          "url": [...],      # 主动爬到的 URL(主目标域内)
-          "urlOther": [...], # 站外 URL(可选录入)
-          "js": [...],       # JS 文件
+          "domain": [...],   # the subdomains
+          "url": [...],      # the URLs it crawled actively (inside the main target domain)
+          "urlOther": [...], # the off-site URLs (optional, they are recorded)
+          "js": [...],       # the JS files
           "fuzz": [...],
           "info": {...}
         }
-      每条 entry 字段(首字母大写,值是字符串):
+      the fields of an entry (the first letter is capitalised, the value is a string):
         {
           "Url":     "...",
-          "Status":  "200",       # 字符串,需 int() 转换
-          "Size":    "34253",     # 字节数,字符串,需 int() 转换
-          "Title":   "...",       # HTML title
+          "Status":  "200",       # a string, it needs an int() conversion
+          "Size":    "34253",     # the byte count, a string, it needs an int() conversion
+          "Title":   "...",       # the HTML title
           "Redirect":"...",
-          "Source":  "..."        # 哪个页面里链过来的
+          "Source":  "..."        # the page it was linked from
         }
-      我们抽 url + urlOther 两个 bucket,每个 entry 都提取 Size/Title/Status
-      (之前漏 Size/Title,size 列一直是空,用户拍板"应该有")。
-    - 也支持退路:不是 JSON 时按纯文本逐行解析。
+      We take the url + urlOther buckets and extract Size/Title/Status from every
+      entry
+      (Size/Title used to be missed, so the size column was always empty and the
+      user decided it "should be there").
+    - there is a fallback too: when the output is not JSON it is parsed line by
+      line as plain text.
     """
     if not Path(URLFINDER_BIN).exists():
         raise RuntimeError(f"URLFinder 不存在: {URLFINDER_BIN}")
@@ -368,15 +391,17 @@ def run_urlfinder(seed_url: str) -> list[dict]:
             return [{"url": u} for u in urls[:URLFINDER_MAX_URLS]]
 
         def _to_int(v: Any) -> int | None:
-            """URLFinder/ffuf 的 Status/Size 字段是字符串("200" / "0")。
+            """The Status/Size fields of URLFinder/ffuf are strings ("200" / "0").
 
-            特例:URLFinder 对"疑似危险路由,已跳过验证"的 URL 返回 Status="0"
-            表示未探测 — 这种值映射成 None,避免被误判为 HTTP 0(无意义)。
+            A special case: URLFinder returns Status="0" for a URL it flagged as
+            "suspected dangerous route, verification skipped",
+            which means it was not probed - such a value maps to None, so that it
+            is not misread as HTTP 0 (which would be meaningless).
             """
             if v is None or v == "":
                 return None
             s = str(v).strip()
-            # URLFinder 的"已跳过"状态:0 / 0.0
+            # the "skipped" status of URLFinder: 0 / 0.0
             if s in ("0", "0.0", "null", "None"):
                 return None
             try:
@@ -384,10 +409,13 @@ def run_urlfinder(seed_url: str) -> list[dict]:
             except (ValueError, TypeError):
                 return None
 
-        # URLFinder 把"危险路由"信息直接放在 Title 字段里(如"疑似危险路由,已跳过验证")
-        # 我们抽取成独立 bool 列 is_dangerous,并保留 Title 原文(title 字段照常入库)
-        #   - is_dangerous = 1 表示该 URL 被 URLFinder 标记为危险
-        #   - danger_reason  = 危险原因描述(通常="疑似危险路由,已跳过验证")
+        # URLFinder puts the "dangerous route" information straight into the Title
+        # field (for example "suspected dangerous route, verification skipped")
+        # we extract it into a separate bool column is_dangerous and keep the
+        # original Title (the title field is stored as usual)
+        #   - is_dangerous = 1 means URLFinder flagged this URL as dangerous
+        #   - danger_reason  = the description of the reason (usually "suspected
+        #                      dangerous route, verification skipped")
         DANGER_TITLE_MARKERS = ("疑似危险", "危险路由", "已跳过验证", "danger", "risky")
 
         out: list[dict] = []
@@ -405,7 +433,7 @@ def run_urlfinder(seed_url: str) -> list[dict]:
                         continue
                     status_raw = entry.get("Status") or entry.get("status")
                     title_raw = entry.get("Title") or entry.get("title") or None
-                    # 危险标记:URLFinder 把"危险"信号写在 Title 字段
+                    # the danger flag: URLFinder writes the "dangerous" signal into the Title field
                     is_dangerous = 0
                     danger_reason = ""
                     if title_raw:
@@ -425,7 +453,7 @@ def run_urlfinder(seed_url: str) -> list[dict]:
                         "danger_reason": danger_reason,
                     })
         elif isinstance(data, list):
-            # 退路:顶层就是 list of dicts
+            # the fallback: the top level is a list of dicts
             for entry in data:
                 if isinstance(entry, dict):
                     url = entry.get("url") or entry.get("Url") or entry.get("URL")
@@ -458,17 +486,17 @@ def run_urlfinder(seed_url: str) -> list[dict]:
 
 
 def run_gau(domain: str) -> list[dict]:
-    """gau 被动扫描(wayback + otx + commoncrawl)。
+    """The gau passive scan (wayback + otx + commoncrawl).
 
-    - 输入:域名(hostname,不带 scheme)
-    - 输出:txt,每行一个 URL
+    - the input: the domain (the hostname, without the scheme)
+    - the output: txt, one URL per line
     """
     if not Path(GAU_BIN).exists():
         raise RuntimeError(f"gau 不存在: {GAU_BIN}")
     if not shutil.which(GAU_BIN) and not Path(GAU_BIN).exists():
         raise RuntimeError(f"gau 不存在: {GAU_BIN}")
     try:
-        # gau 的 --timeout 是纯数字秒数(NOT "30s");version<2.2 老版本才支持 "30s"
+        # the --timeout of gau is a plain number of seconds (NOT "30s"); only the versions before 2.2 support "30s"
         proc = subprocess.run(
             [GAU_BIN, "--threads", "5", "--timeout", "30", domain],
             capture_output=True, text=True, timeout=GAU_TIMEOUT, check=False,
@@ -487,11 +515,11 @@ def run_gau(domain: str) -> list[dict]:
 
 
 # ============================================================
-# 入库
+# the database write
 # ============================================================
 
 def _parse_url(url: str) -> dict | None:
-    """拆 url → {scheme, host, port, path}。失败返回 None(跳过)。"""
+    """Split the url -> {scheme, host, port, path}. Returns None on failure (it is skipped)."""
     try:
         u = urlparse(url)
     except ValueError:
@@ -517,14 +545,18 @@ def persist(
     source: str,
     rows: list[dict],
 ) -> int:
-    """batch INSERT web_hash_urls。
+    """The batch INSERT into web_hash_urls.
 
-    ON CONFLICT DO UPDATE 语义(SQLite 的 INSERT-or-REPLACE 简化版):
-      - 新行 → INSERT, rowcount=1
-      - 冲突行 → UPDATE(更新 last_seen / fetched_at / status_code 等), rowcount=1
+    The ON CONFLICT DO UPDATE semantics (the simplified INSERT-or-REPLACE of
+    SQLite):
+      - a new row -> INSERT, rowcount=1
+      - a conflicting row -> UPDATE (it updates last_seen / fetched_at /
+        status_code and the like), rowcount=1
 
-    返回**新插入行数**(对比 rows 与 DB 已有集合的差集)。
-    SQL rowcount 在 SQLite 里不可靠(更新也算 1),所以走"先查再插"两阶段。
+    It returns the **number of newly inserted rows** (the difference between the
+    rows and the set that is already in the DB).
+    The SQL rowcount is not reliable in SQLite (an update counts as 1 too), so it
+    goes through the two phases of "query first, then insert".
     """
     ts = now()
     parsed_rows = []
@@ -539,22 +571,22 @@ def persist(
             "path": info["path"],
             "url": r["url"],
             "status_code": r.get("status_code"),
-            "title": r.get("title"),                # URLFinder 才有
+            "title": r.get("title"),                # only URLFinder has it
             "content_type": r.get("content_type"),
             "content_length": r.get("content_length"),  # ffuf + URLFinder
-            "word_count": r.get("word_count"),         # 仅 ffuf
-            "redirect": r.get("redirect"),             # URLFinder 才有
-            "link_source": r.get("link_source"),       # URLFinder 才有(来自哪个上游页面)
-            "risk_flag": _detect_risk_flags(info["path"]),  # path 派生;所有 source 都算
-            "is_dangerous": r.get("is_dangerous", 0),  # URLFinder 主动标记(从 Title 字段抽)
+            "word_count": r.get("word_count"),         # only ffuf
+            "redirect": r.get("redirect"),             # only URLFinder has it
+            "link_source": r.get("link_source"),       # only URLFinder has it (the upstream page it came from)
+            "risk_flag": _detect_risk_flags(info["path"]),  # derived from the path; it counts for every source
+            "is_dangerous": r.get("is_dangerous", 0),  # URLFinder flagged it itself (extracted from the Title field)
             "danger_reason": r.get("danger_reason", ""),
-            "is_static": _detect_is_static(info["path"]),  # 路径后缀 .js/.css 判定
+            "is_static": _detect_is_static(info["path"]),  # the .js/.css suffix of the path decides it
         })
 
     if not parsed_rows:
         return 0
 
-    # Step 1: 取本 (hash_id, subdomain, source) 已有的 URL 集合(用于算 new)
+    # Step 1: take the set of URLs that this (hash_id, subdomain, source) already has (it is used to count the new ones)
     existing = {
         r[0] for r in conn.execute(
             "SELECT url FROM web_hash_urls "
@@ -563,7 +595,7 @@ def persist(
         ).fetchall()
     }
 
-    # Step 2: INSERT OR IGNORE + UPDATE(分两步避免 rowcount 误报)
+    # Step 2: INSERT OR IGNORE + UPDATE (two steps, so that the rowcount cannot be misreported)
     sql = """
         INSERT INTO web_hash_urls (
             hash_id, business_id, subdomain, source,
@@ -619,7 +651,7 @@ def persist(
 
 
 def update_hash_url_count(conn: sqlite3.Connection, hash_id: int) -> None:
-    """更新 web_hashes.url_count = 当前 active URL 数。"""
+    """Update web_hashes.url_count = the current number of active URLs."""
     conn.execute("""
         UPDATE web_hashes
            SET url_count = (
@@ -631,23 +663,30 @@ def update_hash_url_count(conn: sqlite3.Connection, hash_id: int) -> None:
 
 
 # ============================================================
-# 主入口
+# the main entry point
 # ============================================================
 
 def _resolve_hash_id(conn: sqlite3.Connection, business_id: int, subdomain: str) -> int | None:
-    """给定 (business, subdomain) → 找对应 hash_id。
+    """Given (business, subdomain) -> find the matching hash_id.
 
-    规则:取该 subdomain 下**所有**(含 is_active=0 历史行)的 web_subdomains,
-    它们的 hash_id 在用户当前模型下应当一致(1 subdomain ≈ 1 hash);不一致时取
-    subdomain_count 最大的那个作为主 hash。
+    The rule: take **all** the web_subdomains of that subdomain (including the
+    historical rows with is_active=0),
+    their hash_id should be the same under the current model of the user
+    (1 subdomain ~= 1 hash); when they differ the one with
+    the largest subdomain_count is taken as the main hash.
 
-    用户 2026-08-27 决策:不再限定 `is_active=1`。
-    - 原因:URL 资产扫描的语义是"对子域",与 web_subdomains.is_active 维度独立;
-      实际场景里 is_active=0 的子域往往仍有大量 web_hash_urls 历史数据(本次
-      large-assets.example.com 即典型:web_subdomains is_active=0,web_hash_urls 3017 条)。
-    - 副作用 (DEPRECATED 2026-10-07): scan_urls 写入原本会触发 trg_ws_au 把 is_active=0 的子域通过 is_active
-      0→1 复活(写 change_type=4 / 6)。这是用户想要的"toggle 看复活"语义。
-    - web_hash_urls 自身 is_active 不受此影响(一直由 persist() 决定)。
+    The user decided on 2026-08-27: no longer restricted to `is_active=1`.
+    - the reason: the semantics of a URL asset scan are "per subdomain", which
+      is independent of the web_subdomains.is_active dimension;
+      in practice a subdomain with is_active=0 often still has a lot of
+      web_hash_urls history (large-assets.example.com is a typical case:
+      web_subdomains is_active=0, web_hash_urls has 3017 rows).
+    - the side effect (DEPRECATED 2026-10-07): the scan_urls write would trigger
+      trg_ws_au and revive a subdomain with is_active=0 through the is_active
+      0->1 path (writing change_type=4 / 6). That is the "toggle and watch the
+      revival" semantics the user wants.
+    - the is_active of web_hash_urls itself is not affected by this (it has always
+      been decided by persist()).
     """
     rows = conn.execute("""
         SELECT ws.hash_id, COUNT(*) AS c
@@ -663,11 +702,11 @@ def _resolve_hash_id(conn: sqlite3.Connection, business_id: int, subdomain: str)
 
 
 def cmd_scan_urls(args: argparse.Namespace) -> int:
-    """dashboard 调入口。返回码:
-        0 全部成功
-        2 hosts 文件错 / 校验失败
-        3 子扫描器失败
-        1 入库失败
+    """The entry point the dashboard calls. The return codes:
+        0 everything succeeded
+        2 the hosts file is wrong / the validation failed
+        3 a sub-scanner failed
+        1 the database write failed
     """
     db_path = Path(args.db).expanduser().resolve()
     business = args.business
@@ -678,7 +717,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
             sys.stderr.write(f"错误:未知 source '{s}'(合法: {VALID_SOURCES})\n")
             return 2
 
-    # 1) hosts 文件
+    # 1) the hosts file
     hosts_file = Path(args.hosts_file).expanduser().resolve()
     if not hosts_file.exists():
         sys.stderr.write(f"错误:hosts 文件不存在 {hosts_file}\n")
@@ -695,7 +734,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
         sys.stderr.write(f"错误:hostname 不合法 {invalid[:5]}\n")
         return 2
 
-    # 2) 业务存在?
+    # 2) does the business exist?
     conn = sqlite3.connect(db_path)
     try:
         bid_row = conn.execute(
@@ -707,7 +746,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
             return 2
         business_id = int(bid_row[0])
 
-        # 3) 逐 host 跑
+        # 3) run it host by host
         total_new = 0
         per_source_count = {s: 0 for s in sources}
         for host in hosts:
@@ -715,7 +754,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
             if hash_id is None:
                 _log("scan_urls", f"{host}: 该子域下无 active web_subdomains,跳过")
                 continue
-            # ffuf 需要 scheme://host(:port)/FUZZ;这里用 https 兜底,urlfinder 自带 url 形式
+            # ffuf needs scheme://host(:port)/FUZZ; https is used as the fallback here, while urlfinder takes the url form itself
             seed_url = f"https://{host}"
 
             for src in sources:
@@ -750,7 +789,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
                 _log("scan_urls",
                      f"{host} / {src}: persisted (new={new_count})")
 
-        # 4) 总结输出(stdout 给 dashboard 抓)
+        # 4) the summary output (stdout, the dashboard picks it up)
         summary = {
             "ok": True,
             "business": business,
@@ -766,7 +805,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
 
 
 # ============================================================
-# CLI 框架
+# the CLI framework
 # ============================================================
 
 def _main(argv: list[str]) -> int:
@@ -786,8 +825,9 @@ def _main(argv: list[str]) -> int:
 
     args = parser.parse_args(argv)
 
-    # 工具二进制解析(env > PATH > 报错)。
-    # 失败要让 dashboard 看到非零退出 + 清晰 stderr,而不是炸成 Python traceback。
+    # the tool binary resolution (env > PATH > raise).
+    # a failure has to show the dashboard a non-zero exit and a clear stderr, instead of
+    # blowing up as a Python traceback.
     global FFUF_BIN, URLFINDER_BIN, GAU_BIN
     try:
         if "ffuf" in args.sources.split(","):

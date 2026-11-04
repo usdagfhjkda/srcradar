@@ -1,47 +1,47 @@
 #!/usr/bin/env python3
-"""Recon-DB dashboard — ARL 4-tab style, served read-only on localhost.
+"""Recon-DB dashboard — the ARL 4-tab style, served read-only on localhost.
 
-Reads recon.sqlite3 directly via SQLite (no JSON snapshot layer). The cached
-HTML is rebuilt every `reload_interval` seconds (default 30, override with
-DASHBOARD_RELOAD env), or on demand via GET /refresh.
+Reads recon.sqlite3 directly through SQLite (there is no JSON snapshot layer). The cached
+HTML is rebuilt every `reload_interval` seconds (30 by default, override with the
+DASHBOARD_RELOAD env), or on demand through GET /refresh.
 
 Usage:
   dashboard.py [--db PATH] [--port PORT] [--host HOST]
 
-Defaults:
+The defaults:
   --db    <repo>/db/recon.sqlite3
   --port  8765
-  --host  127.0.0.1   <-- intentionally; see SECURITY below
+  --host  127.0.0.1   <-- intentionally; see the SECURITY section below
 
 SECURITY
 ========
-The server binds to 127.0.0.1 ONLY. To access it from your laptop, forward
+The server binds to 127.0.0.1 ONLY. To reach it from your laptop, forward
 the port over SSH:
 
     ssh -L 8765:127.0.0.1:8765 user@recon-host
     open http://localhost:8765
 
-No auth is enforced — the assumption is that the SSH tunnel authenticates the
-caller. If you change --host to 0.0.0.0 you will expose the recon data to
-everyone on the network; don't.
+No auth is enforced - the assumption is that the SSH tunnel authenticates the
+caller. If you change --host to 0.0.0.0 you expose the recon data to
+everyone on the network; do not.
 
 Endpoints
 =========
-  GET /                HTML page (rebuilt on reload interval / /refresh)
-  GET /api/snapshot    raw JSON dump of current DB state (same shape the old
-                       snapshot.py produced, for downstream scripts)
-  GET /refresh         force an immediate reload from DB; returns "reloaded"
-  GET /<业务名>        per-business view (e.g. /ExampleCo, /DemoCorp)
-  GET /<业务名>/new    per-business "new since last diff" view
-  GET /<业务名>/body/raw?url=<domain-url>&side=pre|cur
-                       raw HTTP body of one subdomain, as captured by the
-                       daily snapshot (side=pre) or the latest import
-                       (side=cur); body bytes are returned verbatim and
-                       rendered by the browser under a locked-down CSP
-  GET /diff            global "new since last diff" view
+  GET /                the HTML page (rebuilt on the reload interval / /refresh)
+  GET /api/snapshot    the raw JSON dump of the current DB state (the same shape
+                        the old snapshot.py produced, for the downstream scripts)
+  GET /refresh         forces an immediate reload from the DB; returns "reloaded"
+  GET /<business name>        the per-business view (e.g. /ExampleCo, /DemoCorp)
+  GET /<business name>/new    the per-business "new since the last diff" view
+  GET /<business name>/body/raw?url=<domain-url>&side=pre|cur
+                        the raw HTTP body of one subdomain, as captured by the
+                        daily snapshot (side=pre) or by the latest import
+                        (side=cur); the body bytes are returned verbatim and
+                        rendered by the browser under a locked-down CSP
+  GET /diff            the global "new since the last diff" view
   GET /health          "ok"
 
-The page is read-only — only GET is implemented.
+The page is read-only - only GET is implemented.
 """
 from __future__ import annotations
 import argparse
@@ -185,9 +185,12 @@ def _aggregate(snap: dict) -> dict:
     return {'captured_at': snap.get('captured_at', ''), 'row_counts': snap.get('row_counts', {}), 'tables': {'scopes': scopes, 'tcp_assets': tcp, 'web_subdomains': ws, 'web_hashes': wh}, 'biz': biz, 'by_host': {h: rows for (h, rows) in by_host.items()}, 'risk_by_host': dict(risk_by_host), 'port_class': dict(port_class_counter), 'risk_counter': dict(risk_counter), 'risky_open': risky_open, 'fp_rows': fp_rows, 'fat_hosts': fat_hosts, 'web_status_codes': dict(web_status_codes), 'web_techs': dict(web_techs), 'web_root_domains': dict(web_root_domains), 'web_fp_buckets': fp_buckets, 'companies': companies, 'mp_records': mp_records, 'oa_records': oa_records, 'comp_counts': list(comp_counts.values()), 'biz_stats': _per_biz_stats(tables, biz)}
 
 def _per_biz_stats(tables: dict, biz: dict[int, str]) -> list[dict]:
-    """Per-business asset counts — used by the home page 业务 card link list.
-    Empty rows (total == 0) are included so callers can decide to hide them.
-    mapp_records are counted via companies.company_id → business_id join."""
+    """The per-business asset counts — used by the business card link list on the
+    home page.
+    The empty rows (total == 0) are included so that the callers can decide to
+    hide them.
+    The mapp_records are counted through the companies.company_id -> business_id
+    join."""
     _BID_TABS = ('scopes', 'companies', 'web_subdomains', 'web_hashes', 'tcp_assets')
     bid_counter: dict[str, Counter] = {t: Counter((r.get('business_id') for r in tables.get(t, []) if r.get('business_id') is not None)) for t in _BID_TABS}
     comp_to_bid = {c['id']: c.get('business_id') for c in tables.get('companies', []) if c.get('business_id') is not None}
@@ -219,10 +222,13 @@ KATANA_ENRICH_TIMEOUT = 600
 SCAN_URLS_DEFAULT_WORDLIST = os.environ.get('SCAN_URLS_WORDLIST', '')
 
 def _scan_urls_default_wordlist_suggestion() -> str:
-    """表单建议值 —— 与 scan_urls.py._resolve_default_wordlist_path 同款探测。
+    """The form suggestion value — the same probing as
+    scan_urls.py._resolve_default_wordlist_path.
 
-    env 已显式设置时直接用 env;否则探测两个候选路径,有就用第一个命中的;
-    都探测不到返回空串(表单渲染空 input,提交后 scan_urls.py 那边再报错)。
+    When env is set explicitly it is used directly; otherwise the two candidate
+    paths are probed and the first hit is used;
+    when neither can be found it returns an empty string (the form renders an
+    empty input and scan_urls.py reports the error after the submit).
     """
     env = os.environ.get('SCAN_URLS_WORDLIST')
     if env:
@@ -243,20 +249,24 @@ def _risk_tag(risk: str) -> str:
     return f'<span class="tag {cls}">{label}</span>'
 
 def _build_scan_form(biz_name: str) -> str:
-    """对当前业务发起单点扫描的折叠表单。biz_name 为空则首页 / 全局视图不渲染。"""
+    """The collapsible form that starts a single point scan of the current business. When biz_name is empty the home page / the global view does not render it."""
     if not biz_name:
         return ''
     action = '/' + urllib.parse.quote(biz_name) + '/scan'
     return f'\n<details class="scan-form">\n  <summary>扫描并入库（向 {_e(biz_name)} 提交新域名）</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">一行一个域名，&le;{SCAN_MAX_HOSTS} 条；自动去重 / 小写 / 忽略空行与井号注释；\n    入库会同步触发 httpx 探测，结果刷新到本页面数据。</div>\n    <textarea name="hosts" rows="4" required\nplaceholder="example.com&#10;api.example.com"></textarea>\n    <div class="submit-row">\n      <button type="submit" class="btn primary">扫描并入库</button>\n      <span class="muted">同步等待（典型 5-30s）</span>\n    </div>\n  </form>\n</details>\n'
 
 def _build_scan_urls_form(biz_name: str) -> str:
-    """URL 资产扫描折叠表单(ffuf / URLFinder / gau)。点击 POST /<biz>/scan-urls。
+    """The URL asset scan collapsible form (ffuf / URLFinder / gau). It posts to
+    /<biz>/scan-urls.
 
-    设计目标:
-      - 只扫描已存在的 active 子域(POST handler 校验),不会扩散到未知域
-      - 默认 source 勾选 urlfinder(主动爬虫、无字典依赖、最稳)
-      - ffuf / gau 留给用户按需勾选
-      - wordlist 暂用 SCAN_URLS_DEFAULT_WORDLIST;高级用户可在表单里改路径
+    The design goals:
+      - only the active subdomains that already exist are scanned (the POST handler
+        validates that), so it never spreads to unknown domains
+      - urlfinder is checked by default (the active crawler, no dictionary
+        dependency, the most reliable one)
+      - ffuf / gau are left for the user to tick when they want them
+      - the wordlist uses SCAN_URLS_DEFAULT_WORDLIST for now; an advanced user
+        can change the path in the form
     """
     if not biz_name:
         return ''
@@ -334,20 +344,28 @@ def _score_cell(r: dict) -> str:
     return f'<td class="score-cell" data-hash-id="{hid}" data-num="{sort_key}"><input type="number" class="score-input" data-hash-id="{hid}" data-cur-score="{score_txt}" value="{score_txt}" min="-1000" max="1000" step="1" title="绝对值(0-100) 或 ±N 相对当前值" /><button type="button" class="score-save" data-hash-id="{hid}" title="保存 score + description">save</button><span class="desc-status" data-hash-id="{hid}"></span></td><td class="desc-cell" data-hash-id="{hid}"><input type="text" class="desc-input" data-hash-id="{hid}" value="{_e(desc)}" maxlength="500" placeholder="备注..." title="回车或 save 保存" /></td>'
 
 def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
-    """站点详情 — 隐藏无 TLD 的泛解析噪声（subdomain 不含 '.' 的全部剔除，
-    治 'http://a/' / 'http://j/' 这类单字符 wildcard 命中），按 response_hash
-    去重（每指纹一行，新增 count 列），点 hash 弹窗展示该 hash 下全部子域。
+    """The site details — the wildcard noise without a TLD is hidden (every
+    subdomain that does not contain a "." is dropped,
+    which takes care of the single character wildcard hits such as "http://a/" /
+    "http://j/"), deduplicated by response_hash
+    (one row per fingerprint, with a new count column), and clicking a hash opens
+    a modal that shows every subdomain under that hash.
 
-    行背景按 status_code 分级：5xx=红/4xx=黄/3xx=灰/2xx=绿/None=灰。
-    URL 列按端口拼接（80→http / 443→https / 其它→http://host:port）。
+    The row background is graded by status_code: 5xx=red / 4xx=yellow / 3xx=grey
+    / 2xx=green / None=grey.
+    The URL column is joined by port (80->http / 443->https / the others ->
+    http://host:port).
 
-    `diff_mode=True` (used by /diff and /<biz>/new): deduplication skipped,
-    one row per affected subdomain. A leading category column ("新"/"hash 变")
-    lets the user distinguish new entries from old (which the hash bucket alone
-    hides — same hash can appear on both / and /new).
+    `diff_mode=True` (used by /diff and /<biz>/new): the deduplication is skipped,
+    there is one row per affected subdomain. A leading category column ("new" /
+    "hash changed")
+    lets the user tell the new entries from the old ones (which the hash bucket
+    alone hides — the same hash can appear on both / and /new).
 
-    每行末尾追加「URL 详情」按钮,点击跳到 /<biz>/urls/<hash_id>(新页面,
-    按 hash_id 实时查 web_hash_urls 表 — 严格 lazy,不预加载)。
+    A "URL details" button is appended to the end of every row; clicking it goes
+    to /<biz>/urls/<hash_id> (a new page
+    that queries the web_hash_urls table live by hash_id - strictly lazy, nothing
+    is preloaded).
     """
     if biz_name:
         biz_quoted = urllib.parse.quote(biz_name)
@@ -387,9 +405,11 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
         return 1 if any(('一' <= c <= '\u9fff' for c in s)) else 0
 
     def cat_badge(cat: str) -> tuple[str, str]:
-        # reactivated (change_type & 4) 归到 "新": .tag-new 的 CSS 注释即
-        # "/new: 新 (added or reactivated)"。此前 reactivated 未映射, badge
-        # 落到 '?', 用户看不出是复活。
+        # a reactivated row (change_type & 4) counts as "new": the CSS comment of
+        # .tag-new is
+        # "/new: new (added or reactivated)". The reactivated case used to have no
+        # mapping, so the badge
+        # fell back to ?, and the user could not tell that it was a revival.
         return {
             'added':       ('tag-new', '新'),
             'reactivated': ('tag-new', '新'),
@@ -474,7 +494,7 @@ def _build_ports(agg: dict) -> str:
     return f"""\n<div class="filter">\n  <input id="q" placeholder="过滤 ip / hosts / service / category" />\n  &nbsp; {rc_html}\n</div>\n<div class="scroll-x"><table id="tcp-table">\n<thead><tr>\n  <th class="sortable" data-type="str">业务</th>\n  <th class="sortable" data-type="str">ip</th>\n  <th class="sortable" data-type="num">port</th>\n  <th class="sortable" data-type="str">hosts</th>\n  <th class="sortable" data-type="str">category</th>\n  <th class="sortable" data-type="str">service</th>\n  <th>risk</th>\n</tr></thead>\n<tbody>\n{rows_html or '<tr><td colspan="7" class="muted">无 tcp_assets</td></tr>'}\n</tbody>\n</table></div>\n<div class="muted">{len(rows)} 条 ip:port · IP 直读自 tcp_assets.ip；hosts 来自 tcp_assets.hosts（多 host 以逗号分隔）。</div>\n"""
 
 def _build_mapp(agg: dict, kind: str) -> str:
-    """小程序 / 公众号 详情页 — kind='mp' 取 mp_records，否则取 oa_records。"""
+    """The mini program / WeChat details page — kind="mp" takes mp_records, otherwise it takes oa_records."""
     records = agg['mp_records'] if kind == 'mp' else agg['oa_records']
     title = '小程序' if kind == 'mp' else '公众号'
     empty_msg = '暂无小程序数据' if kind == 'mp' else '暂无公众号数据'
@@ -483,7 +503,7 @@ def _build_mapp(agg: dict, kind: str) -> str:
     return f'''\n<div class="filter">\n  <input id="q-{kind}" placeholder="过滤 主体 / 名称 / 备案号 / 域名" />\n  &nbsp; <span class="muted">{len(records)} 条 {title}备案</span>\n</div>\n<div class="scroll-x"><table id="{kind}-table">\n<thead><tr>\n  <th class="sortable" data-type="str">主体</th>\n  <th class="sortable" data-type="str">名称</th>\n  <th class="sortable" data-type="str">备案号</th>\n  <th class="sortable" data-type="str">类型</th>\n  <th class="sortable" data-type="str">域名</th>\n  <th class="sortable" data-type="str">更新时间</th>\n</tr></thead>\n<tbody>\n{rows_html or f'<tr><td colspan="6" class="muted">{empty_msg}</td></tr>'}\n</tbody>\n</table></div>\n<script>\n(function() {{\n  const q = document.getElementById('q-{kind}');\n  const tbody = document.querySelector('#{kind}-table tbody');\n  if (!q || !tbody) return;\n  q.addEventListener('input', () => {{\n    const v = q.value.toLowerCase();\n    tbody.querySelectorAll('tr').forEach(tr => {{\n      tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none';\n    }});\n  }});\n}})();\n</script>\n'''
 
 def _build_companies(agg: dict) -> str:
-    """子公司详情 — 直接列 companies 表。"""
+    """The subsidiary details — it lists the companies table directly."""
     rows = sorted(agg['companies'], key=lambda c: (c.get('business_id') or 0, c.get('unit_name') or ''))
     counts = {c['unit_name']: c for c in agg['comp_counts']}
     rows_html = ''.join((f"""<tr><td>{_e(c.get('unit_name') or '')}</td><td class="muted">{_e(agg['biz'].get(c.get('business_id'), ''))}</td><td>{_e(c.get('nature_name') or '')}</td><td class="mono">{_e(c.get('main_licence') or '')}</td><td class="num">{counts.get(c.get('unit_name'), {}).get('mp', 0)}</td><td class="num">{counts.get(c.get('unit_name'), {}).get('oa', 0)}</td><td class="muted">{_e(c.get('updated_at') or '')}</td></tr>""" for c in rows))
@@ -581,18 +601,21 @@ def _snapshot_row_key(table: str, r: dict) -> tuple | None:
     return None
 
 def _load_changed_keys(report_dir: Path, snap: dict) -> dict[str, dict[tuple, str]]:
-    """Scan added/reactivated/changed CSVs; any difference vs the previous
+    """Scan the added/reactivated/changed CSVs; any difference against the
+    previous
     run qualifies. Returns {table: {key_tuple: category_label}}.
 
-    Categories used:
-        "added"      — row did not exist in the previous snapshot
-        "added"      — row was inactive before, is active now (reactivated)
-        "changed"    — row existed and was active in both runs, but some
+    The categories used:
+        "added"      — the row did not exist in the previous snapshot
+        "added"      — the row was inactive before and is active now (reactivated)
+        "changed"    — the row existed and was active in both runs, but a
                        field (hash / status / title / tech / etc.) differs
 
-    Category is informational — the /new site tab badges rows as "新" or "变"
-    purely for visual identification. Inclusion is uniform across all three
-    CSVs: a row is on /new iff it shows up in any of them.
+    The category is informational — the /new site tab badges the rows as "new" or
+    "changed"
+    purely for the visual identification. The inclusion is uniform across all
+    three CSVs:
+    a row is on /new if and only if it shows up in any of them.
     """
     if not report_dir or not report_dir.exists():
         return {t: {} for t in _DIFF_TABLES}
@@ -788,24 +811,35 @@ def _latest_run_id() -> str:
 
 
 # ---------------------------------------------------------------------------
-# /<业务名>/body/raw?url=<domain-url>&side=pre|cur
+# /<business name>/body/raw?url=<domain-url>&side=pre|cur
 # ---------------------------------------------------------------------------
-# 把某个子域在"前 / 后"两个时刻的 HTTP body 原文取出来, 交给浏览器渲染。
+# Take the raw HTTP body of one subdomain at the "before / after" moments and hand
+# it to the browser to render.
+# side=pre -> web_subdomains_pre.curr_body (the version in the step 0 snapshot of
+# daily_monitor)
+# side=cur -> web_subdomains.curr_body       (the version the latest import
+# wrote)
 #
-# side=pre -> web_subdomains_pre.curr_body (daily_monitor step 0 那次快照里的版本)
-# side=cur -> web_subdomains.curr_body       (最近一次 import 落库的版本)
-#
-# 三条硬约束:
-# 1) 数据每次现查 SQLite, 不进 snapshot 缓存。body 列本来就不在
-#    _DB_SNAPSHOT_QUERIES 里, 且 side=pre 依赖 step 0 快照语义, 缓存会串味。
-# 2) pre 侧 JOIN 用 (id + business_id + subdomain + port) 四个条件全等, 不
-#    只用 id —— 判定期 (algo_diff_cpp) 用的是 pre.id = cur.id, 但 id 回收后
-#    可能指向别的逻辑行; 补齐三个业务列后两者的语义才真正等价。
-#    也不取 ws.prev_body: import_scan_results 的 UPSERT 会滚动 prev_body,
-#    它与快照表在实测中有 56/272 行不一致。
-# 3) 响应必须带 CSP sandbox。body 是被扫描目标的第三方内容, 而本端点与
-#    dashboard 同源 —— 不 sandbox 的话, body 里的 <script> 能同源调用
-#    dashboard 的 POST (触发扫描 / 改 score) 并 GET /api/snapshot 读全量业务。
+# Three hard constraints:
+# 1) The data is queried from SQLite every time, it does not go into the snapshot
+#    cache. The body column is not in
+#    _DB_SNAPSHOT_QUERIES to begin with, and side=pre depends on the semantics of
+#    the step 0 snapshot, so the cache would mix things up.
+# 2) The pre side joins on the four conditions (id + business_id + subdomain +
+#    port) being equal, not
+#    only on the id — the judgement period (algo_diff_cpp) uses pre.id = cur.id,
+#    but after an id is recycled
+#    it may point at a different logical row; only with the three business columns
+#    added are the two really equivalent.
+#    It does not take ws.prev_body either: the UPSERT of import_scan_results
+#    rolls prev_body over,
+#    and it differs from the snapshot table in 56/272 rows in the measurements.
+# 3) The response has to carry a CSP sandbox. The body is the third party content
+#    of the scanned target, and this endpoint is
+#    same-origin with the dashboard — without the sandbox a <script> in the body
+#    could call
+#    the POST of the dashboard (trigger a scan / change the score) and GET
+#    /api/snapshot to read all the business data.
 
 _MIME_TOKEN_RE = re.compile(r'^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$')
 _CHARSET_TOKEN_RE = re.compile(r'^[A-Za-z0-9_.:+-]{1,40}$')
@@ -813,15 +847,23 @@ _SCHEME_TOKEN_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.\-]*$')
 _META_CHARSET_RE = re.compile(rb'<meta[^>]{0,200}?charset\s*=\s*["\']?\s*([A-Za-z0-9_.:+-]{1,40})', re.I)
 _XML_ENCODING_RE = re.compile(rb'<\?xml[^>]{0,200}?encoding\s*=\s*["\']?\s*([A-Za-z0-9_.:+-]{1,40})', re.I)
 
-# 第三方 body 在 dashboard 自己的源下被解析, 用 CSP 把活动面收干净:
-#   sandbox (不给 allow-scripts / allow-same-origin) -> body 里的脚本不执行,
-#     origin 不透明, 无法反向调 dashboard 的 POST 或读 /api/snapshot;
-#   default-src 'none' -> 所有子资源都不加载, 浏览器不会回连目标站泄漏 IP;
-#   style-src 'unsafe-inline' -> 保留原站内联样式, 否则页面全裸无排版;
-#   img-src data: blob: -> 只放行内联图, 挡掉远程图片 beacon;
-#   base-uri 'none' -> body 里的 <base href> 不能改写相对链接指向 dashboard;
-#   form-action 'none' -> 捕获到的钓鱼页不能提交表单 (sandbox 之外再加一道);
-#   frame-ancestors 'self' -> 只允许 dashboard 自己内嵌。
+# The third party body is parsed under the origin of the dashboard itself, so the
+# CSP keeps the active surface clean:
+#   sandbox (no allow-scripts / allow-same-origin) -> the scripts in the body do
+#     not run, the
+#     origin is opaque and they cannot call the POST of the dashboard or read
+#     /api/snapshot;
+#   default-src 'none' -> no subresource is loaded, so the browser does not call
+#     back to the target site and leak the IP;
+#   style-src 'unsafe-inline' -> the inline styles of the page are kept, otherwise
+#     the page has no layout at all;
+#   img-src data: blob: -> only the inline images are allowed, which blocks the
+#     remote image beacons;
+#   base-uri 'none' -> a <base href> in the body cannot rewrite the relative links
+#     to point at the dashboard;
+#   form-action 'none' -> a captured phishing page cannot submit a form (one more
+#     layer on top of the sandbox);
+#   frame-ancestors 'self' -> only the dashboard itself may embed it.
 _BODY_RAW_CSP = (
     "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; "
     "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
@@ -830,11 +872,13 @@ _BODY_RAW_CSP = (
 
 
 def _parse_body_url(raw: str) -> tuple[str, int | None, int] | None:
-    """解析 ?url= 参数 -> (host, 显式端口或 None, 按 scheme 推断的默认端口)。
+    """Parse the ?url= parameter -> (host, the explicit port or None, the default
+    port inferred from the scheme).
 
-    只取 host[:port], path / query / fragment 一律丢弃 —— web_subdomains 的
-    唯一键是 (business_id, subdomain, port), 没有 path 维度。
-    解析不出来时返回 None。
+    Only host[:port] is taken, the path / query / fragment are dropped — the
+    unique key of web_subdomains
+    is (business_id, subdomain, port), it has no path dimension.
+    It returns None when it cannot be parsed.
     """
     s = (raw or '').strip()
     if not s:
@@ -843,8 +887,9 @@ def _parse_body_url(raw: str) -> tuple[str, int | None, int] | None:
     if '://' in s:
         scheme, _, s = s.partition('://')
         scheme = scheme.strip().lower()
-        # scheme 必须是合法 token, 否则整串当作 host 处理会得到误导性的
-        # "no such subdomain" (404) 而不是 "cannot parse url" (400)。
+        # the scheme has to be a valid token, otherwise treating the whole string as
+        # the host would give a misleading
+        # "no such subdomain" (404) instead of "cannot parse url" (400).
         if not scheme or not _SCHEME_TOKEN_RE.match(scheme):
             return None
     s = s.split('/', 1)[0].split('?', 1)[0].split('#', 1)[0]
@@ -878,10 +923,12 @@ def _parse_body_url(raw: str) -> tuple[str, int | None, int] | None:
 
 
 def _snapshot_at_iso(raw: str) -> str:
-    """web_subdomains_pre._snapshot_at 存的是 SQLite datetime('now') = UTC。
+    """The _snapshot_at of web_subdomains_pre holds SQLite datetime('now') = UTC.
 
-    仓内其它时间戳 (fetched_at / last_seen) 都是 +08:00 ISO, 这里统一成同一
-    口径, 免得两个 header 一头 UTC 一头 +08:00 被误读成同一时刻。
+    The other timestamps in the repo (fetched_at / last_seen) are all +08:00 ISO,
+    so they are unified into the same
+    reading here, to avoid two headers that are one UTC and one +08:00 being
+    misread as the same moment.
     """
     s = (raw or '').strip()
     if not s:
@@ -894,9 +941,11 @@ def _snapshot_at_iso(raw: str) -> str:
 
 
 def _declared_body_charset(data: bytes) -> str:
-    """从 body 里读它自己声明的 charset (HTML <meta charset> 或 XML 声明)。
+    """Read the charset the body declares for itself (the HTML <meta charset> or
+    the XML declaration).
 
-    只看前 4KB —— 浏览器也只在前 1KB 找 meta charset。
+    Only the first 4KB are looked at — the browser only looks for the meta
+    charset in the first 1KB either.
     """
     head = data[:4096]
     for rx in (_META_CHARSET_RE, _XML_ENCODING_RE):
@@ -909,11 +958,13 @@ def _declared_body_charset(data: bytes) -> str:
 
 
 def _pick_body_charset(data: bytes, declared: str) -> str:
-    """选一个能真正解出这串字节的 charset。
+    """Pick a charset that can really decode this byte string.
 
-    utf-8 优先: 全串能干净解成 utf-8 是很强的信号, 就算 body 自己声明了
-    别的 charset 也该信字节; 解不动再退到声明值, 再退 gb18030 (GBK 超集),
-    最后 utf-8 兜底。
+    utf-8 comes first: the whole string decoding cleanly as utf-8 is a strong
+    signal, so the bytes should be
+    trusted even when the body declares another charset; when it does not decode
+    it falls back to the declared value, then to gb18030 (a superset of GBK),
+    and utf-8 is the last fallback.
     """
     order = ['utf-8']
     if declared and declared.lower() not in order:
@@ -930,7 +981,7 @@ def _pick_body_charset(data: bytes, declared: str) -> str:
 
 
 def _sniff_body_mime(data: bytes) -> str:
-    """存储的 content_type 为空时, 按字节猜一个 MIME。"""
+    """When the stored content_type is empty, guess a MIME from the bytes."""
     head = data[:512].lstrip().lower()
     if head.startswith(b'<!doctype') or head.startswith(b'<html'):
         return 'text/html'
@@ -942,10 +993,13 @@ def _sniff_body_mime(data: bytes) -> str:
 
 
 def _body_content_type(stored: str | None, data: bytes) -> str:
-    """算出回给浏览器的 Content-Type (含 charset)。
+    """Compute the Content-Type (with the charset) that goes back to the browser.
 
-    存储值优先 (那是扫描时对方真正回的类型), 但必须过 token 校验 —— 它来自
-    第三方响应头, 不能直接拼进响应头。存值为空或不合规时按字节嗅探。
+    The stored value comes first (that is the type the other side really sent
+    during the scan), but it has to pass a token check — it comes
+    from a third party response header, so it cannot be pasted into a response
+    header directly. When the stored value is empty or invalid it is sniffed
+    from the bytes.
     """
     mime = ''
     if stored:
@@ -984,8 +1038,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith('/'):
             biz_part = path[1:]
-            # /<业务名>/body/raw?url=<domain-url>&side=pre|cur
-            # 放在 snapshot 之前: 该端点一律现查 SQLite, 不吃 snapshot 缓存。
+            # /<business name>/body/raw?url=<domain-url>&side=pre|cur
+            # it comes before the snapshot: this endpoint always queries SQLite
+            # live, it does not use the snapshot cache.
             if biz_part.endswith('/body/raw'):
                 self._serve_body_raw(biz_part[:-len('/body/raw')], raw_query, accept_enc)
                 return
@@ -1005,12 +1060,18 @@ class Handler(BaseHTTPRequestHandler):
         self._respond(404, 'text/plain', f'not found: {raw}'.encode(), accept_enc)
 
     def do_POST(self) -> None:
-        """POST routes:
-          /<业务名>/scan              — 提交 hosts 列表触发 scan-onesite 子流程
-          /<业务名>/scan-urls         — 提交 hosts + sources + wordlist 触发 URL 资产扫描
-          /api/hash/<id>/edit         — 改 score + description(纯 JSON 响应,无重定向)
-          /<业务名>/schedule/toggle   — 用户 2026-08-26:toggle 子域加入/移除每日扫描
-                                        (纯 JSON 响应,无重定向 — JS 处理跳转 / 提示)
+        """The POST routes:
+          /<business name>/scan              — post the hosts list to trigger the
+                                          scan-onesite sub flow
+          /<business name>/scan-urls         — post hosts + sources + wordlist to
+                                          trigger the URL asset scan
+          /api/hash/<id>/edit         — change the score + the description (a
+                                     plain JSON response, no redirect)
+          /<business name>/schedule/toggle   — the user decided on 2026-08-26:
+                                         toggle a subdomain in and out of the
+                                         daily scan
+                                         (a plain JSON response, no redirect —
+                                          the JS handles the redirect / the hint)
         """
         accept_enc = self.headers.get('Accept-Encoding', '').encode()
         raw = self.path.split('?', 1)[0]
@@ -1059,18 +1120,21 @@ class Handler(BaseHTTPRequestHandler):
         self._handle_scan(biz_name, accept_enc)
 
     def _handle_hash_edit(self, path: str, accept_enc: bytes) -> None:
-        """POST /api/hash/<id>/edit — 改 score + description，纯 JSON 响应。
+        """POST /api/hash/<id>/edit — changes the score + the description, the
+        response is plain JSON.
 
         Body: application/x-www-form-urlencoded
           score       = int 0..100   (required)
-          description = str          (optional, defaults to '')
+          description = str          (optional, it defaults to '')
 
-        响应：200 {"ok": true, "id": <id>, "score": ..., "description": "..."}
-              400 参数错 / 404 hash 不存在
+        The response: 200 {"ok": true, "id": <id>, "score": ..., "description": "..."}
+                    400 bad arguments / 404 the hash does not exist
 
-        写入后立即局部更新 _State.cached_snap，避免等5 分钟 reload 看到陈旧数据。
-        cron 下次跑时（按 §"Web Hash 评分"）只会处理新增 hash + 未评分 hash，
-        所以本次手动修改不会被 cron 覆盖。
+        The _State.cached_snap is updated in place right after the write, so that
+        the stale data is not shown for the 5 minutes until the reload.
+        On the next cron run (per the "Web Hash scoring" section) only the new
+        hashes + the unscored hashes are
+        processed, so this manual change is not overwritten by the cron.
         """
         prefix = '/api/hash/'
         suffix = '/edit'
@@ -1140,7 +1204,7 @@ class Handler(BaseHTTPRequestHandler):
         log.info(f'hash edit id={hash_id} score={new_score} desc_len={len(new_desc)}')
 
     def _handle_scan(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务>/scan 的实际处理：解析 body → 预校验 → subprocess 调 scan-onesite。"""
+        """The actual handling of POST /<business>/scan: parse the body -> pre-validate -> subprocess call scan-onesite."""
         try:
             length = int(self.headers.get('Content-Length') or 0)
         except ValueError:
@@ -1208,7 +1272,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _render_scan_result(self, biz_name: str, *, ok: bool, n_total: int, error_lines: list[str], accept_enc: bytes, status: int) -> None:
-        """POST /<业务>/scan 之后返回的小结果页（绿/红 panel + 返回链接）。"""
+        """The small result page returned after POST /<business>/scan (a green/red panel + a back link)."""
         biz_quoted = urllib.parse.quote(biz_name)
         back_href = '/' + biz_quoted
         cls = 'ok' if ok else 'err'
@@ -1221,9 +1285,11 @@ class Handler(BaseHTTPRequestHandler):
         self._respond(status, 'text/html; charset=utf-8', page.encode('utf-8'), accept_enc)
 
     def _dispatch_scan_urls(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<biz>/scan-urls 的入口校验 + dispatch 到 _handle_scan_urls。
+        """The entry validation of POST /<biz>/scan-urls + the dispatch to
+        _handle_scan_urls.
 
-        业务存在性:同 /scan,优先 _State.cached_snap,缺时 _load_snap 兜底。
+        The business existence: the same as /scan, _State.cached_snap comes
+        first and _load_snap is the fallback.
         """
         snap = _State.cached_snap
         if not snap:
@@ -1235,12 +1301,13 @@ class Handler(BaseHTTPRequestHandler):
         self._handle_scan_urls(biz_name, accept_enc)
 
     def _handle_scan_urls(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务>/scan-urls 的实际处理。
+        """The actual handling of POST /<business>/scan-urls.
 
-        body 字段:
-          hosts    = 多行子域(必填)
-          sources  = 多值('ffuf' / 'urlfinder' / 'gau',至少 1 个)
-          wordlist = ffuf 字典路径(可空,空则用 SCAN_URLS_DEFAULT_WORDLIST)
+        The body fields:
+          hosts    = the subdomains, one per line (required)
+          sources  = the multiple values ('ffuf' / 'urlfinder' / 'gau', at least 1)
+          wordlist = the path of the ffuf dictionary (it may be empty, then
+                     SCAN_URLS_DEFAULT_WORDLIST is used)
         """
         try:
             length = int(self.headers.get('Content-Length') or 0)
@@ -1326,21 +1393,28 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _handle_schedule_toggle(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务名>/schedule/toggle — 用户 2026-08-26 拍板。
+        """POST /<business name>/schedule/toggle — the user decided on
+        2026-08-26.
 
-        body 字段(x-www-form-urlencoded):
-          subdomain = 子域名(必填,FQDN 格式,经 SCAN_HOSTNAME_RE 校验)
-          action    = 'add' / 'remove'(必填)
+        The body fields (x-www-form-urlencoded):
+          subdomain = the subdomain (required, the FQDN format, validated by
+                      SCAN_HOSTNAME_RE)
+          action    = 'add' / 'remove' (required)
 
-        语义:
-          - add    → INSERT INTO web_subdomain_scan_schedule(biz_id, sub, sources='urlfinder')
-                     同 (biz_id, sub) 已存在 → 不动(幂等),返回 ok=1 / created=0
-          - remove → DELETE FROM web_subdomain_scan_schedule WHERE biz_id & sub
-                     不存在行也算 ok(幂等)
+        The semantics:
+          - add    -> INSERT INTO web_subdomain_scan_schedule(biz_id, sub,
+                     sources='urlfinder')
+                     when the same (biz_id, sub) already exists it is left alone
+                     (idempotent) and it returns ok=1 / created=0
+          - remove -> DELETE FROM web_subdomain_scan_schedule WHERE biz_id & sub
+                     a missing row also counts as ok (idempotent)
 
-        返回纯 JSON(200 / 400 / 404),前端 JS 解析后提示用户 + 刷新页面。
-        不刷新 cache:schedule 不在 _State.cached_snap 里(配置不在快照里),
-        下次 _serve_urls_detail 查 schedule 表时即生效。
+        It returns plain JSON (200 / 400 / 404) and the front end JS parses it,
+        hints the user and reloads the page.
+        The cache is not reloaded: the schedule is not in _State.cached_snap
+        (the configuration is not in the snapshot),
+        so it takes effect the next time _serve_urls_detail queries the schedule
+        table.
         """
         try:
             length = int(self.headers.get('Content-Length') or 0)
@@ -1386,14 +1460,16 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
 
     def _respond_json(self, status: int, payload: dict, accept_enc: bytes) -> None:
-        """JSON 响应 helper,仅用于 _handle_hash_edit / _handle_schedule_toggle。"""
+        """The JSON response helper, only used by _handle_hash_edit / _handle_schedule_toggle."""
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         self._respond(status, 'application/json; charset=utf-8', body, accept_enc)
 
     def _serve_urls_detail(self, biz_name: str, hash_id_str: str, accept_enc: bytes) -> None:
-        """GET /<业务名>/urls/<hash_id> — 实时查 web_hash_urls 渲染 URL 详情页。
+        """GET /<business name>/urls/<hash_id> — queries web_hash_urls live and
+        renders the URL details page.
 
-        用户决策:严格 lazy,这个页面打开时才查 SQL,不在 reload snapshot 里预加载。
+        The user decided: strictly lazy, the SQL is only queried when this page
+        is opened, it is not preloaded in the reload snapshot.
         """
         try:
             hash_id = int(hash_id_str)
@@ -1469,16 +1545,17 @@ class Handler(BaseHTTPRequestHandler):
         FFUF_GAU_EXTRA_COLS = (('words', 'word_count', 'num'),)
 
         def _trunc(html_inner, css_class=''):
-            """把已渲染好的 cell 内容包进 <div class="trunc">,触发可滚动行为。"""
+            """Wrap the already rendered cell content in <div class="trunc">, which triggers the scrollable behaviour."""
             extra = f' {css_class}' if css_class else ''
             return f'<div class="trunc{extra}">{html_inner}</div>'
 
         def _render_cell(kind, key, e):
-            """返回单 cell 的完整 <td>...</td>。
+            """Return the full <td>...</td> of a single cell.
 
-            kind 决定样式 (a/text/num/host/time/risk/danger);
-            key 决定取哪一列的值 — 同一 kind (如 num) 在 status / bytes / words
-            三个列各自取不同字段,所以参数化避免 bug。
+            kind decides the style (a/text/num/host/time/risk/danger);
+            key decides which column the value comes from — the same kind (such as
+            num) takes a different field in the status / bytes / words
+            columns, so the parameterisation avoids the bug.
             """
             url = e.get('url') or ''
             path = e.get('path') or ''
@@ -1566,7 +1643,7 @@ class Handler(BaseHTTPRequestHandler):
             return COMMON_COLS + FFUF_GAU_EXTRA_COLS
 
         def _colgroup(cols):
-            """按列类型返回 col 元素(比例贴近 ant-table 默认 150px 最小宽度)。"""
+            """Return the col element for a column type (the width is close to the 150px minimum of the ant-table default)."""
             parts = []
             for (label, _key, _kind) in cols:
                 if label == 'URL':
@@ -1622,11 +1699,13 @@ class Handler(BaseHTTPRequestHandler):
         log.info(f'urls detail biz={biz_name} hash_id={hash_id} rows={len(rows)} per_source={per_source_count}')
 
     def _serve_body_raw(self, biz_name: str, raw_query: str, accept_enc: bytes) -> None:
-        """GET /<业务名>/body/raw?url=<domain-url>&side=pre|cur
+        """GET /<business name>/body/raw?url=<domain-url>&side=pre|cur
 
-        返回该子域某一侧保存下来的 HTTP body 原文 (zlib 解压后), 由浏览器
-        按 Content-Type 渲染。side=pre 取 daily run 快照里的那一版,
-        side=cur 取最近一次 import 落库的那一版。
+        It returns the raw HTTP body that was stored for one side of that
+        subdomain (after the zlib decompression), and the browser
+        renders it according to the Content-Type. side=pre takes the version in
+        the daily run snapshot,
+        side=cur takes the version the latest import wrote.
         """
         def _fail(status: int, msg: str) -> None:
             self._respond(status, 'text/plain; charset=utf-8', msg.encode('utf-8'), accept_enc)
@@ -1653,7 +1732,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             conn.row_factory = sqlite3.Row
-            # 业务可见性取判定口径: enabled=1 或者根本没有 config 行。
+            # the business visibility follows the judgement rule: enabled=1 or there is no config row at all.
             biz = conn.execute(
                 "SELECT b.id FROM businesses b "
                 "LEFT JOIN recon_business_config c ON c.business_id = b.id "
@@ -1685,8 +1764,10 @@ class Handler(BaseHTTPRequestHandler):
             _fail(404, 'no such subdomain in this business\n')
             return
 
-        # 端口回退链: 显式端口精确匹配 -> 推断端口先试 scheme 默认再试另一个
-        # 默认端口 -> 该子域在本业务下只有一行时直接用那一行。
+        # the port fallback chain: an explicit port matches exactly -> an inferred
+        # port tries the scheme default first and then the other
+        # default port -> when the subdomain has only one row under this business
+        # that row is used directly.
         match: list[Any] = []
         if explicit_port is not None:
             match = [r for r in rows if r['port'] == explicit_port]
@@ -1721,8 +1802,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             data = zlib.decompress(bytes(blob))
         except zlib.error:
-            # 与 algo_diff/compute.py::_decompress 同约定: 解不开就当未压缩
-            # 原文处理 (blob 可能是未压缩/损坏的)。渲染时给出的是字节原样。
+            # the same convention as algo_diff/compute.py::_decompress: when it
+            # cannot be decompressed it is treated as not compressed
+            # raw text (the blob may be uncompressed / corrupted). The bytes are
+            # returned as they are when it is rendered.
             data = bytes(blob)
 
         extra = {
@@ -1796,15 +1879,22 @@ class Handler(BaseHTTPRequestHandler):
         biz_snap = _filter_snap_by_business(snap, bid)
         hash_total = Counter((r.get('response_hash') or '' for r in biz_snap.get('tables', {}).get('web_subdomains', [])))
         if is_new:
-            # 2026-10-24: /new 直接按 DB 的 change_type > 0 过滤, 不再依赖
-            # reports/ 目录下的 diff CSV。理由:
-            #   - 实时性: 报告只在 daily_monitor 跑完时更新 (每天一次), 手动
-            #     跑完 algo_diff_cpp 后 DB 变了但报告没变 -> /new 不反映最新数据。
-            #   - 抗污染: _find_latest_report() 按目录名倒序取第一个, 任何往
-            #     reports/ 塞目录的动作都会劫持 /new (空目录 -> changed_keys
-            #     为空 -> 一条也没有)。2026-10-24 smoke 测试就在生产 reports/
-            #     下留了两个目录, 导致 /<业务>/new 全空。
-            # 分类规则沿用 diff.py 的 bitmask 语义 (added/reactivated/changed)。
+            # 2026-10-24: /new filters directly on the change_type > 0 of the DB, it
+            # does not depend on
+            # the diff CSV under the reports/ directory any more. The reason:
+            #   - the freshness: the report is only updated when daily_monitor has
+            #     finished (once a day), so after a manual
+            #     run of algo_diff_cpp the DB changed but the report did not ->
+            #     /new did not reflect the newest data.
+            #   - the resistance to poisoning: _find_latest_report() takes the
+            #     first one by the reverse order of the directory names, so any
+            #     action that pushes a directory into
+            #     reports/ hijacks /new (an empty directory -> changed_keys
+            #     is empty -> not a single row). The smoke test of 2026-10-24 left
+            #     two directories under the production reports/
+            #     directory, which made /<business>/new completely empty.
+            # The classification follows the bitmask semantics of diff.py
+            # (added/reactivated/changed).
             run_id = _latest_run_id()
             filtered = _filter_snapshot_by_ct(biz_snap)
             agg = _aggregate(filtered)
@@ -1879,17 +1969,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 def _build_katana_enrich_form(biz_name: str) -> str:
-    """katana enrich 折叠表单(2026-09-22 加)。点击 POST /<biz>/katana-enrich。
+    """The katana enrich collapsible form (added 2026-09-22). It posts to
+    /<biz>/katana-enrich.
 
-    跟 _build_scan_urls_form 平级,但只一个 textbox(hosts),没有 sources / wordlist:
-      - katana 自动启用 js-crawl / form-extraction / xhr-extraction
-      - 字典不需要(katana 主动爬虫)
-      - 字段对齐 httpx(详见 modules/public/katana/README.md §三)
+    It is at the same level as _build_scan_urls_form, but it only has one textbox
+(the hosts), no sources / wordlist:
+      - katana turns on js-crawl / form-extraction / xhr-extraction on its own
+      - no dictionary is needed (katana is an active crawler)
+      - the fields are aligned with httpx (see modules/public/katana/README.md
+        section 3)
 
-    设计目标:
-      - 只扫已存在的 active 子域(POST handler 校验)
-      - 单次 host 上限收紧到 30(katana 比 URLFinder 重,大字典场景超时)
-      - 5 词风险黑名单沿用 URLFinder,katana -crawl-out-scope 源头 + 入库前双重 gate
+    The design goals:
+      - only the active subdomains that already exist are scanned (the POST
+        handler validates that)
+      - the per-invocation host limit is tightened to 30 (katana is heavier than
+        URLFinder and it times out with a big dictionary)
+      - the 5 word risk blacklist is the one of URLFinder, katana gates it at
+        the source with -crawl-out-scope and a second gate before the write
     """
     if not biz_name:
         return ''
@@ -1897,9 +1993,11 @@ def _build_katana_enrich_form(biz_name: str) -> str:
     return f'\n<details class="scan-form">\n  <summary>katana URL 扫描(向 {_e(biz_name)} 已收录的子域跑 katana,字段对齐 httpx)</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">每行一个 <b>已存在的子域</b>(从站点详情 tab 复制),&le;{KATANA_ENRICH_MAX_HOSTS} 个;\n    只对各 subdomain 下的 <code>web_subdomains.is_active=1</code> 行做扫描;\n    katana 自动启用 js-crawl / form-extraction / xhr-extraction,字段对齐 httpx(response_hash = mmh3 body);\n    危险路由(remove/delete/insert/update/logout)双重 gate(源头 -crawl-out-scope + 入库前 is_dangerous=1)。\n    多次扫描同一目标 = 同 URL 不会被重复插入(ON CONFLICT UPDATE last_seen)。</div>\n    <textarea name="hosts" rows="6" cols="60" placeholder="a.example.com&#10;b.example.com"></textarea><br>\n    <button type="submit">Run katana</button>\n  </form>\n</details>\n'
 
     def _dispatch_katana_enrich(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<biz>/katana-enrich 入口校验 + dispatch 到 _handle_katana_enrich。
+        """The entry validation of POST /<biz>/katana-enrich + the dispatch to
+        _handle_katana_enrich.
 
-        katana 模块不存在 / 二进制没装 → 404 + 提示,不要静默 fallback。
+        The katana module does not exist / the binary is not installed -> 404 + a
+        hint, do not fall back silently.
         """
         snap = _State.cached_snap
         if not snap:
@@ -1911,15 +2009,18 @@ def _build_katana_enrich_form(biz_name: str) -> str:
         self._handle_katana_enrich(biz_name, accept_enc)
 
     def _handle_katana_enrich(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务>/katana-enrich 的实际处理。
+        """The actual handling of POST /<business>/katana-enrich.
 
-        body 字段:
-          hosts = 多行子域(必填,<= KATANA_ENRICH_MAX_HOSTS)
+        The body fields:
+          hosts = the subdomains, one per line (required, <=
+                 KATANA_ENRICH_MAX_HOSTS)
 
-        行为:
-          - katana_enrich.sh 不存在(模块没装) → 503 + 提示装法
-          - subprocess.run + KATANA_ENRICH_TIMEOUT 全局超时
-          - 跑完 stdout 是 JSON summary;非零退出 → 502 + stderr 摘要
+        The behaviour:
+          - katana_enrich.sh does not exist (the module is not installed) -> 503 +
+            a hint on how to install it
+          - subprocess.run + KATANA_ENRICH_TIMEOUT as the global timeout
+          - when it finishes the stdout is a JSON summary; a non-zero exit -> 502
+            + a summary of the stderr
         """
         try:
             length = int(self.headers.get('Content-Length') or 0)

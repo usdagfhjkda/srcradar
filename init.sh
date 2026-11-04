@@ -1,68 +1,73 @@
 #!/usr/bin/env bash
 #
-# init.sh — 环境检查 + db 初始化。
+# init.sh — the environment check + the db initialization.
 #
-# 重构后(init.sh 不再负责 clone/build;这部分拆给 modules/*/install.sh):
-#   - 环境检查(go/python3/git + 完整依赖)
-#   - --install-deps 自动装缺失依赖(apt/dnf/brew)
-#   - --init-db [PATH] 调用 modules/main/db/install.sh --path
-#   - --check-schema 校对 db/schema.sql vs 源文件 CREATE TABLE
-#   - --offline      跳过所有网络(只 build/check;若已 git mv 完毕就 fast-pass)
+# After the refactor (init.sh no longer clones or builds; that part moved to
+# modules/*/install.sh):
+#   - the environment check (go/python3/git + the full dependency list)
+#   - --install-deps installs the missing dependencies (apt/dnf/brew)
+#   - --init-db [PATH] calls modules/main/db/install.sh --path
+#   - --check-schema checks db/schema.sql against the CREATE TABLE in the sources
+#   - --offline      skips every network call (only build/check; if the git mv
+#                    is already done it fast-passes)
 #
-# 模块 clone/build 改由 ./install.sh 或 ./install-internal.sh 统一调度
-# (遍历 modules/main, modules/public 各模块 install.sh)。
+# The clone/build of the modules is now scheduled by ./install.sh or
+# ./install-internal.sh
+# (they walk the install.sh of every module under modules/main, modules/public).
 #
-# 用法:
-#   ./init.sh                  # 仅检查 + 打印 next-step 提示
-#   ./init.sh --check          # 只检查 git/curl/docker
-#   ./init.sh --check-deps     # 详细环境检查
-#   ./init.sh --install-deps   # 列出将要装的包 (DRY-RUN,不 sudo)
-#   ./init.sh --install-deps --yes   # 真装 (sudo apt/dnf/brew)
-#   ./init.sh --offline        # 跳过所有网络调用
-#   ./init.sh --init-db [PATH] # 调用 modules/main/db/install.sh --path PATH
-#   ./init.sh --check-schema   # 校对 db/schema.sql vs 源文件
+# Usage:
+#   ./init.sh                  # only check + print the next-step hints
+#   ./init.sh --check          # only check git/curl/docker
+#   ./init.sh --check-deps     # the detailed environment check
+#   ./init.sh --install-deps   # list the packages that would be installed (DRY-RUN, no sudo)
+#   ./init.sh --install-deps --yes   # install them for real (sudo apt/dnf/brew)
+#   ./init.sh --offline        # skip every network call
+#   ./init.sh --init-db [PATH] # call modules/main/db/install.sh --path PATH
+#   ./init.sh --check-schema   # check db/schema.sql against the sources
 #
-# 退出码:
-#   0   全部成功
-#   1   参数错误
-#   2   缺少必要命令(--check / --check-deps 失败)
-#   3   某个上游 clone 失败(本脚本不负责)
-#   4   --install-deps 自动安装失败
-#   5/6/7  init-db / sqlite / schema.sql 缺失相关
+# Exit codes:
+#   0   everything succeeded
+#   1   bad arguments
+#   2   a required command is missing (--check / --check-deps failed)
+#   3   an upstream clone failed (this script does not own that)
+#   4   the --install-deps auto install failed
+#   5/6/7  init-db / sqlite / a missing schema.sql
 
 set -euo pipefail
 
-# ---- 配置(改这里升级 upstream 版本) ----
-# 注意:ENScan_GO / cdncheck 等上游 vendor 由对应模块 install.sh 拉取
+# ---- the configuration (change it here to upgrade the upstream version) ----
+# Note: the upstream vendors such as ENScan_GO / cdncheck are pulled by the
+# install.sh of the matching module
 # (modules/public/db_align/install.sh / modules/main/pdtm/install.sh)
 
-# ---- 完整功能跑通所需的工具清单 ----
-# 类别:
-#   - GO_REQUIRED  build 期一次性需要(Go >= 1.21)
-#   - CORE         运行时必需(任何 mode 都要)
-#   - SCAN         推荐装(没装 = 某些数据采不到,但不挂)
-# 字段:
-#   cmd  命令名
-#   min  最低版本(空 = 不校验)
-#   pkg  --install-deps 时按 OS 安装的包名(apt / dnf / brew)
+# ---- the list of tools needed for the full feature set ----
+# The categories:
+#   - GO_REQUIRED  needed once at build time (Go >= 1.21)
+#   - CORE         needed at runtime (in every mode)
+#   - SCAN         recommended (without it some data cannot be collected, but
+#                  nothing breaks)
+# The fields:
+#   cmd  the command name
+#   min  the minimum version (empty = not checked)
+#   pkg  the package name installed per OS by --install-deps (apt / dnf / brew)
 # shellcheck disable=SC2034 # used by --check-deps / --install-deps sibling scripts
 GO_MIN_VERSION="1.21"
 # shellcheck disable=SC2034 # used by --check-deps / --install-deps sibling scripts
 PY_MIN_VERSION="3.10"
 
-# 完整功能跑通所需工具清单
-# 格式: <cmd>|<min_version>|<apt_pkg>|<dnf_pkg>|<brew_pkg>|<category>|<note>
+# the list of tools needed for the full feature set
+# the format: <cmd>|<min_version>|<apt_pkg>|<dnf_pkg>|<brew_pkg>|<category>|<note>
 DEPS=(
-    # --- build 期(Go 工具链)---
+    # --- build time (the Go toolchain) ---
     "go|1.21|golang-go|golang|go|go|build 期:编译 Go 项目 (modules/main/pdtm/cdnmatch + modules/public/db_align)|"
-    # --- 运行时必需 ---
+    # --- needed at runtime ---
     "bash|4.0|bash|bash|bash|core|关联数组 / [[ ]] / <() process substitution|"
     "python3|3.10|python3|python3|python3|core|daily/lib + pdtm/*.py 全栈 Python|"
     "docker|0.0|docker.io|podman|docker|core|可选用(ymicp 由用户自部署,本脚本不再 pull)|"
     "flock|0.0|util-linux|util-linux|flock|core|daily/install_cron + pdtm/pipeline 互斥锁|"
     "sqlite3|3.0|sqlite3|sqlite|sqlite3|core|DB 调试 + Python sqlite3 stdlib|"
     "git|0.0|git|git|git|core|模块 install.sh 拉取上游 vendor 用;日常不需要|"
-    # --- 推荐装(扫描 / URL 资产)---
+    # --- recommended (the scan / the URL assets) ---
     "subfinder|0.0|subfinder|subfinder|subfinder|scan|modules/main/pdtm/scan.sh glob 目标派生候选|"
     "alterx|0.0|alterx|alterx|alterx|scan|关键词派生,和 subfinder 配合|"
     "naabu|0.0|naabu|naabu|naabu|scan|tcp_assets 表的端口扫描数据;SYN 模式需要 setcap|"
@@ -71,14 +76,14 @@ DEPS=(
     "URLFinder|0.0||URLFinder||scan|中文社区版 by pingc0y,GitHub 无官方同名包;无 apt/brew 包,需自下载二进制|"
 )
 
-# ---- 路径 ----
+# ---- the paths ----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 DB_DIR="$SCRIPT_DIR/modules/main/db"
 DB_PATH_DEFAULT="$DB_DIR/recon.sqlite3"
 
-# ---- 参数解析 ----
+# ---- the argument parsing ----
 MODE="all"
 PASSTHROUGH_ARGS=()
 INIT_DB_PATH=""
@@ -102,7 +107,7 @@ log()  { printf "[init] %s\n" "$*"; }
 warn() { printf "[init][warn] %s\n" "$*" >&2; }
 err()  { printf "[init][err]  %s\n" "$*" >&2; }
 
-# ---- 环境检查 ----
+# ---- the environment check ----
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || {
         err "缺少命令: $1"
@@ -127,7 +132,7 @@ check_env() {
     return 0
 }
 
-# ---- OS 探测 ----
+# ---- the OS detection ----
 detect_os() {
     case "$(uname -s)" in
         Linux)
@@ -140,7 +145,7 @@ detect_os() {
     esac
 }
 
-# ---- 版本比较 ----
+# ---- the version comparison ----
 ver_ge() {
     [ "$1" = "$2" ] && return 0
     local highest
@@ -148,7 +153,7 @@ ver_ge() {
     [ "$highest" = "$1" ]
 }
 
-# ---- 工具探测 + 版本解析 ----
+# ---- the tool detection + the version parsing ----
 cmd_path() {
     local cmd="$1"
     command -v "$cmd" 2>/dev/null && return 0
@@ -331,7 +336,7 @@ EOF
     return 0
 }
 
-# ---- init-db:转发给 modules/main/db/install.sh ----
+# ---- init-db: forwarded to modules/main/db/install.sh ----
 init_db() {
     local db_path="${1:-$DB_PATH_DEFAULT}"
     local db_install="$DB_DIR/install.sh"
@@ -351,7 +356,7 @@ init_db() {
     fi
 }
 
-# ---- check-schema:转发给 modules/main/db/install.sh --check-schema ----
+# ---- check-schema: forwarded to modules/main/db/install.sh --check-schema ----
 check_schema() {
     local db_install="$DB_DIR/install.sh"
     if [ ! -x "$db_install" ]; then
@@ -366,7 +371,7 @@ check_schema() {
     fi
 }
 
-# ---- next-step 提示 ----
+# ---- the next-step hints ----
 next_step_hint() {
     cat <<EOF
 
@@ -388,7 +393,7 @@ next_step_hint() {
 EOF
 }
 
-# ---- 主流程 ----
+# ---- the main flow ----
 main() {
     case "$MODE" in
         check-deps)
