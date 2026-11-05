@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-r"""target_glob.py — 把 target.txt / exclude.txt 编译为 glob 语义 ERE/正则。
+r"""target_glob.py — compiles target.txt / exclude.txt into glob-semantics ERE/regex.
 
-设计:
-- `*` 语义: glob 通配,匹配任意字符(包括 `.`)。等价 ERE `.*`。
-- 锚定: 匹配主机名边界 `(^|\.)pattern$`,避免 `*.example.com` 误命中 `notexample.com`。
-- Base 提取: 从右往左累积不含 `*` 的连续 label,首个含 `*` 的 label 处停止。
-  例:
+Design:
+- `*` semantics: a glob wildcard, it matches any character (including `.`). The equivalent ERE is `.*`.
+- Anchoring: it matches the hostname boundary `(^|\.)pattern$`, so that `*.example.com` does not hit `notexample.com` by accident.
+- Base extraction: it accumulates the run of labels without a `*` from right to left and stops at the first label that contains a `*`.
+  Examples:
     cc-*.example.com   -> example.com
     *.example.com      -> example.com
     aaa.*.bbb.com      -> bbb.com
     ccc.bbb.com        -> ccc.bbb.com
 
-CLI 用法(scan.sh 调用):
+CLI usage (called by scan.sh):
     python3 target_glob.py targets-ere  --input target.txt
     python3 target_glob.py excludes-ere --input exclude.txt
     python3 target_glob.py all-bases    --input target.txt
@@ -206,12 +206,12 @@ def main() -> int:
 
     if args.mode == "partition-alive":
         if not args.bases:
-            sys.exit("[partition-alive] --bases 不能为空")
+            sys.exit(t("main.target_glob.bases_empty"))
         if not args.output_dir:
-            sys.exit("[partition-alive] --output-dir 不能为空")
+            sys.exit(t("main.target_glob.output_dir_empty"))
         bases = [b.strip().lower().rstrip(".") for b in args.bases.split(",") if b.strip()]
         if not bases:
-            sys.exit("[partition-alive] --bases 解析后为空")
+            sys.exit(t("main.target_glob.bases_parsed_empty"))
         stats = partition_alive_hosts(args.input, bases, args.output_dir)
         n_assigned = sum(stats["counts"].values())
         print(
@@ -223,7 +223,10 @@ def main() -> int:
             if c > 0:
                 print(f"  {b}: {c}", file=sys.stderr)
         if stats["unmatched"] > 0:
-            print(f"  unmatched: {stats['unmatched']} (详见 {args.output_dir}/alive.unmatched)", file=sys.stderr)
+            print(
+                f"  {t('main.target_glob.unmatched_detail', {'count': stats['unmatched'], 'output_dir': args.output_dir})}",
+                file=sys.stderr,
+            )
         return 0
 
     lines = _read_scope_lines(args.input)
