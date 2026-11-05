@@ -105,7 +105,7 @@ for t, scols in schema_fps.items():
             candidates.append((tag, fp[t]))
     if not candidates:
         # only in schema.sql (implicit table creation is legal)
-        accepted_drift.append(f"[ACCEPTED] {t} 只在 schema.sql (隐式建表,源文件仅 INSERT)")
+        accepted_drift.append(_t("main.check_schema.drift.accepted_implicit", {"table": t}))
         continue
     src_cols = set()
     for _, c in candidates:
@@ -118,10 +118,10 @@ for t, scols in schema_fps.items():
     accepted_only = only_schema & accepted
     if real_new:
         real_drift.append(
-            f"[REAL-DRIFT] {t}: schema.sql 有但源文件没,且不是已知 ALTER: {sorted(real_new)}")
+            _t("main.check_schema.drift.real_new", {"table": t, "cols": sorted(real_new)}))
     if accepted_only:
         accepted_drift.append(
-            f"[ACCEPTED] {t}: schema.sql 超前 ALTER 列: {sorted(accepted_only)}")
+            _t("main.check_schema.drift.accepted_alter", {"table": t, "cols": sorted(accepted_only)}))
 
 # source files vs schema.sql
 for tag, fp in src_fps.items():
@@ -130,7 +130,7 @@ for tag, fp in src_fps.items():
             continue
         if t not in schema_fps:
             real_drift.append(
-                f"[REAL-DRIFT] {t} 在 {tag} 里有 CREATE, schema.sql 缺失")
+                _t("main.check_schema.drift.missing_in_schema", {"table": t, "tag": tag}))
 
 if real_drift:
     print("REAL drift detected (must fix):")

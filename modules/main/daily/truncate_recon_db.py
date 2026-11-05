@@ -103,7 +103,7 @@ def reset_sequences(con):
 
 def truncate(db_path, *, include_type_map, vacuum, dry_run):
     if not os.path.exists(db_path):
-        sys.exit(f"db 不存在: {db_path}")
+        sys.exit(_t("main.truncate_recon_db.db_missing", {"db_path": db_path}))
     # uri= allows the read and the write on the same file; immutable=True is not advised, because we do want to write
     con = sqlite3.connect(db_path, isolation_level=None)
     try:
@@ -117,9 +117,10 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
         print(_t("main.truncate_recon_db.plan"))
         for i, t in enumerate(order, 1):
             print(f"  {i:2}. {t:<22} rows={before[t]}")
-        print(
-            f"包含 service_type_map: {'yes' if include_type_map else 'no (保留 runner 累积的类型映射)'}"
-        )
+        print(_t(
+            "main.truncate_recon_db.includes_type_map",
+            {"value": "yes" if include_type_map else _t("main.truncate_recon_db.keeps_type_map")},
+        ))
         if vacuum:
             print(_t("main.truncate_recon_db.vacuum_note"))
         if dry_run:
@@ -150,7 +151,7 @@ def truncate(db_path, *, include_type_map, vacuum, dry_run):
         print()
         print(_t("main.truncate_recon_db.done"))
         for t in order:
-            mark = "" if before[t] else " (空表)"
+            mark = "" if before[t] else _t("main.truncate_recon_db.empty_table")
             print(f"  {t:<22} {before[t]:>8} -> {after[t]:>8}{mark}")
         return 0
     finally:
@@ -180,11 +181,11 @@ def main():
     ap.add_argument("-y", "--yes", action="store_true", help=_t("main.truncate_recon_db.arg_skip_confirm"))
     args = ap.parse_args()
 
-    print(f"即将清空: {args.db}")
+    print(_t("main.truncate_recon_db.will_truncate", {"db": args.db}))
     print(_t("main.truncate_recon_db.arg_keeps"))
     if not args.yes and not args.dry_run:
         try:
-            ans = input("确认执行？[y/N] ").strip().lower()
+            ans = input(_t("main.truncate_recon_db.confirm")).strip().lower()
         except EOFError:
             ans = ""
         if ans not in ("y", "yes"):
