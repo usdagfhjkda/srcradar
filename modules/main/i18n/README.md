@@ -148,10 +148,17 @@ domains:
 | `install.*` | the checklist and install results of the top-level `install.sh` |
 | `check.*` | the environment check output of `check.sh` |
 | `i18n.*` | this module itself |
-| `dashboard.*` | dashboard tabs, table headers and hints |
+| `dashboard.common.*` | the words the dashboard shares: the business, the count, the share |
+| `dashboard.tab.*` | the tabs of the dashboard |
+| `dashboard.overview.*` | the overview: the cards, the sections and the tables of the assets |
+| `dashboard.sites.*` | the site detail page: its filters, its notes and the score control |
+| `dashboard.ports.*` / `dashboard.risk.*` / `dashboard.companies.*` / `dashboard.mapp.*` | the other tabs of the dashboard |
+| `dashboard.scan_form.*` / `dashboard.scan_urls_form.*` / `dashboard.katana_form.*` | the forms that start a scan |
+| `dashboard.scan_result.*` / `dashboard.urls.*` | the result of a scan and the URL detail page |
 | `daily.summary.*` | the daily report `summary.md` |
 | `notify.body.*` | the notification email body |
-| `health.report.*` / `health.check.*` | the health check report |
+| `health.report.*` / `health.check.*` / `public.health_check.*` | the health check report |
+| `main.<file>.*` | the output of the tools of `modules/main/` |
 
 ### Adding a new string
 
