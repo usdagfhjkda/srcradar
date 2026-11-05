@@ -46,6 +46,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import log
 
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
+
 TIMESTAMP_NOISE = {
     "fetched_at", "updated_at", "last_seen", "first_seen", "created_at",
     "raw_json", "id", "hash_id", "company_id", "business_id", "change_type",
@@ -626,10 +635,11 @@ def write_report(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     summary_lines: list[str] = []
-    summary_lines.append(f"# SRC 资产监控日报 — {run_id}")
+    summary_lines.append(t("daily.summary.title", {"run_id": run_id}))
     summary_lines.append("")
-    summary_lines.append(f"- 对比基线: `run_markers.started_at < {before_ts or 'N/A'}`")
-    summary_lines.append(f"- 本次 diff 时间: `{_now_iso()}`")
+    summary_lines.append(t("daily.summary.baseline",
+                           {"before_ts": before_ts or "N/A"}))
+    summary_lines.append(t("daily.summary.diff_time", {"diff_time": _now_iso()}))
     summary_lines.append("")
 
     grand_total = 0
@@ -674,10 +684,13 @@ def write_report(
         n_total = n_a + n_re + n_de + n_chg
         grand_total += n_total
         summary_lines.append(
-            f"## {table}  (+{n_a} / ↻{n_re} / ↘{n_de} / ✎{n_chg})"
+            t("daily.summary.table_header", {
+                "table": table, "added": n_a, "reactivated": n_re,
+                "deactivated": n_de, "changed": n_chg,
+            })
         )
         if n_total == 0:
-            summary_lines.append("  - 无变化")
+            summary_lines.append(t("daily.summary.no_change"))
             summary_lines.append("")
             continue
 
@@ -690,35 +703,37 @@ def write_report(
                 desc = ", ".join(f"{k}={r[k]}" for k in keys if r.get(k))
                 out.append(f"    - {desc}")
             if len(items) > n:
-                out.append(f"    - … 还有 {len(items) - n} 条")
+                out.append(t("daily.summary.more", {"count": len(items) - n}))
             return out
 
         if n_a:
-            summary_lines.append(f"  - 新增 ({n_a}):")
+            summary_lines.append(t("daily.summary.added", {"count": n_a}))
             summary_lines += _fmt(cls["added"], 20)
         if n_re:
-            summary_lines.append(f"  - 复活 ({n_re}):")
+            summary_lines.append(t("daily.summary.reactivated", {"count": n_re}))
             summary_lines += _fmt(cls["reactivated"], 20)
         if n_de:
-            summary_lines.append(f"  - 失活 ({n_de}):")
+            summary_lines.append(t("daily.summary.deactivated", {"count": n_de}))
             summary_lines += _fmt(deactivated, 20)
         if n_chg:
-            summary_lines.append(f"  - 内容变更 ({n_chg}):")
+            summary_lines.append(t("daily.summary.changed", {"count": n_chg}))
             summary_lines += _fmt(cls["changed"], 20)
         summary_lines.append("")
 
-    summary_lines.insert(3, f"- 本次变更总数: **{grand_total}**")
+    summary_lines.insert(3, t("daily.summary.total", {"total": grand_total}))
     summary_lines.insert(4, "")
 
     if per_business_warnings:
-        summary_lines.append("## 业务运行告警")
+        summary_lines.append(t("daily.summary.biz_warnings"))
         summary_lines.append("")
         any_warn = False
         for biz, warns in per_business_warnings.items():
             if not warns:
                 continue
             any_warn = True
-            summary_lines.append(f"- **{biz}**: {', '.join(warns)}")
+            summary_lines.append(t("daily.summary.biz_warning_item", {
+                "biz": biz, "warnings": ", ".join(warns),
+            }))
         if not any_warn:
             summary_lines.pop()
             summary_lines.pop()

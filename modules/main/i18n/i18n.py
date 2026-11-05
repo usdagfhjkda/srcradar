@@ -39,6 +39,7 @@ between "query en" and "use en for the following command".
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 # The bootstrap module holds the single definition of "where is the
@@ -160,10 +161,8 @@ def t(key, *args):
     The language is resolved on the first call and then cached for the
     lifetime of the process. Call set_lang() to switch it.
     """
-    global _active_lang
-    if _active_lang is None:
-        _active_lang = resolve_lang()
-    value = load_table(_active_lang).get(key)
+    lang = get_lang()
+    value = load_table(lang).get(key)
     if value is None:
         value = load_table(DEFAULT_LANG).get(key)
     if value is None:
@@ -173,12 +172,55 @@ def t(key, *args):
     return value
 
 
-def set_lang(lang):
-    """Force the language for this process (used by tests)."""
-    global _active_lang
+
+
+# The language of the current thread. The dashboard serves the requests
+# concurrently and the language is a per-request setting, so it cannot
+# live in a module global: one request would change the language of
+# another one. The process default stays the language of the
+# configuration.
+_thread_state = threading.local()
+
+
+def set_lang(lang, *, thread_local: bool = True):
+    """Force the language for this process or for this thread.
+
+    With thread_local (the default) the language belongs to the calling
+    thread and the other threads keep theirs. Without it the language is
+    process wide, which is what a command line tool wants.
+
+    Returns the resolved language.
+    """
     resolved = normalize_lang(lang) or DEFAULT_LANG
+    if thread_local:
+        _thread_state.lang = resolved
+    global _active_lang
     _active_lang = resolved
     return resolved
+
+
+def get_lang() -> str:
+    """The language of the calling thread, resolved on the first call."""
+    lang = getattr(_thread_state, "lang", None)
+    if lang is not None:
+        return lang
+    global _active_lang
+    if _active_lang is None:
+        _active_lang = resolve_lang()
+    return _active_lang
+
+
+def reset_lang() -> None:
+    """Drop the language of the calling thread.
+
+    The next lookup resolves it again from the configuration. A request
+    handler calls this when it is done, so that the thread does not keep
+    the language of the request it just served.
+    """
+    _thread_state.lang = None
+    global _active_lang
+    _active_lang = None
+
 
 
 def dump_shell(lang):

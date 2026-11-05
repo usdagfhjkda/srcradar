@@ -176,8 +176,8 @@ $SUBJECT $BUSINESS $DATE_PH daily diff
 ! $REACTIVATED_PLACEHOLDER reactivated
 deactivated: $DEACTIVATED_PLACEHOLDER
 
-Dashboard: http://127.0.0.1:8765/$BUSINESS/diff (需 SSH 隧道)
-Encrypted attachment: summary.gpg (OpenPGP,需 OpenKeychain 解密)
+Dashboard: http://127.0.0.1:8765/$BUSINESS/diff $(t notify.body.dashboard_hint)
+Encrypted attachment: summary.gpg (OpenPGP,$(t notify.body.gpg_hint))
 EOF
     chmod 0600 "$body_file"
     BODY_OUT="$body_file"

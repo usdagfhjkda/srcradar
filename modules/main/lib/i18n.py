@@ -59,13 +59,17 @@ load_table = _impl.load_table
 normalize_lang = _impl.normalize_lang
 resolve_lang = _impl.resolve_lang
 set_lang = _impl.set_lang
+get_lang = _impl.get_lang
+reset_lang = _impl.reset_lang
 t = _impl.t
 
 __all__ = [
     "DEFAULT_LANG",
     "KNOWN_LANGS",
+    "get_lang",
     "load_table",
     "normalize_lang",
+    "reset_lang",
     "resolve_lang",
     "set_lang",
     "t",
