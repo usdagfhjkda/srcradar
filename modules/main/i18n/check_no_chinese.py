@@ -41,6 +41,7 @@ ALLOWED_LANG = {"\u4e2d\u6587"}
 # data of the comparison, not output
 ALLOWED_MARKERS = {
     "\u7591\u4f3c\u5371\u9669", "\u5371\u9669\u8def\u7531", "\u5df2\u8df3\u8fc7\u9a8c\u8bc1",
+    "\u7591\u4f3c\u5371\u9669\u8def\u7531,\u5df2\u8df3\u8fc7\u9a8c\u8bc1",
 }
 # the tests hold the text they check for, that is the point of a test
 TEST_FILES = ("modules/main/i18n/test_",)

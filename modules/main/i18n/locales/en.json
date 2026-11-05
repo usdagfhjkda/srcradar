@@ -720,6 +720,7 @@
   "public.install.resend_api_key_placeholder": "RESEND_API_KEY is still the placeholder; the real value has not been filled in",
   "public.install.resend_api_key_prefix": "RESEND_API_KEY does not start with re_ (the standard Resend format)",
   "public.install.resend_api_key_too_short": "RESEND_API_KEY is shorter than 20 characters (it looks invalid)",
+  "public.katana.runner.tool_not_found": "{tool} was not found; set the {env_var} environment variable or install it into PATH",
   "public.katana_install.already_in_path": "katana is already in the PATH: $(command -v katana)",
   "public.katana_install.binary_not_removed": "the katana binary was not deleted; if you want it: rm \\$(go env GOPATH)/bin/katana",
   "public.katana_install.checking": "checking the dependencies + the self test...",

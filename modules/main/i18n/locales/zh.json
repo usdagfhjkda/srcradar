@@ -720,6 +720,7 @@
   "public.install.resend_api_key_placeholder": "RESEND_API_KEY 仍是占位符,真值未填",
   "public.install.resend_api_key_prefix": "RESEND_API_KEY 不以 re_ 开头(Resend 标准格式)",
   "public.install.resend_api_key_too_short": "RESEND_API_KEY 长度 < 20 字符(疑似无效)",
+  "public.katana.runner.tool_not_found": "找不到 {tool};设 {env_var} 环境变量或装到 PATH",
   "public.katana_install.already_in_path": "katana 已在 PATH: $(command -v katana)",
   "public.katana_install.binary_not_removed": "katana 二进制未删;如需: rm \\$(go env GOPATH)/bin/katana",
   "public.katana_install.checking": "检查依赖 + 自检...",

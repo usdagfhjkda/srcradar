@@ -73,7 +73,9 @@ def _resolve_bin(env_var: str, fallback_name: str) -> str:
     if which:
         return which
     raise FileNotFoundError(
-        f"找不到 {fallback_name};设 {env_var} 环境变量或装到 PATH"
+        t("public.katana.runner.tool_not_found", {
+            "tool": fallback_name, "env_var": env_var,
+        })
     )
 
 
