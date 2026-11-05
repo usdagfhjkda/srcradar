@@ -77,8 +77,9 @@ def _resolve_bin(env_var: str, fallback_name: str) -> str:
     if which:
         return which
     raise FileNotFoundError(
-        f"[scan_urls] 找不到 {fallback_name}; "
-        f"请设置 ${env_var} 指向绝对路径,或把 {fallback_name} 放进 PATH"
+        t("main.scan_urls.tool_not_found", {
+            "tool": fallback_name, "env_var": env_var,
+        })
     )
 
 
@@ -251,18 +252,18 @@ def _resolve_wordlist(arg: str | None) -> Path:
     if arg:
         p = Path(arg).expanduser()
         if not p.exists():
-            raise RuntimeError(f"wordlist 不存在: {p}")
+            raise RuntimeError(t("main.scan_urls.wordlist_missing", {"path": p}))
         return p
     env = os.environ.get("SCAN_WORDLIST")
     if env:
         p = Path(env).expanduser()
         if not p.exists():
-            raise RuntimeError(f"SCAN_WORDLIST={env} 不存在")
+            raise RuntimeError(t("main.scan_urls.wordlist_env_missing", {"env": env}))
         return p
     if DEFAULT_WORDLIST.exists():
         return DEFAULT_WORDLIST
     raise RuntimeError(
-        f"默认 wordlist 不存在: {DEFAULT_WORDLIST};用 --wordlist 指定或 export SCAN_WORDLIST"
+        t("main.scan_urls.default_wordlist_missing", {"path": DEFAULT_WORDLIST})
     )
 
 
@@ -279,7 +280,7 @@ def run_ffuf(seed_url: str, wordlist: Path) -> list[dict]:
     - status_code / content_type / length / words all come from the ffuf JSON
     """
     if not Path(FFUF_BIN).exists():
-        raise RuntimeError(f"ffuf 不存在: {FFUF_BIN}")
+        raise RuntimeError(t("main.scan_urls.ffuf_missing", {"bin": FFUF_BIN}))
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".json", delete=False, encoding="utf-8"
     ) as f:
@@ -364,7 +365,7 @@ def run_urlfinder(seed_url: str) -> list[dict]:
       line as plain text.
     """
     if not Path(URLFINDER_BIN).exists():
-        raise RuntimeError(f"URLFinder 不存在: {URLFINDER_BIN}")
+        raise RuntimeError(t("main.scan_urls.urlfinder_missing", {"bin": URLFINDER_BIN}))
     with tempfile.TemporaryDirectory() as tmp:
         out_file = Path(tmp) / "urlfinder.json"
         cmd = [
@@ -500,9 +501,9 @@ def run_gau(domain: str) -> list[dict]:
     - the output: txt, one URL per line
     """
     if not Path(GAU_BIN).exists():
-        raise RuntimeError(f"gau 不存在: {GAU_BIN}")
+        raise RuntimeError(t("main.scan_urls.gau_missing", {"bin": GAU_BIN}))
     if not shutil.which(GAU_BIN) and not Path(GAU_BIN).exists():
-        raise RuntimeError(f"gau 不存在: {GAU_BIN}")
+        raise RuntimeError(t("main.scan_urls.gau_missing", {"bin": GAU_BIN}))
     try:
         # the --timeout of gau is a plain number of seconds (NOT "30s"); only the versions before 2.2 support "30s"
         proc = subprocess.run(
@@ -722,24 +723,24 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
     for s in sources:
         if s not in VALID_SOURCES:
-            sys.stderr.write(f"错误:未知 source '{s}'(合法: {VALID_SOURCES})\n")
+            sys.stderr.write(t("main.scan_urls.unknown_source", {"source": s, "valid": VALID_SOURCES}) + "\n")
             return 2
 
     # 1) the hosts file
     hosts_file = Path(args.hosts_file).expanduser().resolve()
     if not hosts_file.exists():
-        sys.stderr.write(f"错误:hosts 文件不存在 {hosts_file}\n")
+        sys.stderr.write(t("main.scan_urls.hosts_file_missing", {"file": hosts_file}) + "\n")
         return 2
     hosts = _read_hosts_file(hosts_file)
     if not hosts:
-        sys.stderr.write("错误:hosts 文件为空\n")
+        sys.stderr.write(t("main.scan_urls.hosts_file_empty") + "\n")
         return 2
     if len(hosts) > MAX_HOSTS:
-        sys.stderr.write(f"错误:host 数 {len(hosts)} 超过上限 {MAX_HOSTS}\n")
+        sys.stderr.write(t("main.scan_urls.too_many_hosts", {"count": len(hosts), "max": MAX_HOSTS}) + "\n")
         return 2
     invalid = [h for h in hosts if not HOSTNAME_RE.match(h)]
     if invalid:
-        sys.stderr.write(f"错误:hostname 不合法 {invalid[:5]}\n")
+        sys.stderr.write(t("main.scan_urls.invalid_hostname", {"hosts": invalid[:5]}) + "\n")
         return 2
 
     # 2) does the business exist?
@@ -750,7 +751,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
             (business,),
         ).fetchone()
         if not bid_row:
-            sys.stderr.write(f"错误:业务 '{business}' 不在 businesses 表\n")
+            sys.stderr.write(t("main.scan_urls.business_not_found", {"business": business}) + "\n")
             return 2
         business_id = int(bid_row[0])
 
@@ -760,7 +761,7 @@ def cmd_scan_urls(args: argparse.Namespace) -> int:
         for host in hosts:
             hash_id = _resolve_hash_id(conn, business_id, host)
             if hash_id is None:
-                _log("scan_urls", f"{host}: 该子域下无 active web_subdomains,跳过")
+                _log("scan_urls", t("main.scan_urls.no_active_subdomains", {"host": host}))
                 continue
             # ffuf needs scheme://host(:port)/FUZZ; https is used as the fallback here, while urlfinder takes the url form itself
             seed_url = f"https://{host}"
@@ -828,7 +829,7 @@ def _main(argv: list[str]) -> int:
     p.add_argument("--business", required=True)
     p.add_argument("--hosts-file", required=True)
     p.add_argument("--sources", required=True,
-                   help=f"逗号分隔子集,合法: {','.join(VALID_SOURCES)}")
+                   help=t("main.scan_urls.arg_sources", {"valid": ','.join(VALID_SOURCES)}))
     p.add_argument("--wordlist", default=None)
 
     args = parser.parse_args(argv)

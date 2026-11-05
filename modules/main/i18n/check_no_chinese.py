@@ -37,6 +37,11 @@ ALLOWED_REGEX = {"*[\u4e00-\u9fa5]*"}
 ALLOWED_DATA = {"\u53ef\u6d4b\u8d44\u4ea7", "\u975e\u53ef\u6d4b\u8d44\u4ea7"}
 # the name of a language: the switcher offers it as a label
 ALLOWED_LANG = {"\u4e2d\u6587"}
+# the markers that match the output of the URLFinder tool: they are the
+# data of the comparison, not output
+ALLOWED_MARKERS = {
+    "\u7591\u4f3c\u5371\u9669", "\u5371\u9669\u8def\u7531", "\u5df2\u8df3\u8fc7\u9a8c\u8bc1",
+}
 # the tests hold the text they check for, that is the point of a test
 TEST_FILES = ("modules/main/i18n/test_",)
 PATTERNS = ("SCAN_RES_OK_RE",)
@@ -94,6 +99,8 @@ def main():
             if body in ALLOWED or body in ALLOWED_SINGLE or body in ALLOWED_REGEX:
                 continue
             if body in ALLOWED_DATA or body in ALLOWED_LANG:
+                continue
+            if body in ALLOWED_MARKERS:
                 continue
             if any(m in body for m in CSS_MARKERS):
                 continue
