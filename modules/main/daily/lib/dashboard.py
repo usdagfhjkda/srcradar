@@ -354,7 +354,7 @@ def _score_cell(r: dict) -> str:
     desc = r.get('hash_description') or ''
     sort_key = -1 if score is None else score
     score_txt = '—' if score is None else str(score)
-    return f'<td class="score-cell" data-hash-id="{hid}" data-num="{sort_key}"><input type="number" class="score-input" data-hash-id="{hid}" data-cur-score="{score_txt}" value="{score_txt}" min="-1000" max="1000" step="1" title="绝对值(0-100) 或 ±N 相对当前值" /><button type="button" class="score-save" data-hash-id="{hid}" title="保存 score + description">save</button><span class="desc-status" data-hash-id="{hid}"></span></td><td class="desc-cell" data-hash-id="{hid}"><input type="text" class="desc-input" data-hash-id="{hid}" value="{_e(desc)}" maxlength="500" placeholder="备注..." title="回车或 save 保存" /></td>'
+    return f'<td class="score-cell" data-hash-id="{hid}" data-num="{sort_key}"><input type="number" class="score-input" data-hash-id="{hid}" data-cur-score="{score_txt}" value="{score_txt}" min="-1000" max="1000" step="1" title="{_t("dashboard.sites.score_input_title")}" /><button type="button" class="score-save" data-hash-id="{hid}" title="{_t("dashboard.sites.score_save_title")}">save</button><span class="desc-status" data-hash-id="{hid}"></span></td><td class="desc-cell" data-hash-id="{hid}"><input type="text" class="desc-input" data-hash-id="{hid}" value="{_e(desc)}" maxlength="500" placeholder="{_t("dashboard.sites.desc_placeholder")}" title="{_t("dashboard.sites.desc_save_title")}" /></td>'
 
 def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
     """The site details — the wildcard noise without a TLD is hidden (every
@@ -389,7 +389,8 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
         if not biz_quoted or hash_id is None:
             return ''
         href = f'/{biz_quoted}/urls/{hash_id}'
-        return f'''<td><a class="btn small" href="{_e(href)}" target="_blank" title="查看该 hash 下所有扫到的 URL 路径（按 {_e(subdomain or '')}）">open</a></td>'''
+        detail_title = _t('dashboard.sites.url_detail_title', {'subdomain': _e(subdomain or '')})
+        return f'''<td><a class="btn small" href="{_e(href)}" target="_blank" title="{detail_title}">open</a></td>'''
     ws_raw = agg['tables']['web_subdomains']
     ws = [r for r in ws_raw if '.' in (r.get('subdomain') or '')]
     hidden = len(ws_raw) - len(ws)
@@ -424,9 +425,9 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
         # mapping, so the badge
         # fell back to ?, and the user could not tell that it was a revival.
         return {
-            'added':       ('tag-new', '新'),
-            'reactivated': ('tag-new', '新'),
-            'changed':     ('tag-changed', '变'),
+            'added':       ('tag-new', _t('dashboard.sites.tag_new')),
+            'reactivated': ('tag-new', _t('dashboard.sites.tag_new')),
+            'changed':     ('tag-changed', _t('dashboard.sites.tag_changed')),
         }.get(cat, ('tag-info', '?'))
     rows_html_parts: list[str] = []
     hash_subs_for_modal: dict[str, list[str]] = defaultdict(list)
@@ -457,10 +458,20 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
         n_added = sum((1 for c in bucket_cat.values() if c == 'added'))
         n_changed = sum((1 for c in bucket_cat.values() if c == 'changed'))
         n_subs = sum(hash_count.values())
-        meta_parts = [f'{len(hash_first):,} 条 · 按 hash 去重 · 原始 {n_subs:,}', f'桶标 新 {n_added:,} · 变 {n_changed:,}']
-        meta_parts.append('点 hash 看同指纹子域')
+        meta_parts = [
+            _t('dashboard.sites.meta_dedup', {'count': f'{len(hash_first):,}', 'total': f'{n_subs:,}'}),
+            _t('dashboard.sites.meta_bucket_tags', {'added': f'{n_added:,}', 'changed': f'{n_changed:,}'}),
+        ]
+        meta_parts.append(_t('dashboard.sites.meta_click_hash_same'))
         if n_changed == 0 and n_added > 0:
-            allnew_html = f'<div class="note note-allnew">⚠ 本业务下 <b>全部 {n_subs:,}</b> 条有效子域在本次运行中均为<b>新增</b>（无既有基线对比，新增前可能未扫描过该业务）。如需关注内容变化，需先建立该业务的扫描基线。</div>'
+            allnew_html = (
+                '<div class="note note-allnew">'
+                + _t('dashboard.sites.note_all_new', {
+                    'total': '<b>' + _t('dashboard.sites.note_all_new.total', {'count': f'{n_subs:,}'}) + '</b>',
+                    'added': '<b>' + _t('dashboard.sites.note_all_new.added') + '</b>',
+                })
+                + '</div>'
+            )
         else:
             allnew_html = ''
     else:
@@ -479,19 +490,19 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
             rows_html_parts.append(f'''<tr class="risk-{status_risk(r.get('status_code'))}" data-hash="{_e(h)}" data-port="{r['port']}" data-hash-count="{cnt}" data-bucket-urls="{_e(bucket_urls)}" data-zh="{has_zh(r.get('title') or '')}"><td class="mono"><a href="{_e(url_for(r))}" target="_blank" rel="noopener noreferrer">{_e(url_for(r))}</a></td><td>{r['port']}</td><td>{(r.get('status_code') if r.get('status_code') is not None else '—')}</td><td>{(r.get('content_length') if r.get('content_length') is not None else '—')}</td><td>{_e(r.get('title') or '')}</td><td class="muted">{_e(r.get('technologies') or '')}</td><td><a class="hash-link" data-hash="{_e(h)}" href="javascript:void(0)">{_e(h)}</a></td><td class="num">{cnt:,}</td><td>{r.get('is_active', 0)}</td>{_score_cell(r)}{_url_detail_cell(r.get('hash_id'), r.get('subdomain'))}</tr>''')
         rows_html = ''.join(rows_html_parts)
         hash_subs_for_modal = dict(hash_subs)
-        meta_parts = [f'{len(hash_first):,} 条 · 按 hash 去重 · 原始 {len(ws_raw):,}']
+        meta_parts = [_t('dashboard.sites.meta_dedup', {'count': f'{len(hash_first):,}', 'total': f'{len(ws_raw):,}'})]
         if hidden:
-            meta_parts.append(f'隐藏 {hidden:,} 条无 TLD 后缀')
-        meta_parts.append('点 hash 看全部子域')
+            meta_parts.append(_t('dashboard.sites.meta_hidden_no_tld', {'count': f'{hidden:,}'}))
+        meta_parts.append(_t('dashboard.sites.meta_click_hash_all'))
     meta = ' · '.join(meta_parts)
     if diff_mode:
-        head_cells = '<th>类别</th><th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">分数</th><th>备注</th><th>URL 详情</th>'
-        empty = '<tr><td colspan="13" class="muted">无新增站点</td></tr>'
+        head_cells = f'<th>{_t("dashboard.sites.table_category")}</th><th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">{_t("dashboard.sites.table_score")}</th><th>{_t("dashboard.sites.table_note")}</th><th>{_t("dashboard.sites.table_url_detail")}</th>'
+        empty = f'<tr><td colspan="13" class="muted">{_t("dashboard.sites.empty_new")}</td></tr>'
     else:
-        head_cells = '<th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">分数</th><th>备注</th><th>URL 详情</th>'
-        empty = '<tr><td colspan="12" class="muted">无 web 子域</td></tr>'
+        head_cells = f'<th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">{_t("dashboard.sites.table_score")}</th><th>{_t("dashboard.sites.table_note")}</th><th>{_t("dashboard.sites.table_url_detail")}</th>'
+        empty = f'<tr><td colspan="12" class="muted">{_t("dashboard.sites.empty_web")}</td></tr>'
     hash_data_json = json.dumps(dict(hash_subs_for_modal), ensure_ascii=False)
-    return f'\n{allnew_html}\n<div class="filter">\n  <input id="q-sites" placeholder="过滤 URL / title / tech / hash" />\n  &nbsp;\n  <button class="toggle" data-toggle="hide-http">隐藏 http</button>\n  <button class="toggle" data-toggle="unique">仅 unique</button>\n  <button class="toggle" data-toggle="zh">中文优先</button>\n  &nbsp; <span class="muted">{meta}</span>\n</div>\n<div class="scroll-x"><table id="sites-table">\n<thead><tr>\n  {head_cells}\n</tr></thead>\n<tbody>\n{rows_html or empty}\n</tbody>\n</table></div>\n\n<div id="hash-modal" class="modal" style="display:none">\n  <div class="modal-card">\n    <div class="modal-header">\n      <span id="hash-modal-title"></span>\n      <button id="hash-modal-close" aria-label="关闭">×</button>\n    </div>\n    <div id="hash-modal-body"></div>\n  </div>\n</div>\n\n<script id="hash-data" type="application/json">{hash_data_json}</script>\n'
+    return f'\n{allnew_html}\n<div class="filter">\n  <input id="q-sites" placeholder="{_t("dashboard.sites.filter_placeholder")}" />\n  &nbsp;\n  <button class="toggle" data-toggle="hide-http">{_t("dashboard.sites.filter_hide_http")}</button>\n  <button class="toggle" data-toggle="unique">{_t("dashboard.sites.filter_unique_only")}</button>\n  <button class="toggle" data-toggle="zh">{_t("dashboard.sites.filter_zh_first")}</button>\n  &nbsp; <span class="muted">{meta}</span>\n</div>\n<div class="scroll-x"><table id="sites-table">\n<thead><tr>\n  {head_cells}\n</tr></thead>\n<tbody>\n{rows_html or empty}\n</tbody>\n</table></div>\n\n<div id="hash-modal" class="modal" style="display:none">\n  <div class="modal-card">\n    <div class="modal-header">\n      <span id="hash-modal-title"></span>\n      <button id="hash-modal-close" aria-label="{_t("dashboard.sites.modal_close")}">×</button>\n    </div>\n    <div id="hash-modal-body"></div>\n  </div>\n</div>\n\n<script id="hash-data" type="application/json">{hash_data_json}</script>\n'
 
 def _build_ports(agg: dict) -> str:
     tcp = agg['tables']['tcp_assets']
