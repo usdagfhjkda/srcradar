@@ -510,7 +510,20 @@ fi
 NOTIFY_SEND="$RECON_ROOT/public/notify/notify_send.sh"
 SUMMARY_MD="$REPORT_DIR/summary.md"
 if [ -x "$NOTIFY_SEND" ] && [ -f "$SUMMARY_MD" ]; then
-    DIFF_TOTAL="$(grep -oE '本次变更总数: \*\*[0-9]+\*\*' "$SUMMARY_MD" 2>/dev/null         | grep -oE '[0-9]+' | head -1)"
+    # The total is read out of the summary in Python, so that it does not
+    # depend on the wording of the line: the summary is written in the
+    # configured language, and a grep on the Chinese label would find
+    # nothing as soon as the language is not Chinese.
+    DIFF_TOTAL="$(python3 - "$SUMMARY_MD" <<'PYEOF'
+import re, sys
+with open(sys.argv[1], encoding="utf-8") as f:
+    for line in f:
+        m = re.match(r"^- .*?:\s*\*\*(\d+)\*\*\s*$", line)
+        if m:
+            print(m.group(1))
+            break
+PYEOF
+)"
     DIFF_TOTAL="${DIFF_TOTAL:-0}"
     if [ "${DIFF_TOTAL:-0}" -gt 0 ]; then
         # User 2026-09-28: when there are only deactivated ↘ rows (no added + ↻ + ✎),
