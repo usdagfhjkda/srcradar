@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: Apache-2.0
 """Report the user-visible output that still holds Chinese.
 
 Usage:
@@ -33,6 +32,11 @@ ALLOWED = {
 ALLOWED_SINGLE = {"\u4e00"}
 # the regular expression that matches a Chinese title
 ALLOWED_REGEX = {"*[\u4e00-\u9fa5]*"}
+# the scope values of the database: they are data, the check of the
+# schema compares them
+ALLOWED_DATA = {"\u53ef\u6d4b\u8d44\u4ea7", "\u975e\u53ef\u6d4b\u8d44\u4ea7"}
+# the name of a language: the switcher offers it as a label
+ALLOWED_LANG = {"\u4e2d\u6587"}
 PATTERNS = ("SCAN_RES_OK_RE",)
 CSS_MARKERS = ("box-sizing", ".urls-table", ".ant-table")
 
@@ -76,6 +80,8 @@ def main():
                 continue
             body = body_of(ts)
             if body in ALLOWED or body in ALLOWED_SINGLE or body in ALLOWED_REGEX:
+                continue
+            if body in ALLOWED_DATA or body in ALLOWED_LANG:
                 continue
             if any(m in body for m in CSS_MARKERS):
                 continue
