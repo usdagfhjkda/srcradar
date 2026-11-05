@@ -23,7 +23,7 @@ for _p in Path(__file__).resolve().parents:
     if (_p / "modules").is_dir():
         sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
         break
-from i18n import t
+from i18n import t as _t
 
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "db" / "recon.sqlite3"
@@ -142,14 +142,14 @@ def _normalize_tech(v: Any) -> Any:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=t("main.import_scan_results.description"))
-    parser.add_argument("--business", required=True, help=t("main.import_scan_results.arg_business"))
-    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=t("main.import_scan_results.arg_db"))
-    parser.add_argument("--scan-dir", default=str(DEFAULT_SCAN_DIR), help=t("main.import_scan_results.arg_scan_dir"))
-    parser.add_argument("--target-file", default="target.txt", help=t("main.import_scan_results.arg_measurable"))
-    parser.add_argument("--exclude-file", default="exclude.txt", help=t("main.import_scan_results.arg_not_measurable"))
-    parser.add_argument("--wildcard-file", default="wildcard.txt", help=t("main.import_scan_results.arg_wildcard"))
-    parser.add_argument("--dry-run", action="store_true", help=t("main.import_scan_results.arg_dry_run"))
+    parser = argparse.ArgumentParser(description=_t("main.import_scan_results.description"))
+    parser.add_argument("--business", required=True, help=_t("main.import_scan_results.arg_business"))
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=_t("main.import_scan_results.arg_db"))
+    parser.add_argument("--scan-dir", default=str(DEFAULT_SCAN_DIR), help=_t("main.import_scan_results.arg_scan_dir"))
+    parser.add_argument("--target-file", default="target.txt", help=_t("main.import_scan_results.arg_measurable"))
+    parser.add_argument("--exclude-file", default="exclude.txt", help=_t("main.import_scan_results.arg_not_measurable"))
+    parser.add_argument("--wildcard-file", default="wildcard.txt", help=_t("main.import_scan_results.arg_wildcard"))
+    parser.add_argument("--dry-run", action="store_true", help=_t("main.import_scan_results.arg_dry_run"))
     return parser.parse_args()
 
 
@@ -162,7 +162,7 @@ def clean_line(line: str) -> str | None:
 
 def read_scope_file(path: Path) -> list[str]:
     if not path.exists():
-        raise FileNotFoundError(f"范围文件不存在: {path}")
+        raise FileNotFoundError(_t("main.import_scan_results.scope_file_missing", {"path": path}))
     result: list[str] = []
     seen: set[str] = set()
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -331,7 +331,7 @@ def parse_json_web(path: Path) -> list[dict[str, Any]]:
         try:
             item = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"{path}:{number} 不是有效 JSONL: {exc}") from exc
+            raise ValueError(_t("main.import_scan_results.invalid_jsonl", {"path": path, "line": number, "error": exc})) from exc
         if not isinstance(item, dict):
             continue
         url = first_value(item, "url", "input")
@@ -582,9 +582,9 @@ def load_web_records(scan_dir: Path, ip_domains: dict[str, list[str]]) -> list[d
         # the counts are recorded, never swallowed: a change in the upstream
         # format shows up here explicitly.
         print(
-            "[import] WARN: %d/%d 条 web record 的 input 无真实 subdomain, "
-            "已回退 IP 反查确定资产身份"
-            % (fallback_ip_count, len(raw)),
+            _t("main.import_scan_results.warn_no_subdomain", {
+                "count": fallback_ip_count, "total": len(raw),
+            }),
             file=sys.stderr,
         )
     return list(records.values())
@@ -1163,17 +1163,21 @@ def main() -> int:
     tcp = load_tcp_records(scan_dir, ip_domains)
     missing_hash = sum(1 for item in web if not item.get("response_hash"))
 
-    print(f"业务: {args.business}")
-    print(f"可测范围: {len(targets)}，非可测范围: {len(excludes)}，泛解析域: {len(wildcards)}")
-    print(f"Web 记录: {len(web)}，TCP 记录: {len(tcp)}，缺少 hash 的 Web: {missing_hash}")
+    print(_t("main.import_scan_results.business", {"business": args.business}))
+    print(_t("main.import_scan_results.scope_counts", {
+        "targets": len(targets), "excludes": len(excludes), "wildcards": len(wildcards),
+    }))
+    print(_t("main.import_scan_results.record_counts", {
+        "web": len(web), "tcp": len(tcp), "missing_hash": missing_hash,
+    }))
     if not web and not tcp:
-        print(t("main.import_scan_results.no_results"), file=sys.stderr)
+        print(_t("main.import_scan_results.no_results"), file=sys.stderr)
         return 1
     if missing_hash:
-        print(t("main.import_scan_results.missing_hash"), file=sys.stderr)
+        print(_t("main.import_scan_results.missing_hash"), file=sys.stderr)
         return 1
     if args.dry_run:
-        print(t("main.import_scan_results.dry_run_note"))
+        print(_t("main.import_scan_results.dry_run_note"))
         return 0
 
     db_path = Path(args.db).expanduser().resolve()
@@ -1185,12 +1189,12 @@ def main() -> int:
             web_count, tcp_count = persist(conn, args.business, targets, excludes, web, tcp, wildcards)
     except (sqlite3.Error, OSError, ValueError, KeyError) as exc:
         conn.rollback()
-        print(t("main.import_scan_results.store_failed", {"exc": exc}), file=sys.stderr)
+        print(_t("main.import_scan_results.store_failed", {"exc": exc}), file=sys.stderr)
         return 1
     finally:
         conn.close()
 
-    print(t("main.import_scan_results.store_ok", {"web_count": web_count, "tcp_count": tcp_count}))
+    print(_t("main.import_scan_results.store_ok", {"web_count": web_count, "tcp_count": tcp_count}))
     return 0
 
 
@@ -1207,12 +1211,12 @@ def _parse_scan_onesite_args(argv: list[str]) -> argparse.Namespace:
     """The argparse setup for the scan-onesite subcommand. Not shared with the parse_args() in main()."""
     parser = argparse.ArgumentParser(
         prog="import_scan_results.py scan-onesite",
-        description=t("main.import_scan_results.onesite_desc"),
+        description=_t("main.import_scan_results.onesite_desc"),
     )
-    parser.add_argument("--business", required=True, help=t("main.import_scan_results.onesite_arg_business"))
+    parser.add_argument("--business", required=True, help=_t("main.import_scan_results.onesite_arg_business"))
     parser.add_argument("--hosts-file", required=True, type=Path,
-                        help=t("main.import_scan_results.onesite_arg_hosts"))
-    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=t("main.import_scan_results.onesite_arg_db"))
+                        help=_t("main.import_scan_results.onesite_arg_hosts"))
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=_t("main.import_scan_results.onesite_arg_db"))
     return parser.parse_args(argv)
 
 
@@ -1239,7 +1243,7 @@ def _run_httpx(hosts: list[str]) -> list[dict[str, Any]]:
     code.
     """
     if not Path(HTTPX_BIN).exists():
-        raise RuntimeError(f"找不到 httpx：{HTTPX_BIN}")
+        raise RuntimeError(_t("main.import_scan_results.httpx_not_found", {"bin": HTTPX_BIN}))
 
     stdin_blob = ("\n".join(hosts) + "\n").encode("utf-8")
     # Without -l, httpx reads the host list from stdin by default.
@@ -1256,13 +1260,13 @@ def _run_httpx(hosts: list[str]) -> list[dict[str, Any]]:
             capture_output=True, timeout=HTTPX_TIMEOUT, check=False,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError(f"无法启动 httpx：{exc}") from exc
+        raise RuntimeError(_t("main.import_scan_results.httpx_start_failed", {"error": exc})) from exc
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"httpx 超时（{HTTPX_TIMEOUT}s）") from exc
+        raise RuntimeError(_t("main.import_scan_results.httpx_timeout", {"timeout": HTTPX_TIMEOUT})) from exc
 
     if proc.returncode != 0 and not proc.stdout:
         err = proc.stderr.decode("utf-8", "replace").strip() or f"exit={proc.returncode}"
-        raise RuntimeError(f"httpx 失败：{err[:300]}")
+        raise RuntimeError(_t("main.import_scan_results.httpx_failed", {"error": err[:300]}))
 
     tmp_path: Path | None = None
     try:
@@ -1272,7 +1276,7 @@ def _run_httpx(hosts: list[str]) -> list[dict[str, Any]]:
         try:
             return parse_json_web(tmp_path)
         except (ValueError, OSError) as exc:
-            raise RuntimeError(f"解析 httpx 输出失败：{exc}") from exc
+            raise RuntimeError(_t("main.import_scan_results.httpx_output_failed", {"error": exc})) from exc
     finally:
         if tmp_path is not None:
             try:
@@ -1289,14 +1293,16 @@ def cmd_scan_onesite(args: argparse.Namespace) -> int:
     # 1) read and validate the hosts
     hosts_file = args.hosts_file.expanduser().resolve()
     if not hosts_file.exists():
-        sys.stderr.write(f"错误：找不到 hosts 文件：{hosts_file}\n")
+        sys.stderr.write(_t("main.import_scan_results.hosts_file_missing", {"file": hosts_file}) + "\n")
         return 2
     hosts = _read_hosts_file(hosts_file)
     if not hosts:
-        sys.stderr.write("错误：hosts 文件为空（全部是空行 / 注释）\n")
+        sys.stderr.write(_t("main.import_scan_results.hosts_file_empty") + "\n")
         return 2
     if len(hosts) > MAX_HOSTS:
-        sys.stderr.write(f"错误：域名数量 {len(hosts)} 超过上限 {MAX_HOSTS}\n")
+        sys.stderr.write(_t("main.import_scan_results.too_many_domains", {
+            "count": len(hosts), "max": MAX_HOSTS,
+        }) + "\n")
         return 2
     invalid = [h for h in hosts if not HOSTNAME_RE.match(h)]
     if invalid:

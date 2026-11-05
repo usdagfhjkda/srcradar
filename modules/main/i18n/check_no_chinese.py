@@ -37,6 +37,8 @@ ALLOWED_REGEX = {"*[\u4e00-\u9fa5]*"}
 ALLOWED_DATA = {"\u53ef\u6d4b\u8d44\u4ea7", "\u975e\u53ef\u6d4b\u8d44\u4ea7"}
 # the name of a language: the switcher offers it as a label
 ALLOWED_LANG = {"\u4e2d\u6587"}
+# the tests hold the text they check for, that is the point of a test
+TEST_FILES = ("modules/main/i18n/test_",)
 PATTERNS = ("SCAN_RES_OK_RE",)
 CSS_MARKERS = ("box-sizing", ".urls-table", ".ant-table")
 
@@ -68,6 +70,9 @@ def main():
         if ".git" in path.parts:
             continue
         if "db_align" in str(path) or "ymicp" in str(path):
+            continue
+        # a test holds the text it checks for
+        if any(str(path).startswith(p) for p in TEST_FILES):
             continue
         src = path.read_text(encoding="utf-8")
         lines = src.split("\n")

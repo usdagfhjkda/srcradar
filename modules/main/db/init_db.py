@@ -80,7 +80,7 @@ def main() -> int:
             "SELECT name FROM sqlite_master WHERE type='table'")}
         missing = NEED_TABLES - got
         if missing:
-            print(f"[err] DB 建好后缺表: {sorted(missing)}", file=sys.stderr)
+            print(t("main.init_db.missing_tables", {"tables": sorted(missing)}), file=sys.stderr)
             print(t("main.init_db.schema_incomplete"), file=sys.stderr)
             return 2
 

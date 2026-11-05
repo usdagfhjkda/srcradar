@@ -118,11 +118,15 @@ def apply(db_path: str) -> int:
         conn.commit()
 
         if added:
-            print(f"[apply] 新增列: {', '.join(added)}")
+            print(t("main.migrate_body_columns.added", {"cols": ", ".join(added)}))
         else:
             print(t("main.migrate_body_columns.noop"))
         for table in TABLES:
-            print(f"[apply] 表 {table}: {'存在' if has_table(conn, table) else '缺失'}")
+            print(t("main.migrate_body_columns.table_state", {
+                "table": table,
+                "state": t("main.migrate_body_columns.exists") if has_table(conn, table)
+                         else t("main.migrate_body_columns.missing"),
+            }))
         return 0
     finally:
         conn.close()

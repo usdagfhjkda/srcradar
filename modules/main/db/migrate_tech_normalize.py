@@ -138,7 +138,8 @@ def apply(db_path: str, dry_run: bool) -> int:
                     conn.execute(f"UPDATE {t} SET {COLUMN}=? WHERE id=?", (new, rid))
             if not dry_run:
                 conn.commit()
-            verb = "dry-run 待回填" if dry_run else "已回填"
+            verb = (_t("main.migrate_tech_normalize.verb_dry_run") if dry_run
+                    else _t("main.migrate_tech_normalize.verb_applied"))
             print(_t("main.migrate_tech_normalize.apply_counts", {"t": t, "COLUMN": COLUMN, "verb": verb, "changed": changed}))
         return 0
     finally:
