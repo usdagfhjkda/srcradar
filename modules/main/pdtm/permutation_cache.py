@@ -88,8 +88,10 @@ def filter_permutations(db_path: str, business_id: int, wordlist_hash: str,
         kept.append(perm)
 
     print(
-        f"[permutation_cache] 输入去重 {len(seen)}, 保留 {len(kept)}, "
-        f"跳过已解析 {skipped_resolved}, 跳过缓存未到期 {skipped_cached}",
+        t("main.permutation_cache.counts", {
+            "seen": len(seen), "kept": len(kept),
+            "resolved": skipped_resolved, "cached": skipped_cached,
+        }),
         file=sys.stderr,
     )
     return kept
@@ -142,7 +144,7 @@ def record_permutations(db_path: str, business_id: int, wordlist_hash: str,
     finally:
         conn.close()
     if rows:
-        print(f"[permutation_cache] 写回 {len(rows)} 条 (alterx_runs 同事务标记)", file=sys.stderr)
+        print(t("main.permutation_cache.written", {"count": len(rows)}), file=sys.stderr)
     else:
         print(t("main.permutation_cache.no_candidates"), file=sys.stderr)
     return len(rows)

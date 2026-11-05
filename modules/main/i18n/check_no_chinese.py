@@ -69,10 +69,17 @@ def main():
     for path in sorted(root.rglob("*.py")):
         if ".git" in path.parts:
             continue
-        if "db_align" in str(path) or "ymicp" in str(path):
+        # the path is compared relative to the root, so that the check
+        # holds whatever the root is
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            rel = path
+        rel = str(rel)
+        if "db_align" in rel or "ymicp" in rel:
             continue
         # a test holds the text it checks for
-        if any(str(path).startswith(p) for p in TEST_FILES):
+        if any(rel.startswith(p) for p in TEST_FILES):
             continue
         src = path.read_text(encoding="utf-8")
         lines = src.split("\n")
@@ -100,6 +107,10 @@ def main():
             else:
                 line = ""
             if any(p in line for p in PATTERNS):
+                continue
+            # the SQL that creates the scopes table holds the scope
+            # values in a CHECK constraint: they are data
+            if "CREATE TABLE" in body or "scope_name TEXT" in body:
                 continue
             bad.append("%s:%d %s" % (path, st[0], ts[:70]))
     if bad:

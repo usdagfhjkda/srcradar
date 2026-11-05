@@ -56,17 +56,17 @@ def should_run(db_path: str, business_id: int, cadence_days: int) -> tuple[bool,
         conn.close()
 
     if row is None:
-        return True, "无历史记录(首跑)"
+        return True, t("main.alterx_runs.no_history")
 
     last_ts = parse_iso(row[0])
     if last_ts == 0.0:
-        return True, "历史时间戳无法解析,视为过期"
+        return True, t("main.alterx_runs.timestamp_unparsable")
 
     age = datetime.now(timezone.utc).timestamp() - last_ts
     age_days = age / 86400.0
     if age_days >= cadence_days:
-        return True, f"已过 {age_days:.1f} 天 ≥ 节奏 {cadence_days} 天"
-    return False, f"上次跑在 {age_days:.1f} 天前 < 节奏 {cadence_days} 天"
+        return True, t("main.alterx_runs.overdue", {"age_days": age_days, "cadence_days": cadence_days})
+    return False, t("main.alterx_runs.not_due", {"age_days": age_days, "cadence_days": cadence_days})
 
 
 def mark_ran(db_path: str, business_id: int, wordlist_hash: str,

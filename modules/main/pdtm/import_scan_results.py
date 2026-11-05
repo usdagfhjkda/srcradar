@@ -1307,7 +1307,7 @@ def cmd_scan_onesite(args: argparse.Namespace) -> int:
     invalid = [h for h in hosts if not HOSTNAME_RE.match(h)]
     if invalid:
         sys.stderr.write(
-            f"错误：hostname 不合法：{', '.join(invalid[:5])}\n"
+            _t("main.import_scan_results.invalid_hostname", {"hosts": ", ".join(invalid[:5])}) + "\n"
         )
         return 2
 
@@ -1355,13 +1355,15 @@ def cmd_scan_onesite(args: argparse.Namespace) -> int:
             # for the operator to score by hand in the dashboard)
             _upsert_web_records(conn, business_id, fetched_at, web_records)
     except sqlite3.Error as exc:
-        sys.stderr.write(f"错误：入库失败：{exc}\n")
+        sys.stderr.write(_t("main.import_scan_results.write_failed", {"error": exc}) + "\n")
         return 1
     finally:
         conn.close()
 
     sys.stdout.write(
-        f"[+] 扫描完成：{len(web_records)} 条写入 {business} (业务 id={business_id})\n"
+        _t("main.import_scan_results.scan_done", {
+            "count": len(web_records), "business": business, "business_id": business_id,
+        }) + "\n"
     )
     return 0
 

@@ -58,7 +58,7 @@ def main() -> int:
         for row in conn.execute("SELECT id, business_name FROM businesses").fetchall()
     }
 
-    print(f"[migrate] 待迁移: {len(plan)} 行 (out of {len(rows)} total)")
+    print(t("main.migrate_scope_glob.to_migrate", {"plan": len(plan), "total": len(rows)}))
     if plan:
         print(f"{'id':>4}  {'biz_id':>6}  {'biz_name':<20}  {'scope_name':<10}  {'old':<35}  -> new")
         print("-" * 110)
