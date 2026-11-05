@@ -122,7 +122,7 @@ def check_disk(thresholds: dict) -> list[Finding]:
     if rc != 0 or not out:
         findings.append(Finding(
             severity="alert", check="disk",
-            message="df 命令执行失败",
+            message=t("public.health_check.disk.df_failed"),
             detail=f"rc={rc} stderr={err.strip()[:200]}",
         ))
         return findings
@@ -131,7 +131,7 @@ def check_disk(thresholds: dict) -> list[Finding]:
     # the 5th column looks like '78%'; the mount point can contain spaces
     lines = out.splitlines()
     if len(lines) < 2:
-        findings.append(Finding("alert", "disk", "df 输出为空", out[:200]))
+        findings.append(Finding("alert", "disk", t("public.health_check.disk.df_empty"), out[:200]))
         return findings
 
     parsed: list[tuple[str, int, str]] = []  # (mountpoint, used_pct, raw_line)
@@ -151,8 +151,11 @@ def check_disk(thresholds: dict) -> list[Finding]:
     if not bad:
         findings.append(Finding(
             severity="ok", check="disk",
-            message=f"所有挂载点 < {warn_pct}%",
-            detail=f"共 {len(parsed)} 个挂载点,最大占用 {max((p[1] for p in parsed), default=0)}%",
+            message=t("public.health_check.disk.all_below", {"pct": warn_pct}),
+            detail=t(
+                "public.health_check.disk.all_below_detail",
+                {"count": len(parsed), "max": max((p[1] for p in parsed), default=0)},
+            ),
         ))
         return findings
 
@@ -160,7 +163,7 @@ def check_disk(thresholds: dict) -> list[Finding]:
         sev = "alert" if used >= alert_pct else "warn"
         findings.append(Finding(
             severity=sev, check="disk",
-            message=f"挂载点 {mount} 占用 {used}% (>{warn_pct}%)",
+            message=t("public.health_check.disk.mount_over_threshold", {"mount": mount, "used": used, "pct": warn_pct}),
             detail=raw.strip(),
         ))
     return findings
@@ -185,13 +188,17 @@ def check_cpu(thresholds: dict) -> list[Finding]:
     if rc != 0 or not out:
         findings.append(Finding(
             severity="alert", check="cpu",
-            message="uptime 命令执行失败",
+            message=t("public.health_check.cpu.uptime_failed"),
             detail=f"rc={rc} stderr={err.strip()[:200]}",
         ))
     else:
         m = re.search(r"load average:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)", out)
         if not m:
-            findings.append(Finding("alert", "cpu", "load average 解析失败", out.strip()[:200]))
+            findings.append(Finding(
+                "alert", "cpu",
+                t("public.health_check.cpu.loadavg_parse_failed"),
+                out.strip()[:200],
+            ))
         else:
             l1, l5, l15 = float(m.group(1)), float(m.group(2)), float(m.group(3))
             ratio5 = l5 / n
@@ -211,14 +218,18 @@ def check_cpu(thresholds: dict) -> list[Finding]:
 
     # ---- the instantaneous CPU usage (top -bn1) ----
     if not shutil.which("top"):
-        findings.append(Finding("alert", "cpu", "top 命令不存在", "瞬时 CPU 占用无法采集"))
+        findings.append(Finding(
+            "alert", "cpu",
+            t("public.health_check.cpu.top_missing"),
+            t("public.health_check.cpu.top_missing_detail"),
+        ))
         return findings
 
     rc, out, err = _safe_run(["top", "-bn1"])
     if rc != 0 or not out:
         findings.append(Finding(
             severity="alert", check="cpu",
-            message="top -bn1 执行失败",
+            message=t("public.health_check.cpu.top_failed"),
             detail=f"rc={rc} stderr={err.strip()[:200]}",
         ))
         return findings
@@ -230,12 +241,16 @@ def check_cpu(thresholds: dict) -> list[Finding]:
             cpu_line = line
             break
     if not cpu_line:
-        findings.append(Finding("alert", "cpu", "%Cpu 行未找到", out.splitlines()[0][:200]))
+        findings.append(Finding(
+            "alert", "cpu",
+            t("public.health_check.cpu.pct_line_missing"),
+            out.splitlines()[0][:200],
+        ))
         return findings
 
     m = _CPU_PCT_RE.search(cpu_line)
     if not m:
-        findings.append(Finding("alert", "cpu", "idle 字段未找到", cpu_line[:200]))
+        findings.append(Finding("alert", "cpu", t("public.health_check.cpu.idle_field_missing"), cpu_line[:200]))
         return findings
 
     idle = float(m.group(1))
@@ -244,13 +259,13 @@ def check_cpu(thresholds: dict) -> list[Finding]:
     if used >= cpu_pct_alert:
         findings.append(Finding(
             severity="warn", check="cpu",
-            message=f"瞬时 CPU 占用 {used:.1f}% (>{cpu_pct_alert}%)",
+            message=t("public.health_check.cpu.usage_over_threshold", {"used": f"{used:.1f}", "pct": cpu_pct_alert}),
             detail=detail,
         ))
     else:
         findings.append(Finding(
             severity="ok", check="cpu",
-            message=f"瞬时 CPU 占用 {used:.1f}%",
+            message=t("public.health_check.cpu.usage", {"used": f"{used:.1f}"}),
             detail=detail,
         ))
     return findings
@@ -269,7 +284,7 @@ def check_memory(thresholds: dict) -> list[Finding]:
     except OSError as exc:
         findings.append(Finding(
             severity="alert", check="memory",
-            message="/proc/meminfo 读取失败",
+            message=t("public.health_check.memory.meminfo_read_failed"),
             detail=str(exc),
         ))
         return findings
@@ -285,7 +300,7 @@ def check_memory(thresholds: dict) -> list[Finding]:
     if total <= 0 or avail < 0:
         findings.append(Finding(
             severity="alert", check="memory",
-            message="MemTotal/MemAvailable 缺失",
+            message=t("public.health_check.memory.total_available_missing"),
             detail=f"keys={list(kv.keys())[:8]}",
         ))
         return findings
@@ -298,13 +313,13 @@ def check_memory(thresholds: dict) -> list[Finding]:
     if used_pct >= alert_pct:
         findings.append(Finding(
             severity="alert", check="memory",
-            message=f"内存使用 {used_pct:.1f}% (>={alert_pct}%)",
+            message=t("public.health_check.memory.usage_over_threshold", {"used": f"{used_pct:.1f}", "pct": alert_pct}),
             detail=detail,
         ))
     else:
         findings.append(Finding(
             severity="ok", check="memory",
-            message=f"内存使用 {used_pct:.1f}%",
+            message=t("public.health_check.memory.usage", {"used": f"{used_pct:.1f}"}),
             detail=detail,
         ))
     return findings
@@ -404,23 +419,23 @@ def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Pat
         if "no crontab" in err.lower() or not out.strip():
             findings.append(Finding(
                 severity="ok", check="cron",
-                message="当前用户无 crontab",
+                message=t("public.health_check.cron.no_crontab"),
                 detail=err.strip()[:200] or "(empty)",
             ))
         else:
             findings.append(Finding(
                 severity="warn", check="cron",
-                message="crontab -l 失败",
+                message=t("public.health_check.cron.list_failed"),
                 detail=f"rc={rc} stderr={err.strip()[:200]}",
             ))
     else:
         entries = _parse_crontab(out)
         if not entries:
-            findings.append(Finding("ok", "cron", "crontab 无任务", ""))
+            findings.append(Finding("ok", "cron", t("public.health_check.cron.no_tasks"), ""))
         else:
             findings.append(Finding(
                 severity="ok", check="cron",
-                message=f"crontab 解析到 {len(entries)} 条任务",
+                message=t("public.health_check.cron.task_count", {"count": len(entries)}),
                 detail="\n".join(f"{e['schedule']}  {_redact_cmd(e['command'])}" for e in entries),
             ))
 
@@ -440,8 +455,8 @@ def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Pat
             # the full path only appears in the encrypted attachment
             findings.append(Finding(
                 severity="warn", check="cron",
-                message=f"日志不存在: {p.name}",
-                detail=f"max_age_hours={max_age_hours} (path 脱敏)",
+                message=t("public.health_check.cron.log_missing", {"name": p.name}),
+                detail=t("public.health_check.cron.log_missing_detail", {"hours": max_age_hours}),
             ))
             continue
         try:
@@ -449,7 +464,7 @@ def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Pat
         except OSError as exc:
             findings.append(Finding(
                 severity="warn", check="cron",
-                message=f"日志 stat 失败: {p.name}",
+                message=t("public.health_check.cron.log_stat_failed", {"name": p.name}),
                 detail=str(exc),
             ))
             continue
@@ -458,13 +473,16 @@ def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Pat
             # the message is redacted (the basename only), the detail holds the full path (only in the encrypted attachment)
             findings.append(Finding(
                 severity="warn", check="cron",
-                message=f"日志 {p.name} 已 {age_h:.1f}h 未更新 (>{max_age_hours}h)",
+                message=t(
+                    "public.health_check.cron.log_stale",
+                    {"name": p.name, "age": f"{age_h:.1f}", "hours": max_age_hours},
+                ),
                 detail=f"mtime_age_hours={age_h:.2f} path={p}",
             ))
         else:
             findings.append(Finding(
                 severity="ok", check="cron",
-                message=f"日志 {p.name} 年龄 {age_h:.1f}h",
+                message=t("public.health_check.cron.log_age", {"name": p.name, "age": f"{age_h:.1f}"}),
                 detail=f"mtime_age_hours={age_h:.2f} path={p}",
             ))
     return findings
@@ -503,13 +521,13 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
     if not pids:
         findings.append(Finding(
             severity="alert", check="dashboard",
-            message="dashboard 进程未运行",
+            message=t("public.health_check.dashboard.not_running"),
             detail=f"pattern={pattern!r} scanned=/proc/*/cmdline",
         ))
     else:
         findings.append(Finding(
             severity="ok", check="dashboard",
-            message=f"dashboard 运行中 (pid={','.join(pids)})",
+            message=t("public.health_check.dashboard.running", {"pid": ",".join(pids)}),
             detail=f"pattern={pattern!r} pids={pids}",
         ))
 
@@ -518,7 +536,7 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
     if not log_path.exists():
         findings.append(Finding(
             severity="warn", check="dashboard",
-            message=f"watchdog 日志不存在: {log_path.name}",
+            message=t("public.health_check.dashboard.watchdog_log_missing", {"name": log_path.name}),
             detail=f"path={log_path}",
         ))
     else:
@@ -527,7 +545,7 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
         except OSError as exc:
             findings.append(Finding(
                 severity="warn", check="dashboard",
-                message="watchdog 日志 stat 失败",
+                message=t("public.health_check.dashboard.watchdog_log_stat_failed"),
                 detail=str(exc),
             ))
         else:
@@ -535,14 +553,17 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
                 findings.append(Finding(
                     severity="alert",
                     check="dashboard",
-                    message=f"watchdog 日志已 {age_h:.1f}h 未更新 (>{max_age_hours}h)",
+                    message=t(
+                        "public.health_check.dashboard.watchdog_log_stale",
+                        {"age": f"{age_h:.1f}", "hours": max_age_hours},
+                    ),
                     detail=f"path={log_path} mtime_age_hours={age_h:.2f}",
                 ))
             else:
                 findings.append(Finding(
                     severity="ok",
                     check="dashboard",
-                    message=f"watchdog 日志年龄 {age_h:.1f}h",
+                    message=t("public.health_check.dashboard.watchdog_log_age", {"age": f"{age_h:.1f}"}),
                     detail=f"path={log_path} mtime_age_hours={age_h:.2f}",
                 ))
     return findings
@@ -571,7 +592,7 @@ def run_all(thresholds: dict, repo_root: Path | None = None) -> list[Finding]:
         except Exception as exc:  # noqa: BLE001 - it swallows every exception on purpose
             sub = [Finding(
                 severity="alert", check=name,
-                message=f"{name} 检查自身抛异常",
+                message=t("public.health_check.runner.check_raised", {"name": name}),
                 detail=f"{type(exc).__name__}: {exc}",
             )]
         findings.extend(sub)
@@ -665,7 +686,7 @@ def _cli() -> int:
     p.add_argument("--run-id", default=time.strftime("%Y%m%d-%H%M%S"), help="run_id")
     p.add_argument("--date-ph", default="%Y-%m-%d", help=t("public.health_check.cli_date_placeholder"))
     p.add_argument("--out", default=str(LOG_DIR / "health_report.md"),
-                   help=f"报告输出路径(默认 {LOG_DIR / 'health_report.md'})")
+                   help=t("public.health_check.cli.out_help", {"path": str(LOG_DIR / "health_report.md")}))
     p.add_argument("--notify-script", default=str(NOTIFY_SEND),
                    help=t("public.health_check.cli_notify_script_help"))
     p.add_argument("--repo-root", default=str(REPO_ROOT),
@@ -722,10 +743,10 @@ def _cli() -> int:
     body_md = out_path.parent / "health_report.body.md"
     if body_md.is_file():
         cmd[2:2] = ["--text-file", str(body_md)]
-    print(f"[health] 调 notify: {' '.join(shlex.quote(c) for c in cmd)}")
+    print(t("public.health_check.notify.calling", {"cmd": " ".join(shlex.quote(c) for c in cmd)}))
     rc, _, err = _safe_run(cmd, timeout=60)
     if rc != 0:
-        print(f"[health] WARN notify 失败 rc={rc}: {err.strip()[:300]}", file=sys.stderr)
+        print(t("public.health_check.notify.failed", {"rc": rc, "error": err.strip()[:300]}), file=sys.stderr)
         # a failed notification does not affect the health verdict
         return 0
     return 0
