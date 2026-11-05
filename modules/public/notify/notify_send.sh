@@ -144,7 +144,7 @@ gpg_encrypt() {
     # shellcheck disable=SC2154  # set by load_conf via printf -v
     gpg --batch --yes --trust-model always \
         -r "$GPG_RECIPIENT" \
-        -o "$out" -e "$SUMMARY" || { err "gpg 加密失败(rc=$?)"; return 3; }
+        -o "$out" -e "$SUMMARY" || { _rc=$?; err "$(t public.notify_send.gpg_failed rc=$_rc)"; return 3; }
     GPG_OUT="$out"
     log "gpg ok: $out ($(wc -c <"$out") bytes)"
 }

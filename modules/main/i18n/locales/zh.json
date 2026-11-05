@@ -453,6 +453,7 @@
   "public.notify_send.config_missing": "config/notify.conf 不存在,请复制 example 并填真值:",
   "public.notify_send.config_parse_failed": "notify_config.py parse 失败,config 跳过",
   "public.notify_send.dryrun_skips_curl": "--dryrun: 跳过 curl 调用(payload.json 已生成)",
+  "public.notify_send.gpg_failed": "gpg 加密失败(rc={rc})",
   "public.notify_send.summary_missing": "summary.md 不存在: {SUMMARY}",
   "public.notify_send.text_file_missing": "--text-file 指向的文件不存在: {TEXT_FILE}",
   "public.notify_send.usage": "用法: notify_send.sh [--dryrun] [--config <conf>] [--text-file <path>] <summary.md> <business_name> <run_id> <date_placeholder>",

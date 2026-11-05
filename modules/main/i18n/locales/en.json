@@ -453,6 +453,7 @@
   "public.notify_send.config_missing": "config/notify.conf does not exist; copy the example and fill in the real values:",
   "public.notify_send.config_parse_failed": "notify_config.py failed to parse; the config is skipped",
   "public.notify_send.dryrun_skips_curl": "--dryrun: skipping the curl call (payload.json has been generated)",
+  "public.notify_send.gpg_failed": "the gpg encryption failed (rc={rc})",
   "public.notify_send.summary_missing": "summary.md does not exist: {SUMMARY}",
   "public.notify_send.text_file_missing": "the file given by --text-file does not exist: {TEXT_FILE}",
   "public.notify_send.usage": "Usage: notify_send.sh [--dryrun] [--config <conf>] [--text-file <path>] <summary.md> <business_name> <run_id> <date_placeholder>",
