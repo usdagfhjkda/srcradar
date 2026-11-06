@@ -272,24 +272,24 @@ ask_checklist() {
     # the module description (it makes the list easier to read)
     desc_for() {
         case "$1" in
-            main/daily)   echo "日度 cron 03:00 + dashboard(默认不勾,免登 crontab)" ;;
-            main/db)      echo "DB schema + 末尾建空 DB" ;;
-            main/i18n)    echo "语言模块 (zh/en 词表, 输出语言可配置)" ;;
-            main/lib)     echo "共享 Python 工具库(load_config 等)" ;;
-            main/manage)  echo "业务管理(register target / set_config)" ;;
-            main/pdtm)    echo "主动测绘核心 dnsx+httpx+naabu+cdnmatch" ;;
-            public/db_align) echo "ENScan_GO 集成(Apache-2.0,大依赖)" ;;
-            public/srcradar-mcp-server) echo "独立 MCP server 子模块(独立 repo,默认不勾,勾选后自动 clone + ./install.sh --yes)" ;;
-            public/srcradar-algo-diff-cpp) echo "内容相似度判定引擎(独立 repo,GPL-2.0;落盘 modules/public/algo_diff_cpp;不装则不做变更判定)" ;;
-            public/ymicp) echo "小程序备案反查客户端(需自部署服务)" ;;
+            main/daily)   echo "$(t root.install.desc_daily)" ;;
+            main/db)      echo "$(t root.install.desc_db)" ;;
+            main/i18n)    echo "$(t root.install.desc_i18n)" ;;
+            main/lib)     echo "$(t root.install.desc_lib)" ;;
+            main/manage)  echo "$(t root.install.desc_manage)" ;;
+            main/pdtm)    echo "$(t root.install.desc_pdtm)" ;;
+            public/db_align) echo "$(t root.install.desc_db_align)" ;;
+            public/srcradar-mcp-server) echo "$(t root.install.desc_mcp_server)" ;;
+            public/srcradar-algo-diff-cpp) echo "$(t root.install.desc_algo_diff_cpp)" ;;
+            public/ymicp) echo "$(t root.install.desc_ymicp)" ;;
             *)            echo "" ;;
         esac
     }
 
     while true; do
         echo
-        printf 'srcradar installer — 勾选要安装的模块\n'
-        printf '回车切换状态;数字 0 确认开始安装;q 退出\n'
+        printf '%s\n' "$(t root.install.picker_header)"
+        printf '%s\n' "$(t root.install.picker_hint)"
         echo
 
         local n=0
@@ -311,7 +311,7 @@ ask_checklist() {
         done
 
         echo
-        printf 'Choice [1-%d 切换 / 0 确认 / q 退出,默认 0 退出]: ' "${#entries[@]}"
+        printf '%s' "$(t root.install.picker_prompt count="${#entries[@]}")" 
         local reply
         read -r reply
         reply="${reply:-q}"

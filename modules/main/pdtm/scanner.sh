@@ -70,7 +70,7 @@ ENABLE_TCP=false
 resolvers_file="${resolvers_file:-resolvers}"
 # the CSV is derived from the file (change the resolvers file and the CSV here follows)
 RESOLVERS="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
-[ -z "$RESOLVERS" ] && { echo "[-] 错误: $resolvers_file 文件为空或读不出" >&2; exit 1; }
+[ -z "$RESOLVERS" ] && { echo "[-] $(t main.scanner.resolvers_unreadable file="$resolvers_file")" >&2; exit 1; }
 
 OUTPUT_DIR="./scan_results"
 DNSX_INPUT_RAW="./dnsx_output.txt"
@@ -98,13 +98,13 @@ ENABLE_TCP=false
 
 usage() {
     cat <<EOF
-用法: $0 [-all] [-p PORTS]
-  (默认)              仅做 Web 资产发现，跳过 TCP 端口扫描
-  -all                启用 TCP 端口信息收集（naabu 被动 + 主动）
-  -p PORTS            覆盖默认 9 个常用 Web 端口（逗号分隔，例如 28000,28001,28002）
-                      默认: 80,443,8000,8080,8081,8443,8888,9000,9090
-                      CI/smoke fixture 用此 flag 切到高端口避开本地端口占用
-  -h                  显示本帮助
+$(t main.scanner.usage_header script="$0")
+  $(t main.scanner.usage_default)
+  -all                $(t main.scanner.usage_all)
+  -p PORTS            $(t main.scanner.usage_ports)
+                      $(t main.scanner.usage_ports_default)
+                      $(t main.scanner.usage_ports_note)
+  -h                  $(t main.scanner.usage_help)
 EOF
 }
 
@@ -114,7 +114,7 @@ while [ $# -gt 0 ]; do
         -p)        COMMON_WEB_PORTS="$2"; shift 2 ;;
         -p=*)      COMMON_WEB_PORTS="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
-        *)         usage; log "[-] 未知参数: $1"; exit 1 ;;
+        *)         usage; log "[-] $(t main.scanner.unknown_arg arg="$1")"; exit 1 ;;
     esac
 done
 
@@ -215,7 +215,7 @@ log "$(t main.scanner.stage1_dns)"
 
 # 2026-10-03: the dnsx path is resolved through resolve_tools.sh (env override > the conf injection > the default)
 DNSX_BIN=$(resolve_tool dnsx "$HOME/.pdtm/go/bin/dnsx")
-[ -x "$DNSX_BIN" ] || { log "[-] 缺少 dnsx: $DNSX_BIN"; exit 1; }
+[ -x "$DNSX_BIN" ] || { log "[-] $(t main.scanner.dnsx_missing bin="$DNSX_BIN")"; exit 1; }
 
 DNSX_RAW_FILE="$OUTPUT_DIR/dnsx_raw_output.txt"
 FILE_IP="$OUTPUT_DIR/tmp_domain_ip_pairs.txt"
@@ -234,7 +234,7 @@ CDNMATCH_STATS="$OUTPUT_DIR/cdnmatch_stats.json"
      -no-color \
      < /dev/null \
      -o "$DNSX_RAW_FILE" \
-     || log "[!] dnsx 退出非零 — JSONL 部分输出仍可继续"
+     || log "[!] $(t main.scanner.dnsx_nonzero)"
 
 DNSX_OUTPUT_COUNT=$(wc -l < "$DNSX_RAW_FILE" | tr -d ' ')
 log "$(t main.scanner.stage1_dnsx_rows DNSX_OUTPUT_COUNT=$DNSX_OUTPUT_COUNT)"
@@ -262,7 +262,7 @@ fi
     -domains "$OUTPUT_DIR/pure_domains.txt" \
     -out "$OUTPUT_DIR" \
     -stats "$CDNMATCH_STATS" \
-    || { log "[-] cdnmatch 失败,中止 stage 1+2"; exit 1; }
+    || { log "[-] $(t main.scanner.cdnmatch_failed)"; exit 1; }
 
 AWK_EXTRACT_COUNT=$(cat "$FILE_IP" "$FILE_IPV6" 2>/dev/null | wc -l || echo 0)
 UNIQUE_IP_COUNT=$(wc -l < "$OUTPUT_DIR/all_unique_ips.txt" | tr -d ' ')
@@ -318,7 +318,7 @@ log "$(t main.scanner.stage35_merge)"
 # stage 3.5
 # 2026-10-03: the httpx path is resolved through resolve_tools.sh (env override > the conf injection > the default)
 HTTPX_BIN=$(resolve_tool httpx "$HOME/.pdtm/go/bin/httpx")
-[ -x "$HTTPX_BIN" ] || { log "[-] 缺少 httpx: $HTTPX_BIN"; exit 1; }
+[ -x "$HTTPX_BIN" ] || { log "[-] $(t main.scanner.httpx_missing bin="$HTTPX_BIN")"; exit 1; }
 
 cat "$OUTPUT_DIR/cdn_ips.txt" \
     "$OUTPUT_DIR/waf_ips.txt" \

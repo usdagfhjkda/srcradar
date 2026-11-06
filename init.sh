@@ -64,21 +64,21 @@ PY_MIN_VERSION="3.10"
 # the format: <cmd>|<min_version>|<apt_pkg>|<dnf_pkg>|<brew_pkg>|<category>|<note>
 DEPS=(
     # --- build time (the Go toolchain) ---
-    "go|1.21|golang-go|golang|go|go|build 期:编译 Go 项目 (modules/main/pdtm/cdnmatch + modules/public/db_align)|"
+    "go|1.21|golang-go|golang|go|go|$(t root.init.deps.go)|"
     # --- needed at runtime ---
-    "bash|4.0|bash|bash|bash|core|关联数组 / [[ ]] / <() process substitution|"
-    "python3|3.10|python3|python3|python3|core|daily/lib + pdtm/*.py 全栈 Python|"
-    "docker|0.0|docker.io|podman|docker|core|可选用(ymicp 由用户自部署,本脚本不再 pull)|"
-    "flock|0.0|util-linux|util-linux|flock|core|daily/install_cron + pdtm/pipeline 互斥锁|"
-    "sqlite3|3.0|sqlite3|sqlite|sqlite3|core|DB 调试 + Python sqlite3 stdlib|"
-    "git|0.0|git|git|git|core|模块 install.sh 拉取上游 vendor 用;日常不需要|"
+    "bash|4.0|bash|bash|bash|core|$(t root.init.deps.bash)|"
+    "python3|3.10|python3|python3|python3|core|$(t root.init.deps.python3)|"
+    "docker|0.0|docker.io|podman|docker|core|$(t root.init.deps.docker)|"
+    "flock|0.0|util-linux|util-linux|flock|core|$(t root.init.deps.flock)|"
+    "sqlite3|3.0|sqlite3|sqlite|sqlite3|core|$(t root.init.deps.sqlite3)|"
+    "git|0.0|git|git|git|core|$(t root.init.deps.git)|"
     # --- recommended (the scan / the URL assets) ---
-    "subfinder|0.0|subfinder|subfinder|subfinder|scan|modules/main/pdtm/scan.sh glob 目标派生候选|"
-    "alterx|0.0|alterx|alterx|alterx|scan|关键词派生,和 subfinder 配合|"
-    "naabu|0.0|naabu|naabu|naabu|scan|tcp_assets 表的端口扫描数据;SYN 模式需要 setcap|"
-    "ffuf|0.0|ffuf|ffuf|ffuf|scan|modules/main/pdtm/scan_urls.py URL 爆破 -> web_hash_urls|"
-    "gau|0.0|gau|gau|gau|scan|wayback / Common Crawl 历史 URL|"
-    "URLFinder|0.0||URLFinder||scan|中文社区版 by pingc0y,GitHub 无官方同名包;无 apt/brew 包,需自下载二进制|"
+    "subfinder|0.0|subfinder|subfinder|subfinder|scan|$(t root.init.deps.subfinder)|"
+    "alterx|0.0|alterx|alterx|alterx|scan|$(t root.init.deps.alterx)|"
+    "naabu|0.0|naabu|naabu|naabu|scan|$(t root.init.deps.naabu)|"
+    "ffuf|0.0|ffuf|ffuf|ffuf|scan|$(t root.init.deps.ffuf)|"
+    "gau|0.0|gau|gau|gau|scan|$(t root.init.deps.gau)|"
+    "URLFinder|0.0||URLFinder||scan|$(t root.init.deps.urlfinder)|"
 )
 
 # ---- the paths ----
@@ -301,11 +301,11 @@ install_deps() {
 
     if [ "$auto_apply" = 0 ]; then
         cat <<EOF
-[init] DRY-RUN — 缺以下包(未执行安装):
+$(t root.init.dryrun_missing)
 
-  $os: ${missing_pkgs[*]:-(无可自动装的包)}
+  $os: ${missing_pkgs[*]:-$(t root.init.no_auto_packages)}
 
-[init] 确认要装吗?加 --yes:
+$(t root.init.dryrun_confirm)
   ./init.sh --install-deps --yes
 EOF
         return 0
@@ -380,21 +380,21 @@ check_schema() {
 next_step_hint() {
     cat <<EOF
 
-[init] 下一步(模块安装已拆分到 ./install.sh):
+$(t root.init.next_steps)
 
-  1. 装 main 模块(pdtm / daily / manage / db):
+  1. $(t root.init.step_main)
        ./install.sh
-     内部部署(全装 main + public,不询问):
+     $(t root.init.step_internal)
        ./install-internal.sh
 
-  2. db_align(可选,法律实体反查):
+  2. $(t root.init.step_db_align)
        modules/public/db_align/install.sh
-     内部装 ENScan_GO vendor + go build。
+     $(t root.init.step_db_align_detail)
 
-  3. ymicp(可选,小程序备案反查):
+  3. $(t root.init.step_ymicp)
        modules/public/ymicp/install.sh
 
-[init] 完成。
+$(t root.init.done)
 EOF
 }
 
