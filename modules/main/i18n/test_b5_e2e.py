@@ -11,6 +11,7 @@ languages and prints what it found.
 
 The exit code is 0 when every check holds.
 """
+import os
 import re
 import socket
 import sqlite3
@@ -69,6 +70,16 @@ def free_port():
 def dashboard_pages():
     """The home page of the dashboard, in both languages."""
     import dashboard
+
+    # The language of the deployment is not the language of the test: the
+    # config directory points at a temporary one, so that the test gives
+    # the same result on every installation. The dashboard resolves the
+    # language in its own thread, so the override of the thread does not
+    # help here.
+    cfg = tempfile.mkdtemp(prefix="srcradar-i18n-test-")
+    with open(os.path.join(cfg, "lang.conf"), "w", encoding="utf-8") as fh:
+        fh.write("lang=zh\n")
+    os.environ["SRCDAR_CONFIG_DIR"] = cfg
 
     port = free_port()
     tmp = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
@@ -130,6 +141,8 @@ def main():
     # the switcher
     sw = re.findall(r'href="\?lang=(\w+)"', en_page)
     check("the switcher offers both languages", set(sw) >= {"zh", "en"}, str(sorted(set(sw))))
+
+    os.environ.pop("SRCDAR_CONFIG_DIR", None)
 
     print()
     if FAILS:
