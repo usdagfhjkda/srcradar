@@ -34,7 +34,7 @@ NORMAL_OUT="no_wildcard.txt"
 # resolver source stays consistent with the ./resolvers file (see README section 8-11)
 resolvers_file="${resolvers_file:-resolvers}"
 RESOLVERS="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
-[ -z "$RESOLVERS" ] && { echo "[-] 错误: $resolvers_file 文件为空或不可读" >&2; exit 1; }
+[ -z "$RESOLVERS" ] && { echo "[-] $(t main.check_wildcard.resolvers_unreadable file="$resolvers_file")" >&2; exit 1; }
 PROBES=3
 
 # ---- dependency check ----

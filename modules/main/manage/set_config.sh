@@ -17,6 +17,11 @@
 set -euo pipefail
 
 RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 DB="${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}"
 
 NAME=""
@@ -51,11 +56,22 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$NAME" ] || { echo "[-n <业务名>] is required" >&2; usage 1; }
+[ -n "$NAME" ] || { echo "$(t main.set_config.arg_name_required)" >&2; usage 1; }
 [ -f "$DB" ]  || { echo "[-d] db not found: $DB" >&2; exit 1; }
 
 python3 - "$DB" "$NAME" "$ENABLE_FLAG" "$WEB" "$TCP" "$ICP" <<'PY'
 import sqlite3, sys
+from pathlib import Path
+
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at
+# this depth. Walk up to the repo root (the directory that holds
+# "modules") and add the lib directory to the path.
+for _p in Path.cwd().resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
+
 db, biz, enable_flag, web, tcp, icp = sys.argv[1:7]
 
 conn = sqlite3.connect(db)
@@ -63,7 +79,7 @@ row = conn.execute(
     "SELECT id FROM businesses WHERE TRIM(business_name)=?", (biz,)
 ).fetchone()
 if row is None:
-    sys.exit(f"[set_config] business '{biz}' 不存在; 先跑 manage/add_business.sh")
+    sys.exit(_t("main.set_config.business_missing", {"biz": biz}))
 bid = int(row[0])
 
 cur = conn.execute(
@@ -71,7 +87,7 @@ cur = conn.execute(
     (bid,),
 ).fetchone()
 if cur is None:
-    sys.exit(f"[set_config] business_id={bid} 无 config 行; 先跑 manage/add_business.sh")
+    sys.exit(_t("main.set_config.config_row_missing", {"bid": bid}))
 before = dict(enabled=int(cur[0]), web=int(cur[1]), tcp=int(cur[2]), icp=int(cur[3]))
 
 updates = {}

@@ -39,10 +39,10 @@ usage() {
 
 check_deps() {
     local rc=0
-    command -v python3 >/dev/null 2>&1 || { err "缺 python3"; rc=2; }
-    command -v sqlite3 >/dev/null 2>&1 || { err "缺 sqlite3"; rc=2; }
-    [ -f "$SCRIPT_DIR/init_db.py" ] || { err "init_db.py 缺失"; rc=3; }
-    [ -f "$SCRIPT_DIR/schema.sql" ] || { err "schema.sql 缺失"; rc=3; }
+    command -v python3 >/dev/null 2>&1 || { err "$(t main.db_install.dep_python3_missing)"; rc=2; }
+    command -v sqlite3 >/dev/null 2>&1 || { err "$(t main.db_install.dep_sqlite3_missing)"; rc=2; }
+    [ -f "$SCRIPT_DIR/init_db.py" ] || { err "$(t main.db_install.init_db_missing)"; rc=3; }
+    [ -f "$SCRIPT_DIR/schema.sql" ] || { err "$(t main.db_install.schema_missing)"; rc=3; }
     return $rc
 }
 
@@ -54,7 +54,7 @@ init_db() {
 
     log "init-db: $db_path (schema=$schema_sql)"
     if python3 "$init_py" "$db_path" "$schema_sql"; then
-        log "init-db OK: $db_path"
+        log "$(t main.db_install.init_ok path="$db_path")"
         return 0
     else
         err "$(t main.install.init_failed)"
@@ -65,7 +65,7 @@ init_db() {
 # ---- check-schema ----
 check_schema() {
     local checker="$SCRIPT_DIR/check_schema.py"
-    [ -f "$checker" ] || { err "check_schema.py 缺失"; return 3; }
+    [ -f "$checker" ] || { err "$(t main.db_install.checker_missing)"; return 3; }
     log "$(t main.install.check_schema_label SCRIPT_DIR=$SCRIPT_DIR)"
     if python3 "$checker" "$SCRIPT_DIR/schema.sql"; then
         return 0
@@ -78,7 +78,7 @@ check_schema() {
 # ---- verify: confirm the 14 tables exist ----
 verify_db() {
     local db_path="$1"
-    [ -f "$db_path" ] || { err "db 不存在: $db_path"; return 1; }
+    [ -f "$db_path" ] || { err "$(t main.db_install.db_missing path="$db_path")"; return 1; }
     # wait for sqlite to flush after init_db.py, to avoid a race
     sleep 0.2
     local n
@@ -124,7 +124,7 @@ main() {
             check_schema || exit $?
             ;;
         --path)
-            [ $# -ge 2 ] || { err "--path 需参数"; exit 1; }
+            [ $# -ge 2 ] || { err "$(t main.db_install.path_needs_arg)"; exit 1; }
             DB_PATH="$2"
             shift 2
             check_deps || exit $?

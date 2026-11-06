@@ -64,7 +64,7 @@ install_pdtm_bin() {
     fi
     log "go install pdtm -> $HOME/go/bin/pdtm"
     (cd /tmp && go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest)
-    [ -x "$HOME/go/bin/pdtm" ] || { err "go install 后 $HOME/go/bin/pdtm 缺失"; return 3; }
+    [ -x "$HOME/go/bin/pdtm" ] || { err "$(t main.pdtm_install.binary_missing path="$HOME/go/bin/pdtm")"; return 3; }
     log "$(t main.pdtm_install.installed)"
     return 0
 }
@@ -78,7 +78,7 @@ install_pdtm_bin() {
 install_pdtm_tools() {
     local pdtm_bin="$HOME/go/bin/pdtm"
     [ -x "$pdtm_bin" ] || pdtm_bin="$(command -v pdtm || true)"
-    [ -n "$pdtm_bin" ] || { err "pdtm 未装;run install_pdtm_bin first"; return 3; }
+    [ -n "$pdtm_bin" ] || { err "$(t main.pdtm_install.not_installed)"; return 3; }
     log "pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck"
     "$pdtm_bin" -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck
     # shellcheck disable=SC2034 # miss counts missing tools; used in summary below
@@ -117,7 +117,7 @@ install_cdnmatch() {
         mkdir -p "$SCRIPT_DIR/bin"
         go build -o "$bin" .
     )
-    [ -x "$bin" ] || { err "cdnmatch build 完但 $bin 缺失"; return 4; }
+    [ -x "$bin" ] || { err "$(t main.pdtm_install.cdnmatch_missing path="$bin")"; return 4; }
     log "$(t main.pdtm_install.cdnmatch_installed bin=$bin)"
     return 0
 }

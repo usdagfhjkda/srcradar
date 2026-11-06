@@ -181,7 +181,7 @@ run_stage_icp() {
 #   batches automatically (a limit of 50 hosts
 #   per batch; DAILY_URL_BATCH_MAX should be far below that here, so that a single
 #   subprocess does not time out)
-DAILY_URL_BATCH_MAX=50000  # 用户拍板(2026-08-26):见 README"daily-url batch 上限"
+DAILY_URL_BATCH_MAX=50000  # the user decided on 2026-08-26, see the README "daily-url batch limit"
 run_stage_daily_url() {
     log "daily-url begin: biz=$BIZ batch_max=$DAILY_URL_BATCH_MAX"
     # 1) read the schedule (enabled=1)
@@ -449,8 +449,9 @@ if has_stage pdtm; then
     if [ -n "${GUARD_BIZ_ID:-}" ] && [ "${GUARD_SCOPE_COUNT:-0}" = "0" ]; then
         log "$(t main.run_one_business.needs_onboarding BIZ=$BIZ GUARD_BIZ_ID=$GUARD_BIZ_ID)"
         if [ -n "${WARNINGS_FILE:-}" ]; then
-            printf '%s\tneeds_onboarding (no 可测资产 scope; run pipeline.sh -b %s -i <input_dir>)\n' \
-                "$BIZ" "$BIZ" >> "$WARNINGS_FILE"
+            printf '%s\t%s\n' \
+                "$(t main.run_one_business.needs_onboarding scope='可测资产' biz="$BIZ")" \
+                "$BIZ" >> "$WARNINGS_FILE"
         fi
     # shellcheck disable=SC2034
     PDTM_SKIP=1
@@ -528,7 +529,7 @@ RC=0
 # ./srcradar daily run_one_business by hand
 # also counts as "one scan" — the same as the design goal.
 if [ "$RC" -eq 0 ] && [ -n "${BIZ:-}" ] && [ -n "${DB:-}" ] && [ -f "$DB" ]; then
-    python3 - "$DB" "$BIZ" >>"${LOG_FILE:-/dev/null}" 2>&1 <<'PYINCR' || log "scan_count +1 失败 (非致命)"
+    python3 - "$DB" "$BIZ" >>"${LOG_FILE:-/dev/null}" 2>&1 <<'PYINCR' || log "$(t main.run_one_business.scan_count_failed)"
 import sqlite3, sys
 db, biz = sys.argv[1], sys.argv[2]
 con = sqlite3.connect(db)

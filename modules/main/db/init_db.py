@@ -93,7 +93,7 @@ def main() -> int:
         con.close()
 
     print(t("main.init_db.initialized", {"db_path": db_path}))
-    print(f"     {n_tbl} tables / {n_idx} indexes / {n_trig} triggers")
+    print(t("main.init_db.counts", {"tables": n_tbl, "indexes": n_idx, "triggers": n_trig}))
     return 0
 
 

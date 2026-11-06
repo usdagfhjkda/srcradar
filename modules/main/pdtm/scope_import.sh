@@ -59,14 +59,14 @@ while [ $# -gt 0 ]; do
         --skip-check-wildcard)    SKIP_WILDCARD=1; shift ;;
         -h|--help)
             sed -n '2,15p' "$0"; exit 0 ;;
-        *) echo "未知参数: $1" >&2; exit 1 ;;
+        *) echo "$(t main.scope_import.unknown_arg arg="$1")" >&2; exit 1 ;;
     esac
 done
 
-[ -n "$BUSINESS" ]   || { echo "需要 -b/--business 指定业务名" >&2; exit 1; }
-[ -n "$INPUT_PATH" ] || { echo "需要 -i/--input 指定输入目录 (含 target.txt)" >&2; exit 1; }
-[ -d "$INPUT_PATH" ] || { echo "-i 不是目录: $INPUT_PATH" >&2; exit 1; }
-[ -f "$INPUT_PATH/target.txt" ] || { echo "目录 $INPUT_PATH 缺少 target.txt" >&2; exit 1; }
+[ -n "$BUSINESS" ]   || { echo "$(t main.scope_import.business_required)" >&2; exit 1; }
+[ -n "$INPUT_PATH" ] || { echo "$(t main.scope_import.input_required)" >&2; exit 1; }
+[ -d "$INPUT_PATH" ] || { echo "$(t main.scope_import.input_not_a_dir path="$INPUT_PATH")" >&2; exit 1; }
+[ -f "$INPUT_PATH/target.txt" ] || { echo "$(t main.scope_import.target_missing path="$INPUT_PATH")" >&2; exit 1; }
 
 DB_DIR="$(dirname "$DB")"
 mkdir -p "$DB_DIR"
@@ -134,7 +134,7 @@ cleanup() {
         return 0
     fi
     if [ -n "$KEEP_FILES" ]; then
-        [ "$INPUT_GENERATED" = "1" ] && echo "[+] --keep-files: 保留 target.txt / exclude.txt / wildcard.txt / no_wildcard.txt"
+        [ "$INPUT_GENERATED" = "1" ] && echo "[+] $(t main.scope_import.keep_files)"
         return 0
     fi
     if [ "$INPUT_GENERATED" = "1" ]; then
@@ -156,7 +156,7 @@ cleanup() {
                     echo "$(t main.scope_import.cleaned_external_exclude INPUT_PATH=$INPUT_PATH)"
                 fi
                 # rmdir if now empty (best-effort; not fatal if non-empty)
-                rmdir "$INPUT_PATH" 2>/dev/null &&                     echo "[+] 已清理空目录: $INPUT_PATH"
+                rmdir "$INPUT_PATH" 2>/dev/null &&                     echo "[+] $(t main.scope_import.cleaned path="$INPUT_PATH")"
             fi
         fi
     fi
@@ -211,6 +211,15 @@ python3 - "$DB" "$BUSINESS" "$TMP_T" "$TMP_E" <<'PY'
 import sys, sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at
+# this depth. Walk up to the repo root (the directory that holds
+# "modules") and add the lib directory to the path.
+for _p in Path.cwd().resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 db, biz, ft, fe = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 sys.path.insert(0, ".")
@@ -230,7 +239,7 @@ conn.execute("PRAGMA foreign_keys = ON")
 # the same behaviour as pipeline.sh bootstrap_db: the businesses table is created by the shared side / the upstream project
 cols = [r[1] for r in conn.execute("PRAGMA table_info(businesses)").fetchall()]
 if "business_name" not in cols:
-    sys.exit(f"[scope_import] 错误: {db} 缺少 businesses 表或缺 business_name 列, 请先在共享库中建好")
+    sys.exit(_t("main.scope_import.db_schema_missing", {"db": db}))
 
 # the private schema of this project, such as scopes
 import_scan_results.create_tables(conn)
@@ -274,8 +283,10 @@ counts = {row[0]: row[1] for row in conn.execute(
 conn.close()
 print(
     f"[scope_import] business='{biz}' id={bid}: "
-    f"输入 targets={len(targets)} excludes={len(excludes)}; "
-    f"DB 可测={counts.get('可测资产', 0)} 非可测={counts.get('非可测资产', 0)}"
+    f"{_t('main.scope_import.counts', {
+        'targets': len(targets), 'excludes': len(excludes),
+        'measurable': counts.get('可测资产', 0), 'not_measurable': counts.get('非可测资产', 0),
+    })}"
 )
 PY
 

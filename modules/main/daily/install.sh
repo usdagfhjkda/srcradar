@@ -35,12 +35,12 @@ usage() {
 # ---- dependency check ----
 check_deps() {
     local rc=0
-    command -v python3 >/dev/null 2>&1 || { err "缺 python3"; rc=2; }
-    command -v flock >/dev/null 2>&1 || { err "缺 flock (apt: util-linux)"; rc=2; }
-    command -v crontab >/dev/null 2>&1 || { err "缺 crontab (apt: cron)"; rc=2; }
-    command -v sqlite3 >/dev/null 2>&1 || { err "缺 sqlite3"; rc=2; }
-    [ -d "$SCRIPT_DIR/lib" ] || { err "daily/lib 缺失"; rc=3; }
-    [ -x "$SCRIPT_DIR/daily_monitor.sh" ] || { err "daily_monitor.sh 缺失/不可执行"; rc=3; }
+    command -v python3 >/dev/null 2>&1 || { err "$(t main.daily_install.dep_python3_missing)"; rc=2; }
+    command -v flock >/dev/null 2>&1 || { err "$(t main.daily_install.dep_flock_missing)"; rc=2; }
+    command -v crontab >/dev/null 2>&1 || { err "$(t main.daily_install.dep_crontab_missing)"; rc=2; }
+    command -v sqlite3 >/dev/null 2>&1 || { err "$(t main.daily_install.dep_sqlite3_missing)"; rc=2; }
+    [ -d "$SCRIPT_DIR/lib" ] || { err "$(t main.daily_install.lib_missing)"; rc=3; }
+    [ -x "$SCRIPT_DIR/daily_monitor.sh" ] || { err "$(t main.daily_install.monitor_missing)"; rc=3; }
     return $rc
 }
 
@@ -68,10 +68,10 @@ register_cron() {
 
 # ---- verify ----
 verify() {
-    [ -x "$SCRIPT_DIR/daily_monitor.sh" ] && printf "  OK daily_monitor.sh\n" || { err "daily_monitor.sh 缺失"; return 1; }
-    [ -x "$SCRIPT_DIR/run_one_business.sh" ] && printf "  OK run_one_business.sh\n" || err "run_one_business.sh 缺失"
-    [ -x "$SCRIPT_DIR/install_cron.sh" ] && printf "  OK install_cron.sh\n" || err "install_cron.sh 缺失"
-    command -v crontab >/dev/null 2>&1 && crontab -l >/dev/null 2>&1 && printf "  OK cron 表已注册\n" || warn "cron 表未注册(可能正常)"
+    [ -x "$SCRIPT_DIR/daily_monitor.sh" ] && printf "  OK daily_monitor.sh\n" || { err "$(t main.daily_install.monitor_missing)"; return 1; }
+    [ -x "$SCRIPT_DIR/run_one_business.sh" ] && printf "  OK run_one_business.sh\n" || err "$(t main.daily_install.run_one_business_missing)"
+    [ -x "$SCRIPT_DIR/install_cron.sh" ] && printf "  OK install_cron.sh\n" || err "$(t main.daily_install.install_cron_missing)"
+    command -v crontab >/dev/null 2>&1 && crontab -l >/dev/null 2>&1 && printf "  %s\n" "$(t main.daily_install.cron_registered)" || warn "$(t main.daily_install.cron_not_registered)"
     return 0
 }
 
@@ -87,7 +87,7 @@ uninstall() {
 
 main() {
     case "${1:-}" in
-        --check) check_deps || exit $?; log "daily 模块依赖 OK"; exit 0 ;;
+        --check) check_deps || exit $?; log "$(t main.daily_install.deps_ok)"; exit 0 ;;
         --no-cron)
             check_deps || exit $?
             install || exit $?

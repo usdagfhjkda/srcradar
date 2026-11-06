@@ -111,7 +111,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$NAME" ] || { echo "[-n <业务名>] is required" >&2; usage 1; }
+[ -n "$NAME" ] || { echo "$(t main.add_business.arg_name_required)" >&2; usage 1; }
 [ -f "$DB" ]  || { echo "[-d] db not found: $DB" >&2; exit 1; }
 if [ "$AUTO" = "1" ] && [ -n "$INPUT_DIR" ]; then
     echo "$(t main.add_business.auto_and_input_exclusive)" >&2; exit 1
@@ -190,7 +190,7 @@ fi
 # ---- step 3.5: the --auto prerequisite (ymicp /query/web -> target.txt -> import) ----
 if [ "$AUTO" = "1" ]; then
     YMICP_SCRIPT="$RECON_ROOT/public/ymicp/icp_mapp_query.py"
-    [ -f "$YMICP_SCRIPT" ] || { echo "[--auto] 缺少 icp_mapp_query.py: $YMICP_SCRIPT" >&2; exit 1; }
+    [ -f "$YMICP_SCRIPT" ] || { echo "$(t main.add_business.ymicp_script_missing path="$YMICP_SCRIPT")" >&2; exit 1; }
 
     AUTO_INPUT_DIR="$(mktemp -d)"
     AUTO_TARGET="$AUTO_INPUT_DIR/target.txt"
@@ -220,7 +220,7 @@ if [ "$AUTO" = "1" ]; then
     if [ ! -s "$AUTO_TARGET" ]; then
         echo "$(t main.add_business.target_empty)"
         echo "$(t main.add_business.temp_dir_kept_debug AUTO_INPUT_DIR=$AUTO_INPUT_DIR)"
-        trap - EXIT  # 保留临时目录, 让用户能 cat
+        trap - EXIT  # the temporary directory is kept, so that the user can cat it
     else
         n=$(wc -l < "$AUTO_TARGET")
         echo "$(t main.add_business.target_count n=$n)"
@@ -237,7 +237,7 @@ elif [ -n "$INPUT_DIR" ]; then
 fi
 if [ -n "$EFFECTIVE_INPUT_DIR" ]; then
     [ -d "$EFFECTIVE_INPUT_DIR" ]   || { echo "[-i] input dir not found: $EFFECTIVE_INPUT_DIR" >&2; exit 1; }
-    [ -f "$EFFECTIVE_INPUT_DIR/target.txt" ] || { echo "[-i] $EFFECTIVE_INPUT_DIR 缺少 target.txt" >&2; exit 1; }
+    [ -f "$EFFECTIVE_INPUT_DIR/target.txt" ] || { echo "$(t main.add_business.target_missing dir="$EFFECTIVE_INPUT_DIR")" >&2; exit 1; }
     echo "[add_biz] step 4: scope_import (source: $([ "$AUTO" = "1" ] && echo --auto || echo -i))"
     if [ "$KEEP_INPUT" = "1" ]; then
         "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$EFFECTIVE_INPUT_DIR" -d "$DB" --keep-files
@@ -251,5 +251,5 @@ cat <<EOF
 [add_biz] done.
   next:
     cd $RECON_ROOT/public/db_align && ./bin/db_align -n '$NAME' -all
-    (拉控股树 + ICP / 公众号 / 小程序; 可能耗时较长, 注意 AQC 风控)
+    $(t main.add_business.auto_note)
 EOF

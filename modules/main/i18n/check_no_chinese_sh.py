@@ -19,6 +19,23 @@ CJK = re.compile(r"[\u4e00-\u9fff]")
 SCRIPT_NAMES = ("srcradar", "install.sh", "init.sh")
 EXCLUDE = ("db_align", "ymicp")
 
+# The values of the database are data, not output: the names of the scopes
+# and the type of the entity live in the schema and cannot be translated.
+ALLOWED_DATA = ("\u53ef\u6d4b\u8d44\u4ea7", "\u975e\u53ef\u6d4b\u8d44\u4ea7", "\u4f01\u4e1a")
+
+# The keywords that match the title of an external tool are markers, not
+# output: the title of the tool stays as it is.
+ALLOWED_MARKERS = ("web\u5e94\u7528\u9632\u706b\u5899",)
+
+
+def only_allowed(text):
+    """True when every Chinese of the text belongs to an allowed value."""
+    rest = text
+    values = sorted(ALLOWED_DATA + ALLOWED_MARKERS, key=len, reverse=True)
+    for value in values:
+        rest = rest.replace(value, "")
+    return not CJK.search(rest)
+
 
 def strip_comment(line):
     """The line without its comment, and the comment itself."""
@@ -69,7 +86,7 @@ def main():
             # a line that holds a lookup: the key is not the output
             if re.search(r"\bt\s+[a-z][a-z0-9_.]+|\bt\(", code):
                 continue
-            if CJK.search(code):
+            if CJK.search(code) and not only_allowed(code):
                 bad.append("%s:%d %s" % (rel, n, code.strip()[:90]))
     if bad:
         print("FAIL: the shell scripts still hold Chinese:")

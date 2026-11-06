@@ -34,10 +34,10 @@ usage() {
 # ---- check ----
 check_deps() {
     local rc=0
-    command -v bash >/dev/null 2>&1 || { err "缺 bash"; rc=2; }
-    command -v sqlite3 >/dev/null 2>&1 || { err "缺 sqlite3"; rc=2; }
-    [ -x "$SCRIPT_DIR/add_business.sh" ] || { err "add_business.sh 缺失/不可执行"; rc=3; }
-    [ -x "$SCRIPT_DIR/set_config.sh" ] || { err "set_config.sh 缺失/不可执行"; rc=3; }
+    command -v bash >/dev/null 2>&1 || { err "$(t main.manage_install.dep_bash_missing)"; rc=2; }
+    command -v sqlite3 >/dev/null 2>&1 || { err "$(t main.manage_install.dep_sqlite3_missing)"; rc=2; }
+    [ -x "$SCRIPT_DIR/add_business.sh" ] || { err "$(t main.manage_install.add_business_missing)"; rc=3; }
+    [ -x "$SCRIPT_DIR/set_config.sh" ] || { err "$(t main.manage_install.set_config_missing)"; rc=3; }
     return $rc
 }
 
@@ -67,7 +67,7 @@ uninstall() {
 
 main() {
     case "${1:-}" in
-        --check) check_deps || exit $?; log "manage 模块依赖 OK"; exit 0 ;;
+        --check) check_deps || exit $?; log "$(t main.manage_install.deps_ok)"; exit 0 ;;
         --uninstall) uninstall ;;
         --yes|"")
             check_deps || exit $?

@@ -39,7 +39,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/
 # subfinder=-csv trap).
 resolvers_file="${resolvers_file:-resolvers}"
 RESOLVERS_CSV="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
-[ -z "$RESOLVERS_CSV" ] && { echo "[-] 错误: $resolvers_file 文件为空或不可读" >&2; exit 1; }
+[ -z "$RESOLVERS_CSV" ] && { echo "[-] $(t main.scan.resolvers_unreadable file="$resolvers_file")" >&2; exit 1; }
 TARGET="target.txt"
 EXCLUDE="exclude.txt"
 ALIVE="alive.txt"
@@ -87,7 +87,7 @@ command -v python3 >/dev/null 2>&1 || {
 # The intent: since only the exact hosts were listed, there is no need to expand
 # and look at the sibling subdomains. The downstream scanner.sh reads DNSX_OUT
 # directly -> the stages 1+2+5+8 all run, and only the enumerate trio is left out.
-[ -s "$TARGET" ] || { echo "[-] $TARGET 为空或不存在" >&2; exit 1; }
+[ -s "$TARGET" ] || { echo "[-] $(t main.scan.target_missing path="$TARGET")" >&2; exit 1; }
 [ -f "$EXCLUDE" ] || : > "$EXCLUDE"
 
 PRECISE_HOSTS="$(mktemp)"
@@ -161,7 +161,7 @@ if [ ! -s "$GLOB_HOSTS" ]; then
     # scanner.sh takes over.
     : > targets.regex; echo '^  * $' > targets.regex
     : > excludes.regex
-    SUBS_TMP="$(mktemp)"   # fast-path 提前定义,避免 set -u unbound
+    SUBS_TMP="$(mktemp)"   # the fast path defines it in advance, so that set -u does not fail on an unbound variable
 fi
 
 # ===== the rest: the glob flow (ERE compilation -> subfinder -> alterx -> permutation_cache -> wildcard) =====
@@ -245,7 +245,7 @@ fi
 # ===== 2) dnsx resolves the survivors =====
 # 2026-10-03: the dnsx path is resolved through resolve_tools.sh (env override > the conf injection > the default)
 DNSX_BIN=$(resolve_tool dnsx "$HOME/.pdtm/go/bin/dnsx")
-[ -x "$DNSX_BIN" ] || { echo "[-] 缺少 dnsx: $DNSX_BIN" >&2; exit 1; }
+[ -x "$DNSX_BIN" ] || { echo "[-] $(t main.scan.dnsx_missing bin="$DNSX_BIN")" >&2; exit 1; }
 echo "[*] dnsx -> alive.txt ..."
 if [ -s "$SUBS_TMP" ]; then
     "$DNSX_BIN" -rl 100 -t 150 -retry 2 -o "$ALIVE" -r "$RESOLVERS_CSV" < "$SUBS_TMP"
@@ -299,7 +299,7 @@ if [ "$ALTERX_RUN_THIS_TURN" = "1" ] && [ "$LINES" -gt 0 ]; then
     BASES_CSV=$(printf '%s' "$BASES" | tr '\n' ',' | sed 's/,$//')
     python3 target_glob.py partition-alive \
         --input "$ALIVE" --bases "$BASES_CSV" --output-dir "$ALTERX_TMPDIR" \
-        || { echo "[-] partition-alive 失败" >&2; exit 1; }
+        || { echo "[-] $(t main.scan.partition_alive_failed)" >&2; exit 1; }
 
     # the helper that estimates the alterx candidate count and halves it. The -es
     # output goes to stderr:
@@ -491,7 +491,7 @@ if [ "$BRUTE_RUN_THIS_TURN" = "1" ] && [ -s "$TARGET" ]; then
                     fi
                     attempts=$((attempts + 1))
                 done
-                [ "$attempts" -gt 0 ] && echo "[brute] 自适应减半 $attempts 次, SAMPLE_SIZE=$SAMPLE_SIZE"
+                [ "$attempts" -gt 0 ] && echo "[brute] $(t main.scan.brute_halved times="$attempts" size="$SAMPLE_SIZE")"
 
                 # the deterministic sampling (it avoids picking all the numeric tokens
                 # in the dictionary order)
@@ -620,4 +620,4 @@ if [ -s "$DNSX_OUT" ]; then
     sort -u "$DNSX_OUT" -o "$DNSX_OUT"
 fi
 
-echo "[+] done -> $DNSX_OUT ($(wc -l < "$DNSX_OUT") 条)"
+echo "[+] done -> $DNSX_OUT ($(t main.scan.line_count count="$(wc -l < "$DNSX_OUT")"))"
