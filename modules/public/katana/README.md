@@ -1,162 +1,164 @@
-# modules/public/katana — katana 集成(可选 plugin)
+# modules/public/katana — the integration of katana (an optional plugin)
 
-> **模块定位**:`katana` URL 资产扫描插件,**可选用**。
-> 在 [`modules/main/pdtm/scan_urls.py`](../../main/pdtm/scan_urls.py)(URLFinder / gau / ffuf)之外,
-> 提供与 httpx 字段对齐的 URL 级扫描能力,作为 `daily-url` stage 的**默认引擎**(2026-09-22 起)。
+> English | [中文](README_zh.md)
 
-## 导航
+> **The position of the module**: the plugin of the scan of the URL assets `katana`, **it is optional**.
+> Besides [`modules/main/pdtm/scan_urls.py`](../../main/pdtm/scan_urls.py) (URLFinder / gau / ffuf),
+> it offers a scan at the granularity of the URL whose fields are aligned with the ones of httpx, and it is the **default engine** of the `daily-url` stage (since 2026-09-22).
 
-- **本文档**:§模块边界 / §危险路由安全 / §字段对齐 / §部署 / §客户端使用 / §运维 / §文件说明
-- **与 scan_urls.py 关系**(并存,非互斥):
-  - URLFinder 仍是可手动调度的引擎(中文敏感信息提取 / 中文站点适配)
-  - katana 接管 `daily-url` cron stage(字段丰富,可直接接 algo_diff 流水)
-  - 两者都写 `web_hash_urls` 表(已存在,`modules/main/db/schema.sql:233-262`),不冲突
-- **跳过它的场景**:不需要 katana 字段丰富性 / 不要切默认引擎 → 不装即可;
-  `pdtm` / `daily` / `db_align` / `ymicp` 仍独立工作。
+## The navigation
 
-> **⚠️ 重要声明**:本目录仅包含 srcradar 编写的 Python 适配代码,**不重新分发 katana 二进制**。
-> katana 由 [ProjectDiscovery](https://github.com/projectdiscovery/katana) 独立维护,MIT 协议。
-> 本模块通过 `subprocess` 调 katana,**不直接 link Go 源码**,符合 MIT 边界要求。
+- **This document**: §the boundary of the module / §the safety of the dangerous routes / §the alignment of the fields / §the deployment / §the use by the client / §the operation / §the description of the files
+- **The relation with scan_urls.py** (they coexist, they do not exclude each other):
+  - URLFinder is still the engine that can be scheduled by hand (the extraction of the sensitive information of the Chinese / the adaptation to the Chinese sites)
+  - katana takes the `daily-url` cron stage over (the fields are rich, they go straight into the pipeline of algo_diff)
+  - Both of them write the table `web_hash_urls` (it already exists, `modules/main/db/schema.sql:233-262`), and they do not collide
+- **The case where you skip it**: you do not need the richness of the fields of katana / you do not want to change the default engine → do not install it;
+  `pdtm` / `daily` / `db_align` / `ymicp` still work on their own.
+
+> **⚠️ Important statement**: this directory only holds the Python adaptation code that srcradar wrote, **it does not redistribute the katana binary**.
+> katana is maintained on its own by [ProjectDiscovery](https://github.com/projectdiscovery/katana), under the MIT license.
+> This module calls katana through a `subprocess`, it **does not link the Go source directly**, and it respects the boundary of the MIT.
 
 ---
 
-## 一、模块边界
+## I. The boundary of the module
 
-| 项 | 范围 | License |
+| The item | The scope | The license |
 |---|---|---|
-| 本目录的 7 个文件 | srcradar 原创适配代码 | Apache-2.0 |
-| katana CLI 二进制 | 由 ProjectDiscovery 独立维护,自部署 | MIT |
-| URLFinder CLI(已存在) | 保留作为手动 / fallback / 中文敏感信息专用 | GPL(已 NOTICE) |
+| the 7 files of this directory | the adaptation code that srcrador wrote | Apache-2.0 |
+| the katana CLI binary | it is maintained on its own by ProjectDiscovery, self deployed | MIT |
+| the URLFinder CLI (it already exists) | it is kept for the manual use / the fallback / the sensitive information of the Chinese | GPL (the NOTICE is there) |
 
-**srcradar 的职责**:
-- 调 katana `-jsonl` 输出 → 解析 → 入 `web_hash_urls` 表
-- **危险路由拦截双重保险**(沿用 URLFinder 5 词黑名单,详见 §二)
-- 字段对齐 httpx(`urllib.parse` 补 host/port/path,`mmh3` 算 response_hash)
+**The duties of srcradar**:
+- it calls katana with `-jsonl` → it parses → it stores into the table `web_hash_urls`
+- **the double insurance of the interception of the dangerous routes** (the blacklist of the 5 words of URLFinder is kept, see §II)
+- it aligns the fields with the ones of httpx (`urllib.parse` fills the host/port/path, `mmh3` computes the response_hash)
 
-**srcradar 不做**:
-- 不打包 katana 二进制(`install.sh` 用 `go install` 自取)
-- 不接管 katana 升级(用户跑 `go install` 升级)
-- 不维护 katana 上游 issue
+**What srcradar does not do**:
+- it does not package the katana binary (`install.sh` fetches it with `go install`)
+- it does not take the upgrades of katana over (the user upgrades it with `go install`)
+- it does not maintain the issues of the upstream of katana
 
 ---
 
-## 二、危险路由安全(必读)
+## II. The safety of the dangerous routes (a must read)
 
-**沿用 URLFinder 5 词黑名单**(`~/tools/URLFinder/config/config.go:19`):
+**The blacklist of the 5 words of URLFinder is kept** (`~/tools/URLFinder/config/config.go:19`):
 
 ```python
 RISKS = ("remove", "delete", "insert", "update", "logout")
 ```
 
-**双重保险**:
+**The double insurance**:
 
-1. **源头拦截**(`katana_enrich.sh` 拼命令时):`-crawl-out-scope` 用一条 regex 把含 5 词的 URL 全部排除
+1. **The interception at the source** (when `katana_enrich.sh` builds the command): `-crawl-out-scope` excludes every URL that holds one of the 5 words with a single regex
    ```bash
    katana ... -crawl-out-scope "/(remove|delete|insert|update|logout)/i"
    ```
-2. **入库前 gate**(`lib/risks.py:is_dangerous_url`):katana 的 JSONL 输出再过一遍,命中的标
-   `is_dangerous=1, danger_reason="疑似危险路由,已跳过验证"`,**写入** `web_hash_urls` 而不是丢弃
-   (跟 URLFinder 行为对齐,方便 SRC 报告看到"哪些 URL 被跳过")。
+2. **The gate before the storage** (`lib/risks.py:is_dangerous_url`): the JSONL output of katana goes through it once more, and the ones that hit it are marked
+   `is_dangerous=1, danger_reason="疑似危险路由,已跳过验证"`, and they are **written** into the `web_hash_urls` instead of being dropped
+   (it is aligned with the behaviour of URLFinder, so that the report of the SRC sees "which URLs were skipped").
 
-> **已知缺陷**:子串匹配会有误伤(URL 含 `delete-check` 这种只读查询路径会被拦)。
-> 这是 URLFinder 原生缺陷,本模块继承;不在本模块引入更智能判断(成本/复杂度不划算)。
+> **The known flaw**: the match of a substring has false positives (a URL that holds a read-only query path such as `delete-check` is blocked too).
+> That is the native flaw of URLFinder, this module inherits it; it does not introduce a smarter check here (the cost / the complexity is not worth it).
 
 ---
 
-## 三、字段对齐(httpx ↔ katana)
+## III. The alignment of the fields (httpx ↔ katana)
 
-| httpx 字段 | 来源 | katana 字段 | 本模块策略 |
+| The field of httpx | The source | The field of katana | The strategy of this module |
 |---|---|---|---|
-| `host` | httpx 自带 | ❌ 在 `request.endpoint` | `urllib.parse.urlparse(endpoint).hostname` |
-| `port` | httpx 自带 | ❌ | `urlparse().port` 或 80/443 |
-| `scheme` | httpx 自带 | ❌ | `urlparse().scheme` |
-| `path` | httpx 自带 | ❌ | `urlparse().path` |
-| `status_code` | ✅ | ✅ `response.status_code` | 直接取 |
-| `content_type` | ✅ | ⚠️ `response.headers["content-type"]` | headers 兜底 |
-| `content_length` | ✅ | ✅ | 直接取 |
-| `title` | ✅ | ⚠️ 在 body 里 | `<title>(.*?)</title>` 正则(URLFinder 同款) |
-| `technologies` | httpx 叫 `tech` | ✅ | key 改 `tech` |
-| `header` | ✅ | ✅ `response.headers` | 直接取 |
-| `body` | ✅ `-sr` | ✅ | 直接取(可 `KATANA_OMIT_BODY=1` 关) |
-| `web_hash_urls.body` (BLOB) | ❌ 旧版无 | ✅ 默认落库 | 默认 `KATANA_OMIT_BODY=0` → zlib(level=6) 入库;`KATANA_OMIT_BODY=1` 时落 NULL;供 `url_diff` 跑 8 步算法 |
-| `location` | ✅ | ⚠️ `headers["location"]` | headers 兜底 |
-| `response_hash` | ✅ mmh3 | ❌ | **必算** `mmh3.hash128(body)`(algo_diff 依赖) |
-| `time` | ✅ | ✅ 顶层 `timestamp` | 直接取 |
-| `input` | ✅ | ❌ | 用 katana `request.endpoint` 当 input |
+| `host` | it comes with httpx | ❌ it is in `request.endpoint` | `urllib.parse.urlparse(endpoint).hostname` |
+| `port` | it comes with httpx | ❌ | `urlparse().port` or 80/443 |
+| `scheme` | it comes with httpx | ❌ | `urlparse().scheme` |
+| `path` | it comes with httpx | ❌ | `urlparse().path` |
+| `status_code` | ✅ | ✅ `response.status_code` | it is taken directly |
+| `content_type` | ✅ | ⚠️ `response.headers["content-type"]` | the headers are the fallback |
+| `content_length` | ✅ | ✅ | it is taken directly |
+| `title` | ✅ | ⚠️ it is in the body | the regex `<title>(.*?)</title>` (the same as URLFinder) |
+| `technologies` | httpx calls it `tech` | ✅ | the key becomes `tech` |
+| `header` | ✅ | ✅ `response.headers` | it is taken directly |
+| `body` | ✅ `-sr` | ✅ | it is taken directly (it can be turned off with `KATANA_OMIT_BODY=1`) |
+| `web_hash_urls.body` (BLOB) | ❌ the old version has none | ✅ it is stored by default | the default `KATANA_OMIT_BODY=0` → it is stored with zlib(level=6); with `KATANA_OMIT_BODY=1` it stores NULL; it feeds the 8 steps of the algorithm of `url_diff` |
+| `location` | ✅ | ⚠️ `headers["location"]` | the headers are the fallback |
+| `response_hash` | ✅ mmh3 | ❌ | it **has to be computed**: `mmh3.hash128(body)` (algo_diff depends on it) |
+| `time` | ✅ | ✅ the `timestamp` of the top level | it is taken directly |
+| `input` | ✅ | ❌ | the `request.endpoint` of katana is used as the input |
 
-**核心约束**:`response_hash` **必须算** — algo_diff 8 步算法依赖它做 simhash/MMH3 字段屏蔽,
-缺这字段 = 这条记录对 algo_diff 是死的。
+**The key constraint**: the `response_hash` **has to be computed** — the 8 steps of the algorithm of algo_diff depend on it for the masking of the simhash / of the MMH3 field,
+and without that field the record is dead for algo_diff.
 
 ---
 
-## 四、部署
+## IV. The deployment
 
 ```bash
 cd modules/public/katana
-bash install.sh              # go install katana + 写 config example + 自检
-bash install.sh --check      # 只查依赖
-bash install.sh --uninstall  # 不删二进制(由 go 环境管),只删 config + cache
+bash install.sh              # go install katana + write the config example + the self check
+bash install.sh --check      # it only checks the dependencies
+bash install.sh --uninstall  # it does not delete the binary (the go environment takes care of it), it only deletes the config + the cache
 ```
 
-需要:Go ≥ 1.22(`go version` 自检)、Python ≥ 3.10、`bash` ≥ 4。
+It needs: Go ≥ 1.22 (`go version` checks itself), Python ≥ 3.10, `bash` ≥ 4.
 
 ---
 
-## 五、客户端使用
+## V. The use by the client
 
-### 手动调 katana enrich
+### Calling the katana enrich by hand
 
 ```bash
-# 等价 srcradar dispatcher
+# the equivalent of the srcradar dispatcher
 ./srcradar katana enrich -b ExampleCo
 
-# 或直接
+# or directly
 python3 modules/public/katana/lib/katana_runner.py \
     --business ExampleCo \
     --db db/recon.sqlite3 \
     --hosts-file <(echo "example.com")
 ```
 
-### daily-url stage(默认引擎)
+### The daily-url stage (the default engine)
 
 ```bash
-# 默认行为:走 katana
+# the default behaviour: it goes through katana
 ./srcradar daily daily_monitor -type daily-url
 
-# 强制走 URLFinder(老行为,fallback / 中文敏感信息)
+# it forces the URLFinder (the old behaviour, the fallback / the sensitive information of the Chinese)
 DAILY_URL_ENGINE=urlfinder ./srcradar daily daily_monitor -type daily-url
 
-# auto:katana 失败时 fallback URLFinder(best-effort)
+# auto: when katana fails it falls back on URLFinder (best-effort)
 DAILY_URL_ENGINE=auto ./srcradar daily daily_monitor -type daily-url
 ```
 
-### dashboard 手动按钮
+### The manual button of the dashboard
 
-`127.0.0.1:8765/<biz>/katana-enrich` — 跟现有 `scan-urls` 按钮平级。
+`127.0.0.1:8765/<biz>/katana-enrich` — it is at the same level as the existing `scan-urls` button.
 
 ---
 
-## 六、运维
+## VI. The operation
 
-| 现象 | 排查 |
+| The symptom | The troubleshooting |
 |---|---|
-| `install.sh --check` 报 `缺 katana` | `go install github.com/projectdiscovery/katana/v2/cmd/katana@latest` |
-| daily-url 跑完但 web_hash_urls 没新增 | 查 `web_subdomain_scan_schedule` 是否有 `enabled=1` 行 |
-| `is_dangerous=1` 误伤只读 URL | 改 `lib/risks.py:RISKS` 收紧(默认 5 词) |
-| katana 启动慢 | 加 `-crawl-duration 300 -timeout 10` 上限 |
-| response_hash 全空 | body 被 `-ob` 关掉了,确认没设 `KATANA_OMIT_BODY=1` |
-| `web_hash_urls.body` 全 NULL | 跟 `response_hash 全空` 同根因;`url_diff` 阶段会跳过无 body 行(ffuf / urlfinder / gau 老路径按用户拍板维持 body=NULL) |
+| `install.sh --check` reports `缺 katana` | `go install github.com/projectdiscovery/katana/v2/cmd/katana@latest` |
+| the daily-url ran but the web_hash_urls did not grow | check whether the table `web_subdomain_scan_schedule` has a row with `enabled=1` |
+| an `is_dangerous=1` hits a read-only URL | tighten the `lib/risks.py:RISKS` (5 words by default) |
+| katana starts slowly | put a limit on it with `-crawl-duration 300 -timeout 10` |
+| the response_hash is empty everywhere | the body was turned off by `-ob`, make sure that `KATANA_OMIT_BODY=1` is not set |
+| the `web_hash_urls.body` is NULL everywhere | it is the same root cause as the empty response_hash; the stage of `url_diff` skips the rows without a body (the old paths of ffuf / urlfinder / gau keep the body=NULL, as the user decided) |
 
 ---
 
-## 七、文件说明
+## VII. The description of the files
 
-| 文件 | 行数 | 职责 |
+| The file | The lines | The duty |
 |---|---|---|
-| `install.sh` | ~120 | 装 katana 二进制 + 写 example conf + 自检 |
-| `katana_enrich.sh` | ~80 | CLI 入口(daily-url stage 调用) |
-| `config/katana.conf.example` | ~30 | 占位模板(operator 自填真值后另存为 `katana.conf`,`.gitignore` 屏蔽) |
-| `lib/__init__.py` | ~1 | 空,让 `lib/` 成为 package |
-| `lib/risks.py` | ~40 | 5 词黑名单 + `is_dangerous_url()` + 单测入口 |
-| `lib/katana_runner.py` | ~250 | subprocess 调 katana + parse JSONL + 风险 gate |
-| `lib/schema_map.py` | ~120 | katana JSON dict → web_hash_urls INSERT 参数(字段对齐 + 缺字段补算) |
+| `install.sh` | ~120 | it installs the katana binary + it writes the example conf + it checks itself |
+| `katana_enrich.sh` | ~80 | the entry of the CLI (the stage of the daily-url calls it) |
+| `config/katana.conf.example` | ~30 | a template of the placeholders (the operator fills the real values and saves it as `katana.conf`, the `.gitignore` hides it) |
+| `lib/__init__.py` | ~1 | it is empty, it makes `lib/` a package |
+| `lib/risks.py` | ~40 | the blacklist of the 5 words + `is_dangerous_url()` + the entry of the unit tests |
+| `lib/katana_runner.py` | ~250 | the subprocess that calls katana + the parse of the JSONL + the gate of the risk |
+| `lib/schema_map.py` | ~120 | the parameters of the INSERT into web_hash_urls from the JSON dict of katana (the alignment of the fields + the computation of the missing ones) |

@@ -1,122 +1,120 @@
 # Terms Addendum for srcradar
 
-> 本附录是 srcradar 项目在 Apache-2.0 基础上的附加使用限制,按
-> Apache-2.0 第 4 条以"附加条款"形式附属于 LICENSE 文件。
-> 本附录与 LICENSE 共同构成完整的法律文本;单独引用本附录而忽略
-> LICENSE 主文本的,不在 Apache-2.0 §4 的保护范围内。
+> English | [中文](TERMS_ADDENDUM_zh.md)
 
-§A. 允许的用途
+> This addendum is the set of the additional restrictions of the use of the srcradar project on top of Apache-2.0, and it is attached to the file LICENSE as an "additional clause" under the article 4 of Apache-2.0.
+> This addendum and the LICENSE together make the whole legal text; citing this addendum alone and ignoring the main text of the LICENSE is outside of the protection of the §4 of Apache-2.0.
+
+§A. The permitted uses
 ------------------------------------------------------------------------
 
-本软件仅限用于以下场景:
+This software is only allowed for the following cases:
 
-1. 已获明确书面授权的安全测试(penetration testing)
-   - 测试目标的所有者已签署书面授权(测试范围、时限、白名单)
+1. A security test (penetration testing) that holds an explicit written authorization
+   - the owner of the target has signed a written authorization (the scope of the test, the time limit, the whitelist)
 
-2. 漏洞奖励计划(SRC / Bug Bounty)
-   - 在已公布的 SRC 平台(补天、漏洞盒子、HackerOne 等)的资产盘点环节
+2. A bug bounty program (a SRC / a Bug Bounty)
+   - in the inventory of the assets of the published SRC platforms (补天, 漏洞盒子, HackerOne and the like)
 
-3. 企业自身的安全运营
-   - 企业自有资产的风险评估与持续监控
+3. The security operations of a company itself
+   - the risk assessment and the continuous monitoring of the assets of the company itself
 
-4. 教育与学术研究
-   - 网络安全课程、CTF 比赛、学术论文中的合法研究
+4. Education and academic research
+   - the legal research of the courses of the cybersecurity, of the CTF competitions and of the academic papers
 
-5. 公开情报(OSINT)的合法采集
-   - 仅采集公开可访问的数据,且符合目标服务的 ToS
-
-------------------------------------------------------------------------
-§B. 禁止的用途
-------------------------------------------------------------------------
-
-严禁将本软件用于:
-
-1. 未经授权的网络/系统/数据访问,包括但不限于:
-   - 扫描、探测、入侵未授权目标的端口/服务/Web 资产
-   - 突破认证、绕过授权机制、绕过 WAF / 反爬机制
-   - 绕过验证码、Cookie 池维护、TLS 指纹伪造
-
-2. 任何违反所在司法辖区法律的活动,包括但不限于:
-   - 《中华人民共和国刑法》第 285 条(非法侵入计算机信息系统罪)
-   - 《中华人民共和国刑法》第 286 条(破坏计算机信息系统罪)
-   - 《中华人民共和国刑法》第 253 条(侵犯公民个人信息罪)
-   - 《中华人民共和国数据安全法》第 32 条
-   - 《中华人民共和国网络安全法》第 27 条、第 44 条
-   - 《Computer Fraud and Abuse Act》(美国)
-   - 《Computer Misuse Act》(英国)
-   - 其它司法辖区类似法条
-
-3. 商业情报 / 竞争对手分析 / 数据爬取(违反平台 ToS)
-
-4. 大规模个人数据收集(违反《个人信息保护法》/ GDPR)
-
-5. 为违法犯罪活动提供工具、培训或咨询
+5. The legal collection of the public intelligence (OSINT)
+   - only the data that is publicly reachable is collected, and it agrees with the ToS of the target service
 
 ------------------------------------------------------------------------
-§C. 数据源合规责任
+§B. The forbidden uses
 ------------------------------------------------------------------------
 
-本软件可访问的企业信息数据源(爱企查、天眼查、ICP_Query 等)的合规
-责任完全由使用者承担:
+It is strictly forbidden to use this software for:
 
-- 使用者必须自行评估每个数据源的 ToS、robots.txt、访问限制
+1. An unauthorized access to a network / to a system / to the data, including without being limited to:
+   - the scan, the probe and the intrusion of the ports / of the services / of the web assets of an unauthorized target
+   - the breaking of an authentication, the bypass of a mechanism of authorization, the bypass of a WAF / of an anti crawling mechanism
+   - the bypass of a captcha, the maintenance of a pool of cookies, the forging of a TLS fingerprint
 
-- 上游 ENScan_GO 的 config.yaml cookie / token 配置由使用者负责
-  - 项目维护者不为数据源 cookie 失效、被封号等问题负责
-  - 绝对不要将本软件获取的 cookie / token 提交进 git
-    (.gitignore 已配置忽略;违反者自负法律责任)
+2. Any activity that breaks the law of the jurisdiction it happens in, including without being limited to:
+   - the article 285 of the Criminal Law of the People's Republic of China (the crime of the illegal intrusion into a computer information system)
+   - the article 286 of the Criminal Law of the People's Republic of China (the crime of the destruction of a computer information system)
+   - the article 253 of the Criminal Law of the People's Republic of China (the crime of the infringement of the personal information of the citizens)
+   - the article 32 of the Data Security Law of the People's Republic of China
+   - the articles 27 and 44 of the Cybersecurity Law of the People's Republic of China
+   - the Computer Fraud and Abuse Act (the United States)
+   - the Computer Misuse Act (the United Kingdom)
+   - the similar articles of the other jurisdictions
 
-- ICP 备案反查(ymicp/ 模块依赖的 HG-ha/ICP_Query 服务):
-  - 该上游项目未声明开源协议(README 仅声明仅供学习交流)
-  - 使用者自行评估合规风险
-  - 本项目维护者不为该上游的合规性背书
+3. The business intelligence / the analysis of the competitors / the crawling of the data (it breaks the ToS of the platform)
 
-------------------------------------------------------------------------
-§D. 免责声明
-------------------------------------------------------------------------
+4. The mass collection of the personal data (it breaks the Personal Information Protection Law / the GDPR)
 
-本软件按"现状"(AS IS)提供,不提供任何形式的明示或暗示保证。
-
-在适用法律允许的最大范围内:
-
-1. 作者与贡献者对因使用本软件直接或间接造成的任何损失、
-   损害、刑事/民事/行政责任不承担任何责任。
-
-2. 使用者完全理解并接受:
-   - 网络安全工具本身具有双用途性质,作者无法控制使用者行为
-   - 一旦本软件被用于未授权测试,法律后果由使用者独立承担
-
-3. 本软件不构成法律建议,使用者应自行咨询专业法律意见。
-
-4. 本免责声明适用所有司法辖区,在不被当地法律禁止的范围内全部有效。
-
-5. 若任何条款被有管辖权的法院认定为无效,其它条款不受影响。
-
-6. 本软件中包含的开源组件(ENScan_GO / httpx / dnsx / cdncheck 等)
-   仍受各自原始协议约束,本附录不替代或修改那些协议。
+5. Providing a tool, a training or a consulting for a criminal activity
 
 ------------------------------------------------------------------------
-§E. 终止条款
+§C. The responsibility of the compliance of the data sources
 ------------------------------------------------------------------------
 
-使用者违反本附录任一条款时:
+The responsibility of the compliance of the data sources of the information of the companies that this software can reach (爱企查, 天眼查, ICP_Query and the like) is entirely borne by the user:
 
-1. 在 Apache-2.0 下的许可自动终止
-2. 使用者必须立即停止使用本软件
-3. 使用者必须立即删除所有从本软件派生的副本
-4. 作者保留追究法律责任的权利
+- The user has to assess the ToS, the robots.txt and the access restrictions of every data source on their own
 
-------------------------------------------------------------------------
-§F. 联系与报告
-------------------------------------------------------------------------
+- The configuration of the cookie / of the token of the config.yaml of the upstream ENScan_GO is the responsibility of the user
+  - The maintainers of the project are not responsible for the expiry of the cookie of a data source, for a banned account and the like
+  - Never commit the cookie / the token that this software obtained into git
+    (the .gitignore is already configured to ignore it; whoever breaks that bears the legal consequences)
 
-如发现本软件的安全问题,请通过 GitHub Issues / Security Advisories 报告,
-勿直接公开披露。
-
-如发现本软件被用于违反 §B 的活动,可通过 GitHub Issues 举报。
+- The reverse lookup of the ICP filing (the service HG-ha/ICP_Query that the ymicp/ module depends on):
+  - That upstream project declares no license (its README only declares that it is for the learning and the exchange)
+  - The user assesses the risk of the compliance on their own
+  - The maintainers of this project do not endorse the compliance of that upstream
 
 ------------------------------------------------------------------------
-生效日期
+§D. The disclaimer
 ------------------------------------------------------------------------
 
-本 LICENSE 自 srcradar 公开版本首次发布之日起生效。
+This software is provided "as is", without any warranty of any kind, express or implied.
+
+To the maximum extent that the applicable law allows:
+
+1. The authors and the contributors bear no liability at all for any loss, damage or criminal / civil / administrative liability caused directly or indirectly by the use of this software.
+
+2. The user understands and accepts fully:
+   - A tool of the cybersecurity has a dual use by nature, and the author cannot control the behaviour of the user
+   - Once this software is used for an unauthorized test, the legal consequences are borne by the user alone
+
+3. This software does not constitute a legal advice, and the user has to consult a professional legal opinion on their own.
+
+4. This disclaimer applies to every jurisdiction and it is fully valid as far as the local law does not forbid it.
+
+5. If any clause is declared invalid by a court that has the jurisdiction, the other clauses are not affected.
+
+6. The open source components that this software contains (ENScan_GO / httpx / dnsx / cdncheck and the like)
+   remain bound by their own original licenses, and this addendum neither replaces nor modifies those licenses.
+
+------------------------------------------------------------------------
+§E. The termination
+------------------------------------------------------------------------
+
+When the user breaks any clause of this addendum:
+
+1. The license under Apache-2.0 terminates automatically
+2. The user has to stop using this software immediately
+3. The user has to delete every copy that derives from this software immediately
+4. The author keeps the right to pursue the legal liability
+
+------------------------------------------------------------------------
+§F. The contact and the reports
+------------------------------------------------------------------------
+
+When you find a security problem in this software, report it through the GitHub Issues / the Security Advisories,
+and do not disclose it publicly.
+
+When you find that this software is used for an activity that breaks the §B, you can report it through the GitHub Issues.
+
+------------------------------------------------------------------------
+The date of the entry into force
+------------------------------------------------------------------------
+
+This LICENSE comes into force on the day of the first public release of the public version of srcradar.

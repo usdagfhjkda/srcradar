@@ -1,121 +1,123 @@
-# daily/ — SRC 资产监控日报
+# daily/ — the daily report of the monitoring of the SRC assets
 
-每日 03:00 自动跑 `pdtm/pipeline.sh`（+ 可选的 `db_align` / `ymicp`），与上次快照对比后落盘生成增量报告（不上发邮件 / webhook）。
+> English | [中文](README_zh.md)
 
-## 三个项目（`-type` 选择）
+Every day at 03:00 it runs `pdtm/pipeline.sh` on its own (with the optional `db_align` / `ymicp`), compares the result with the snapshot of the last run and writes the incremental report to the disk (it does not send a mail or a webhook).
 
-通过 `-type <pdtm[,icp[,enscan]]>` 单参数选本次要跑的阶段，逗号分隔（默认 `pdtm`）：
+## The three projects (the choice of `-type`)
 
-| `-type` 值 | 项目 | 路径 | 用途 |
+The single parameter `-type <pdtm[,icp[,enscan]]>` selects the stages of this run, separated by commas (the default is `pdtm`):
+
+| Value of `-type` | Project | Path | What it does |
 |---|---|---|---|
-| `pdtm`   | pdtm  | `../pdtm/pipeline.sh`        | 子域 / 端口 / 指纹扫描 |
-| `icp`    | ymicp | `../ymicp/icp_mapp_query.py` | 小程序 / 公众号 备案刷新 |
-| `enscan` | db_align | `../db_align/bin/db_align`  | 主体 / 子公司 / 资产 拉新（含 `-scope`） |
+| `pdtm`   | pdtm  | `../pdtm/pipeline.sh`        | the scan of the subdomains / of the ports / of the fingerprints |
+| `icp`    | ymicp | `../ymicp/icp_mapp_query.py` | the refresh of the filing of the mini programs / of the WeChat accounts |
+| `enscan` | db_align | `../db_align/bin/db_align`  | the pull of the entities / of the subsidiaries / of the assets (with `-scope`) |
 
-**`-type` 只能写一个**，多个 `-type` 会被拒（typo guard）。例如 `-type pdtm -type icp` 报"only takes one value; use comma-separated form like -type pdtm,icp"。
+**`-type` takes one value only**, several `-type` are refused (the guard against a typo). `-type pdtm -type icp` reports "only takes one value; use comma-separated form like -type pdtm,icp".
 
-阶段是**按固定顺序**跑的（不看你写 `-type` 的顺序）：
-`enscan` → `pdtm` → `icp`。
-**顺序固定（启用 enscan 时）**：enscan 先写 `scopes`，pdtm 才能读 scope 作 target。
-空 scope 时 pdtm 会直接退出 1（pipeline.sh:91-95），所以颠倒顺序会让第一次跑 pdtm 直接失败。
-`icp` 跑最后 —— 它只读 `companies` 表，不依赖其他阶段的输出。
+The stages run in a **fixed order** (the order of the `-type` you write does not matter):
+`enscan` → `pdtm` → `icp`.
+**The order is fixed (when enscan is enabled)**: enscan writes the `scopes` first, and pdtm can only read a scope as a target afterwards.
+When there is no scope, pdtm quits with 1 right away (pipeline.sh:91-95), so turning the order around makes the first run of pdtm fail.
+`icp` runs last — it only reads the `companies` table and it does not depend on the output of the other stages.
 
-## 目录结构
+## The structure of the directory
 
 ```
 daily/
-├── daily_monitor.sh            # cron 调用入口（顶层编排）
-├── run_one_business.sh         # 单业务：enscan → pdtm → icp（按固定顺序）
-├── install_cron.sh             # install (无参) / uninstall
+├── daily_monitor.sh            # the entry point of the cron (the orchestration of the top)
+├── run_one_business.sh         # one business: enscan → pdtm → icp (in the fixed order)
+├── install_cron.sh             # install (without arguments) / uninstall
 ├── lib/
-│   ├── snapshot.py             # 全量快照 6 张表到 JSON
-│   ├── diff.py                 # 对比 + 输出 CSV / summary.md
-│   ├── dashboard.py            # ARL 4-tab 本地可视化（仅绑 127.0.0.1）
-│   └── log.py                  # stderr + log 文件双写
-├── snapshots/                  # previous.json + 本轮快照
-├── reports/<run-id>/           # 本轮报告
-└── logs/<run-id>.log           # 本轮日志
+│   ├── snapshot.py             # the full snapshot of the 6 tables into JSON
+│   ├── diff.py                 # the comparison + the CSV / summary.md
+│   ├── dashboard.py            # the local visualisation of the 4 tabs of ARL (it binds 127.0.0.1 only)
+│   └── log.py                  # the stderr and the log file, both written
+├── snapshots/                  # previous.json + the snapshot of this round
+├── reports/<run-id>/           # the report of this round
+└── logs/<run-id>.log           # the log of this round
 ```
 
-## 一次完整运行的产物
+## What a complete run leaves behind
 
 `reports/20260725-030000/`：
 
 ```
-summary.md                       # 总览（默认打开这个）
-added_scopes.csv                 # 新增 scope
-added_mapp_records.csv           # 新增 ICP / APP / 小程序
-added_web_subdomains.csv         # 新增 Web 资产
-added_tcp_assets.csv             # 新增 TCP 端口
-added_companies.csv              # 新增主体
-added_web_hashes.csv             # 新增指纹
-reactivated_web_subdomains.csv   # 失而复得
+summary.md                       # the overview (this is the one to open)
+added_scopes.csv                 # the added scopes
+added_mapp_records.csv           # the added ICP / APP / mini programs
+added_web_subdomains.csv         # the added web assets
+added_tcp_assets.csv             # the added TCP ports
+added_companies.csv              # the added entities
+added_web_hashes.csv             # the added fingerprints
+reactivated_web_subdomains.csv   # the ones that came back
 reactivated_tcp_assets.csv
-deactivated_web_subdomains.csv   # 上一轮在线、本轮失活
+deactivated_web_subdomains.csv   # they were online in the last round and they are gone now
 deactivated_tcp_assets.csv
-changed_companies.csv            # 主体字段变了（main_licence / nature_name）
-changed_mapp_records.csv         # 资产字段变了
-changed_web_hashes.csv           # subdomain_count 等变了
-changed_web_subdomains.csv       # status / title / tech / response_hash 变了
+changed_companies.csv            # a field of the entity changed (main_licence / nature_name)
+changed_mapp_records.csv         # a field of the asset changed
+changed_web_hashes.csv           # subdomain_count and the like changed
+changed_web_subdomains.csv       # status / title / tech / response_hash changed
 changed_tcp_assets.csv
-deleted_<table>.csv              # 物理删除（基本不会有）
-full_snapshot.json               # = after.json 副本，方便离线看
+deleted_<table>.csv              # a physical deletion (it hardly ever happens)
+full_snapshot.json               # a copy of after.json, it is easier to read it offline
 ```
 
-只有当本类有数据时才生成对应 CSV；空类别不会留空文件。
+The CSV of a category is only written when that category holds data; an empty category leaves no empty file behind.
 
-## 安装 / 卸载 cron
+## Installing / removing the cron
 
 ```bash
-# 装（无参，cron 跑 pdtm+icp，业务级开关见 `recon_business_config` 表）
+# install it (without arguments, the cron runs pdtm+icp, the switch of a business is in the table `recon_business_config`)
 ./install_cron.sh
 
-# 验证
+# the verification
 crontab -l | grep daily_monitor
 
-# 卸
+# remove it
 ./install_cron.sh uninstall
 ```
 
-cron 行写死 `-type pdtm,icp` —— 哪些业务实际触发哪些阶段，由 `recon_business_config` 表按业务决定：
+The cron line hardcodes `-type pdtm,icp` — the stages that a business really triggers are decided per business by the `recon_business_config` table:
 
-| 字段 | 控哪个阶段 | 默认 |
+| Field | The stage it controls | Default |
 |---|---|---|
-| `enabled` | 整业务开关（0 = cron 跳过该业务） | 1 |
-| `web` | pdtm 阶段（子域/域名扫描） | 1 |
-| `tcp` | pdtm 阶段（端口扫描，pdtm 共享同 stage） | 0 |
-| `icp` | ymicp 阶段（小程序/公众号 备案刷新） | 1 |
+| `enabled` | the business as a whole (0 = the cron skips the business) | 1 |
+| `web` | the pdtm stage (the scan of the subdomains / of the domains) | 1 |
+| `tcp` | the pdtm stage (the scan of the ports, pdtm shares the same stage) | 0 |
+| `icp` | the ymicp stage (the refresh of the filing of the mini programs / of the WeChat accounts) | 1 |
 
-pdtm 阶段由 `web OR tcp` 任一为 1 触发；缺 config 行的业务按全 0 处理（opt-in）。
+The pdtm stage is triggered when `web OR tcp` is 1; a business whose config row is missing is treated as if every field were 0 (opt-in).
 
-**enscan 不在 cron 里** —— 是 `db_align` 数据拉新阶段（手动 `run_one_business.sh -type enscan 业务名` 触发），未走 config gate，cron 也不会自动跑。
+**enscan is not part of the cron** — it is the stage of `db_align` that pulls the data again (it is triggered by hand with `run_one_business.sh -type enscan <business name>`), it does not go through the gate of the config, and the cron never runs it on its own.
 
-**daily-url 同样不在 cron 行里**（用户 2026-08-26 拍板）—— 它读 `web_subdomain_scan_schedule` 跑手动标记的子域，
-默认 cron 不跑。需要时手动 `./daily_monitor.sh -type daily-url` 或 `crontab -e` 加独立行。
-详见 §"每日 URL 扫描"。
+**daily-url is not part of the cron line either** (the user decided on 2026-08-26) — it reads `web_subdomain_scan_schedule` and runs the subdomains that were marked by hand,
+the default cron does not run it. Run `./daily_monitor.sh -type daily-url` by hand when it is needed, or add a line of its own with `crontab -e`.
+See the section on the daily URL scan.
 
-`flock -n` 锁确保手动触发 + cron 不会并发；`.lock` 文件路径固定。
-重装时 `install` 会替换同 marker 的旧 cron 行（幂等）。
+The `flock -n` lock makes sure that a manual trigger and the cron do not run at the same time; the path of the `.lock` file is fixed.
+When it is installed again, `install` replaces the old cron line that carries the same marker (idempotent).
 
-## 手动运行
+## Running it by hand
 
 ```bash
-# 默认（仅 pdtm）
+# the default (pdtm only)
 ./daily_monitor.sh
 
-# 多阶段（逗号分隔）
+# several stages (separated by commas)
 ./daily_monitor.sh -type pdtm,icp
 ./daily_monitor.sh -type pdtm,icp,enscan
 
-# 不跑任何阶段（只做快照 + diff，适合排查）
+# no stage at all (only the snapshot + the diff, it fits the troubleshooting)
 ./daily_monitor.sh dryrun
 
-# 单独跑某个业务
+# run a single business
 ./run_one_business.sh ExampleCo
 ./run_one_business.sh -type icp ExampleCo
 ./run_one_business.sh -type pdtm,enscan ExampleCo
 
-# 单点 httpx 扫描 + 入库（跳过 dnsx/cdnmatch/naabu/icp，不动同业务 is_active=1 行）
+# the scan of a single host with httpx + the storage (it skips dnsx/cdnmatch/naabu/icp and it leaves the is_active=1 rows of the same business alone)
 cat > /tmp/api_hosts.txt <<EOF
 api.example.com
 api2.example.com
@@ -123,128 +125,129 @@ EOF
 ./run_one_business.sh -onesite /tmp/api_hosts.txt ExampleCo
 ```
 
-### 单点扫描模式 (`-onesite`)
+### The mode of a single site (`-onesite`)
 
-绕过 `pdtm/pipeline.sh` 的 dnsx + cdnmatch + naabu + scanner 整套前置，直接 subprocess 跑 `httpx` 写 `web_hashes + web_subdomains`：
+It skips the whole set of prerequisites of `pdtm/pipeline.sh` (dnsx + cdnmatch + naabu + scanner) and runs `httpx` as a subprocess to write `web_hashes + web_subdomains`:
 
-- **不**触发 `persist()` 里的 `UPDATE ... SET is_active=0` 全清场；只新增 / 刷新传入主机对应的行，同业务下其它 `is_active=1` 行纹丝不动
-- **不**写 `scopes`、`tcp_assets`、`companies`、`mapp_records` 等其它表
-- 适合"加一个新域名验证一下 / 重扫少数几个看 httpx 怎么响"的对点场景
-- 与 `-type` 互斥；与 cron 全量 baseline 互不影响
+- It **does not** trigger the `UPDATE ... SET is_active=0` of `persist()`, the one that clears the floor; it only adds / refreshes the rows of the hosts it was given, and the other `is_active=1` rows of the same business stay untouched
+- It **does not** write the other tables, such as `scopes`, `tcp_assets`, `companies` and `mapp_records`
+- It fits the cases of a point: "add a new domain and check it / scan a few of them again and see how httpx answers"
+- It excludes `-type`; it does not affect the full baseline of the cron
 
-`hosts.txt` 每行一个域名，`#` 开头为注释；上限 200 行；只接受 FQDN 形式（不含 `http://`）。
+`hosts.txt` holds one domain per line, a line that starts with `#` is a comment; the limit is 200 lines; only the FQDN form is accepted (no `http://`).
 
-### Dashboard 表单
+### The form of the dashboard
 
-`/<业务名>` 页面（默认打开的"任务状态" tab 顶部）有一个折叠面板 **「扫描并入库」**：
+The page of `/<business name>` (the top of the "Task Status" tab that opens by default) holds a folding panel called **"Scan and store"**:
 
-- 点击展开 → 文本框 + 「扫描并入库」按钮
-- 浏览器 POST 到 `/<业务名>/scan`（`application/x-www-form-urlencoded`，字段 `hosts=<newline-separated>`）
-- dashboard 同步等待（典型 5-30s）；返回一张小结果页含「返回 /<业务名>」链接
-- 成功后 dashboard 自动 reload，下一次访问业务页就能看到新数据
-- 与上述 `-onesite` CLI 走同一条后端（dashboard subprocess 调 `import_scan_results.py scan-onesite`），语义、退出码、不动 `is_active=1` 行的承诺完全一致
+- A click unfolds it → a text box + the "Scan and store" button
+- The browser POSTs to `/<business name>/scan` (`application/x-www-form-urlencoded`, the field `hosts=<newline-separated>`)
+- The dashboard waits for it (5-30s is typical); it returns a small result page with a link "back to /<business name>"
+- When it succeeds the dashboard reloads itself, and the next visit of the page of the business shows the new data
+- It goes through the same backend as the `-onesite` CLI above (the subprocess of the dashboard calls `import_scan_results.py scan-onesite`), and the semantics, the exit codes and the promise of leaving the `is_active=1` rows alone are exactly the same
 
-可手动用 `curl` 复现同一请求（用于调试 / 自动化）：
+The same request can be reproduced by hand with `curl` (for the debugging / for the automation):
 
 ```bash
 curl -si -X POST -d $'hosts=baidu.com\nqq.com' \
   http://127.0.0.1:8765/ExampleCo/scan
-# 200 OK，HTML 含「扫描完成 · 2 条写入」
+# 200 OK, the HTML holds "the scan is done · 2 rows were written"
 ```
 
-### 退出码（位掩码）
+### The exit codes (a bit mask)
 
-`run_one_business.sh` 用 4 位 bit-mask 报告每阶段的结果（用户 2026-08-26 加 daily-url）：
+`run_one_business.sh` reports the result of every stage with a 4 bit bit-mask (the user added daily-url on 2026-08-26):
 
-| 位 | 值 | 含义 |
+| Bit | Value | What it means |
 |---|---|---|
-| bit0 | 1 | pdtm 失败 |
-| bit1 | 2 | enscan (db_align) 失败 |
-| bit2 | 4 | icp (ymicp) 失败 |
-| bit3 | 8 | daily-url 失败 |
+| bit0 | 1 | pdtm failed |
+| bit1 | 2 | enscan (db_align) failed |
+| bit2 | 4 | icp (ymicp) failed |
+| bit3 | 8 | daily-url failed |
 
-合起来：`0` = 全部 ok，`3` = pdtm+enscan 失败，`5` = pdtm+icp 失败，`7` = 三个全失败，`15` = 四个全失败。
-未请求的阶段不出现在掩码里。`daily_monitor.sh` 把每个失败阶段写到 `summary.md` 的 "业务运行告警" 段落。
+Put together: `0` = everything is ok, `3` = pdtm+enscan failed, `5` = pdtm+icp failed, `7` = the three of them failed, `15` = the four of them failed.
+A stage that was not asked for does not show up in the mask. `daily_monitor.sh` writes every stage that failed into the "Business run warnings" section of `summary.md`.
 
-## 监控范围
+## The scope of the monitoring
 
-`businesses` 表里 `TRIM(business_name) != ''` 的所有业务。当前：
+Every business of the `businesses` table whose `TRIM(business_name) != ''`. At the moment:
 - `ExampleCo`
 
-跑 `enscan` (db_align) 时会自动调 AQC，可能需要 cookie / proxy；详见 `../db_align/README.md`。
+The run of `enscan` (db_align) calls AQC on its own, and it may need a cookie / a proxy; see `../db_align/README.md`.
 
-## 监控表
+## The tables that are monitored
 
-| 表 | 逻辑键 (identity) | 内容字段（判断 changed） |
+| Table | The logical key (the identity) | The content fields (what decides a change) |
 |---|---|---|
 | scopes | (business_id, scope_name, asset) | is_wildcard |
 | companies | (business_id, unit_name) | nature_name, main_licence |
-| mapp_records | (company_id, service_licence) 或 (company_id, service_name, service_type) | domain, content_type_name, record_updated_at |
+| mapp_records | (company_id, service_licence) or (company_id, service_name, service_type) | domain, content_type_name, record_updated_at |
 | web_hashes | (business_id, response_hash) | subdomain_count |
-| web_subdomains | **(business_id, subdomain, port)** ← 逻辑键，不用 hash_id | status_code, title, technologies, response_hash |
+| web_subdomains | **(business_id, subdomain, port)** ← the logical key, not the hash_id | status_code, title, technologies, response_hash |
 | tcp_assets | (business_id, host, port) | hosts, raw_value |
 | **web_hash_urls** | **(business_id, subdomain, url, source)** | status_code, content_length, word_count, title, redirect, link_source, risk_flag, is_dangerous, content_type |
 
-`web_subdomains` 用逻辑键 `(business_id, subdomain, port)` 而非自然键
-`(hash_id, subdomain, port)`：因为 `import_scan_results.py` 按响应指纹分组，
-hash_id 每次跑都可能漂移。
-`web_hash_urls` 同样按逻辑键 `(business_id, subdomain, url, source)` —— 与
-`UNIQUE` 约束一致，便于按 source 拆分历史。
+`web_subdomains` uses the logical key `(business_id, subdomain, port)` and not the natural key
+`(hash_id, subdomain, port)`: `import_scan_results.py` groups by the fingerprint of the response,
+and the hash_id can drift on every run.
+`web_hash_urls` uses the logical key `(business_id, subdomain, url, source)` as well — it agrees with
+the `UNIQUE` constraint, and it makes it easy to split the history by source.
 
-每张表还区分 is_active 翻转：
+Every table also tells the flip of is_active apart:
 
-- `added`      新出现且 active=1
-- `reactivated` 之前 active=0，本轮 active=1
-- `deactivated` 之前 active=1，本轮 active=0
-- `changed`    一直 active，但内容字段变了
-- `deleted`    物理消失（极少见）
+- `added`      it showed up and active=1
+- `reactivated` it was active=0 before and it is active=1 now
+- `deactivated` it was active=1 before and it is active=0 now
+- `changed`    it stayed active, but a content field changed
+- `deleted`    it disappeared (very rare)
 
-时间戳字段（`fetched_at` / `last_seen` / `updated_at` / `first_seen` /
-`created_at` / `raw_json`）每次跑都动，不算 changed。
+The timestamp fields (`fetched_at` / `last_seen` / `updated_at` / `first_seen` /
+`created_at` / `raw_json`) move on every run, they do not count as a change.
 
-`web_hash_urls` 的 change 判定有一处特殊：**仅 `is_static=0` 行（path 最后一个
-`.` 之后不等于 `js` / `css`）参与 change_type 标记**。触发器 `trg_whu_au`
-在 WHEN 子句里 `AND NEW.is_static = 0`，确保静态行永远不会被标 changed /
-reactivated。详见 §"URL 资产扫描" → "is_static 语义"。
+The decision of a change of `web_hash_urls` has one special case: **only the rows of
+`is_static=0` (the last `.` of the path is not followed by `js` / `css`) take part in the
+marking of the change_type**. The trigger `trg_whu_au` carries `AND NEW.is_static = 0` in its
+WHEN clause, so that a static row is never marked changed / reactivated.
+See the section on the scan of the URL assets → "the semantics of is_static".
 
-## 可视化 Dashboard
+## The dashboard
 
-`lib/dashboard.py` 仿 ARL 灯塔的 4 tab 布局，**直接读 SQLite 数据库**渲染单文件 HTML。**纯本地**，**只绑 127.0.0.1**，零外部调用。
+`lib/dashboard.py` copies the layout of the 4 tabs of the ARL beacon, it **reads the SQLite database directly** and it renders a single file of HTML. **It is purely local**, **it binds 127.0.0.1 only**, and it makes no call out.
 
-### 服务管理（systemd --user，用户 2026-08-28 拍板）
+### The management of the service (systemd --user, the user decided on 2026-08-28)
 
-dashboard 由 `systemd --user` 接管，**不再**用 `*/5 * * * * dashboard_watchdog.sh` 的 cron watchdog 兜底
-（cron 行已移除）。systemd unit 文件：
+`systemd --user` takes the dashboard over, it **does not** fall back on the cron watchdog of `*/5 * * * * dashboard_watchdog.sh` any more
+(the cron line is gone). The file of the systemd unit:
 
 ```
-~/.config/systemd/user/dashboard.service    (源文件)
-~/.config/systemd/user/default.target.wants/dashboard.service  (已 enable)
+~/.config/systemd/user/dashboard.service    (the file of the source)
+~/.config/systemd/user/default.target.wants/dashboard.service  (it is enabled)
 ```
 
-unit 关键配置：
+The key configuration of the unit:
 
-| 字段 | 值 | 说明 |
+| Field | Value | What it does |
 |---|---|---|
-| `Type` | `simple` | 直接前台跑 `python3 lib/dashboard.py` |
-| `Restart` | `on-failure` | 异常退出自动拉起 |
-| `RestartSec` | `30` | 避免 OOM kill 后 socket TIME_WAIT 的 bind 竞态（errno 98） |
-| `MemoryMax` | `3G` | 稳态 ~800M，reload 峰值 1.5G；超 3G 视为泄漏 → 重启 |
-| `DASHBOARD_RELOAD` | `300` | env 注入 dashboard.py，5 分钟 reload |
-| `StandardOutput/Error` | `append:~/.../logs/dashboard_service.log` | stdout/stderr 都进 service log |
+| `Type` | `simple` | it runs `python3 lib/dashboard.py` in the foreground |
+| `Restart` | `on-failure` | it starts it again when it quits with an error |
+| `RestartSec` | `30` | it avoids the race of the bind on a socket that is in TIME_WAIT after an OOM kill (errno 98) |
+| `MemoryMax` | `3G` | the steady state is ~800M and the peak of a reload is 1.5G; more than 3G is a leak → restart |
+| `DASHBOARD_RELOAD` | `300` | the env is injected into dashboard.py, it reloads every 5 minutes |
+| `StandardOutput/Error` | `append:~/.../logs/dashboard_service.log` | both the stdout and the stderr go to the log of the service |
 
-日常操作：
+The daily operations:
 
 ```bash
-systemctl --user status dashboard        # 当前 PID / 状态 / 内存
-systemctl --user restart dashboard       # 改 lib/*.py 后手动重启
-systemctl --user stop dashboard          # 维护停服
-journalctl --user -u dashboard -n 50    # 查日志（取代直接 tail log 文件）
+systemctl --user status dashboard        # the current PID / the state / the memory
+systemctl --user restart dashboard       # restart it by hand after a change of lib/*.py
+systemctl --user stop dashboard          # it stops the service for the maintenance
+journalctl --user -u dashboard -n 50    # the log (it takes the place of tailing the log file)
 ```
 
-首次启用（重建环境时跑一次）：
+The first time it is enabled (run it once when the environment is rebuilt):
 
 ```bash
-# 1. 确认 unit 文件 + enable 软链都在
+# 1. check that the file of the unit + the symlink of the enable are there
 ls ~/.config/systemd/user/dashboard.service ~/.config/systemd/user/default.target.wants/dashboard.service
 
 # 2. reload + enable + start
@@ -252,220 +255,219 @@ systemctl --user daemon-reload
 systemctl --user enable dashboard
 systemctl --user start dashboard
 
-# 3. 验证
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8765/health   # 应 200
+# 3. the verification
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8765/health   # it has to be 200
 ```
 
-> ⚠ **unit 真实名字是 `dashboard.service`**，不是 `recon-dashboard.service`。
-> `systemctl --user status recon-dashboard` 会 "Unit could not be found"。
+> ⚠ **the real name of the unit is `dashboard.service`**, not `recon-dashboard.service`.
+> `systemctl --user status recon-dashboard` answers "Unit could not be found".
 
-### 快速开始（手动起服，调试 / 不走 systemd 时）
+### The quick start (starting the server by hand, for the debugging / without systemd)
 
 ```bash
-# 起服（默认 127.0.0.1:8765，直接读 SQLite 数据库）
+# start the server (127.0.0.1:8765 by default, it reads the SQLite database directly)
 python3 lib/dashboard.py
 ```
 
-要从本机访问：
+To reach it from this machine:
 
 ```bash
 ssh -L 8765:127.0.0.1:8765 user@recon-host
-# 浏览器开 http://localhost:8765
+# open http://localhost:8765 in the browser
 ```
 
-后台跑（关掉 SSH 也不断）：
+In the background (it survives the closing of the SSH session):
 
 ```bash
 ssh -fN -L 8765:127.0.0.1:8765 user@recon-host
 ```
 
-多用户各自开隧道，本机端口可以不同（如你 8765、队友 8766，都映射到 recon 的 8765）。
+Every user opens a tunnel of his own, the port of the machine can be different (you take 8765, a colleague takes 8766, and they all map to the 8765 of the recon).
 
-### CLI 参数
+### The parameters of the CLI
 
-| 参数 | 默认 | 说明 |
+| Parameter | Default | What it does |
 |---|---|---|
-| `--port N` | `8765` | 监听端口 |
-| `--host ADDR` | `127.0.0.1` | **保持 127.0.0.1**；改成 `0.0.0.0` 会让 recon 数据裸奔，启动时会 WARN |
+| `--port N` | `8765` | the port it listens on |
+| `--host ADDR` | `127.0.0.1` | **keep 127.0.0.1**; changing it to `0.0.0.0` lets the recon data run free, and the startup warns about it |
 
-### 端点
+### The endpoints
 
-| 路径 | 用途 |
+| Path | What it does |
 |---|---|
-| `GET /` | HTML 主页（每 `reload_interval` 秒自动重渲，或 `GET /refresh` 立即刷新）|
+| `GET /` | the HTML home page (it renders itself again every `reload_interval` seconds, or `GET /refresh` refreshes it at once) |
 | `GET /health` | `200 ok` |
-| `GET /api/snapshot` | 原 JSON 快照（供脚本 / curl 取数）|
+| `GET /api/snapshot` | the JSON snapshot as it is (for the scripts / for curl to read the data) |
 
-无 POST/PUT/DELETE，纯只读。
+There is no POST/PUT/DELETE, it is read-only.
 
-### 4 个 tab 详解
+### The 4 tabs in detail
 
-#### 任务状态
+#### Task Status
 
 ```
-┌── 卡片 ─────────────────────────────────────┐
-│ 业务 · Scope · ICP/APP · Web 子域 · TCP 端口 │
+┌── the card ─────────────────────────────────────┐
+│ business · scope · ICP/APP · web subdomains · TCP ports │
 └─────────────────────────────────────────────┘
-┌── 左：Web 资产分析 ─────┐ ┌── 右：TCP 端口分类 ──┐
-│ · 状态码分布（绿条）     │ │ ⚠ 80/443 实际是 web │
-│ · 技术栈 Top 10（紫条）  │ │ 类别+占比 表格      │
-│ · 注册根域（蓝条）       │ │                     │
-│ · 指纹浓度桶（4 色桶）    │ │                     │
+┌── on the left: the analysis of the web assets ────┐ ┌── on the right: the classes of the TCP ports ──┐
+│ · the distribution of the status codes (green)   │ │ ⚠ the 80/443 are really web │
+│ · the top 10 of the technologies (purple)        │ │ the table of the class + of the share │
+│ · the registered root domains (blue)             │ │                     │
+│ · the buckets of the density of the fingerprints  │ │                     │
 └─────────────────────────┘ └─────────────────────┘
 ```
 
-**指纹浓度桶**颜色：🟢 unique (1 子域) / 🔵 2-10 / 🟡 11-50 / 🔴 ≥51。
-**口径**：覆盖越广价值越低 — `≥51` 多为泛解析/默认页/Wildcard cert。
+**The colours of the buckets of the density of the fingerprints**: 🟢 unique (1 subdomain) / 🔵 2-10 / 🟡 11-50 / 🔴 ≥51.
+**The rule**: the wider the coverage, the lower the value — a `≥51` is most of the time a wildcard resolution, a default page or a wildcard certificate.
 
-**TCP 端口分类**旁的 ⚠ 注：表中 `web` 类别（80/443 等）实际已在 `web_subdomains` 落库，本表保留用于交叉验证，做纯 TCP 分析时建议剔除。
+The ⚠ next to the **classification of the TCP ports**: the category `web` of the table (80/443 and the like) is already stored in `web_subdomains`, this table keeps it for the cross checking, and it is better left out when the analysis is purely about TCP.
 
-#### 站点详情
+#### Site Details
 
-所有 `web_subdomains` 平铺显示，2269 行 × 8 列。
+Every `web_subdomains` row is shown flat, 2269 rows × 8 columns.
 
-**URL 列**按端口拼接 scheme：
+The **URL column** joins the scheme to the port:
 
-| 端口 | URL 格式 |
+| Port | The format of the URL |
 |---|---|
 | 80 | `http://subdomain/` |
 | 443 | `https://subdomain/` |
-| 其它 | `http://subdomain:port/` |
+| the others | `http://subdomain:port/` |
 
-每行 URL 是 `<a target="_blank">`，点击新窗口打开。
+The URL of a row is an `<a target="_blank">`, a click opens it in a new window.
 
-**Hash 列**折叠：`<a class="hash-link">hash</a><span>(count)</span>`，count 在 `<a>` 标签外；
-多个子域共享同一 hash 时，每行都显示该 hash，count 提示合并数量。
-**点击 hash** 弹窗（按 Esc / 点 × / 点遮罩关闭），列出该 hash 下全部子域。
+The **Hash column** is folded: `<a class="hash-link">hash</a><span>(count)</span>`, the count is outside the `<a>` tag;
+when several subdomains share the same hash, every row shows that hash and the count tells how many were merged.
+**A click on the hash** opens a window (it closes with Esc / with a click on × / with a click on the mask), it lists every subdomain of that hash.
 
-**行背景色**按 `status_code`：
+The **colour of the background of a row** follows the `status_code`:
 
-| 状态码 | 颜色 |
+| Status code | The colour |
 |---|---|
-| 5xx | 🔴 红 (high) |
-| 4xx | 🟡 黄 (med) |
-| 3xx | ⚪ 灰 (info) |
-| 2xx | 🟢 绿 (low) |
-| None | ⚪ 灰 (info) |
+| 5xx | 🔴 red (high) |
+| 4xx | 🟡 yellow (med) |
+| 3xx | ⚪ grey (info) |
+| 2xx | 🟢 green (low) |
+| None | ⚪ grey (info) |
 
-**3 个筛选开关**（搜索框右侧，可叠加）：
+**The 3 switches of the filter** (on the right of the search box, they stack):
 
-| 开关 | 行为 |
+| Switch | What it does |
 |---|---|
-| 隐藏 http | 隐藏 `port=80` 行（只保留 https）|
-| 仅 unique | 只显示 `hash_count=1` 的行（即每个指纹只对应 1 个子域）|
-| 中文优先 | 可见行重排，title 含中文字符的行排到前面 |
+| hide http | it hides the rows of `port=80` (only https stays) |
+| only unique | it only shows the rows of `hash_count=1` (every fingerprint belongs to one single subdomain) |
+| Chinese first | it reorders the visible rows, the rows whose title holds a Chinese character come first |
 
-**搜索**：URL / title / tech / hash 子串匹配（不区分大小写）。
+**The search**: it matches a substring of the URL / of the title / of the tech / of the hash (it does not tell the case apart).
 
-**列头点击**：切升降序（▲ / ▼），数字列按数值，文本列按 `localeCompare('zh-Hans-CN')`。
+**A click on the head of a column**: it toggles the ascending and the descending order (▲ / ▼), the numeric columns go by their value and the text columns by `localeCompare('zh-Hans-CN')`.
 
-#### 端口服务
+#### Port Services
 
-所有 `tcp_assets` 平铺显示，2797 行 × 7 列。列序：
+Every `tcp_assets` row is shown flat, 2797 rows × 7 columns. The order of the columns:
 
 ```
-业务 · port · host · ip · category · service · risk
+business · port · host · ip · category · service · risk
 ```
 
-**`port` 自动打标**：
+**The `port` is tagged on its own**:
 
-| 类别 | 典型端口 | 风险 |
+| Category | The typical ports | The risk |
 |---|---|---|
-| web | 80/443/8080/8443/8000-8999 | 🟢 低 |
-| db | 3306/5432/27017/6379/1433/9200/11211/... | 🔴 高 |
-| remote | 22 (SSH) / 23 (Telnet) / 3389 (RDP) / 5900-5901 (VNC) | SSH🟡 中，其余🔴 高 |
-| mail | 25/110/143/465/587/993/995 | 🟡 中 |
-| snmp | 161/162 | 🟡 中 |
-| tftp | 69 | 🟡 中 |
-| high-port | > 10000 且未识别 | 🟡 中 |
-| other | 其它未识别 | ⚪ 提示 |
+| web | 80/443/8080/8443/8000-8999 | 🟢 low |
+| db | 3306/5432/27017/6379/1433/9200/11211/... | 🔴 high |
+| remote | 22 (SSH) / 23 (Telnet) / 3389 (RDP) / 5900-5901 (VNC) | SSH🟡 medium, the others🔴 high |
+| mail | 25/110/143/465/587/993/995 | 🟡 medium |
+| snmp | 161/162 | 🟡 medium |
+| tftp | 69 | 🟡 medium |
+| high-port | > 10000 and not recognised | 🟡 medium |
+| other | the others that are not recognised | ⚪ a hint |
 
-行首左侧色条按 risk 上色。**搜索**：host / ip / service / category 子串匹配。
-**列头点击**：升降序切换（port 数值，其余文本；与站点详情 tab 共用同一套排序逻辑）。
+The colour bar on the left of a row follows the risk. **The search**: it matches a substring of the host / of the ip / of the service / of the category.
+**A click on the head of a column**: it toggles the order (the port by its value, the other columns as text; it shares the logic of the sorting with the tab of the site details).
 
-**`ip` 列来源**：`tcp_assets` 表本身没有 IP 列（只有 host 域名），dashboard 用 `snapshot.host_ip_map`
-派生字段回填 —— 该 map 在 `snapshot.py` 里通过
-`json_extract(web_subdomains.raw_json, '$.host_ip')` 解析得到，**first-seen wins**
-（首次见到的 IP 保留，IP 实际极少变）。如果某 host 没在 web_subdomains 里出现过，IP 列
-显示 `—`（实测 2797 条里只有 2 条空着）。
+**The source of the `ip` column**: the table `tcp_assets` has no IP column of its own (only the host name), and the dashboard fills it back from the derived field `snapshot.host_ip_map` — that map is built in `snapshot.py` with
+`json_extract(web_subdomains.raw_json, '$.host_ip')`, and the **first-seen wins**
+(the IP that was seen first is kept, and the IP really changes very seldom). When a host never showed up in web_subdomains, the IP column
+shows `—` (of the 2797 rows only 2 are empty).
 
-#### 风险等级
+#### Risk Level
 
-三段独立列出，按严重程度排序：
+Three independent lists, sorted by the severity:
 
-1. **暴露的高危端口** — 所有 risk=high 的 tcp_assets（DB / RDP / Telnet / VNC / 无认证服务），按 host 列出
-2. **批量指纹告警** — `response_hash` 覆盖 ≥50 子域的指纹（这些是泛解析/默认页/未配置独立站点，不是独立资产）
-3. **端口展开过宽的主机** — 单 host 开放 ≥50 端口（看起来像端口段扫描产物，web 视角可剔除）
+1. **The exposed high risk ports** — every tcp_assets whose risk=high (DB / RDP / Telnet / VNC / the services without an authentication), listed by host
+2. **The alerts of the mass fingerprints** — the fingerprints whose `response_hash` covers ≥50 subdomains (they are a wildcard resolution, a default page or a site that is not configured on its own, not an asset of its own)
+3. **The hosts whose ports are spread too wide** — a single host that opens ≥50 ports (it looks like the product of a scan of a range of ports, and it can be left out of the web view)
 
-### 局限性
+### The limitations
 
-- **所有判断纯本地启发式**，无外部探测：
-  - 风险分基于端口字典写死，不知道实际服务版本（22 不一定是 OpenSSH 9.x + 禁密 + fail2ban）
-  - "暴露" 仅指 `tcp_assets.is_active=1`，**不等于真的对外开放** — 实际可能在内网 / 有 VPC 隔离 / 域名解析到 0.0.0.0 占位
-  - 中文标题检测只看 CJK 区间 U+4E00-U+9FFF
-- **派生字段**：snapshot 顶层新增 `host_ip_map`（subdomain→IP），dashboard 用它给 tcp_assets 回填 IP 列。
-  派生源是 `web_subdomains.raw_json.host_ip`；**first-seen wins**，域名换 IP 时显示旧值（实际极少变）。
-  如果未来 `raw_json` 结构变（如 `host_ip` 改名），snapshot 这条 SQL 要跟着改。
-- **没有真正的截图** — "站点详情"是元数据视图；站点截图 tab 在 v1 早期被替换掉了，真截图需要外接 `gowitness` / `aquatone` 扫描产物落 `web_screenshots` 表
-- **页面全量嵌入** — 站点详情 tab 渲染 2269 行 × 8 列 ≈ 1MB HTML；hash→subdomains 弹窗数据 ≈ 50KB 内嵌 JSON；总页面 ~1.8MB，纯客户端过滤无网络往返
+- **Every decision is a local heuristic**, there is no probe from the outside:
+  - the risk score is based on a hardcoded dictionary of the ports, it does not know the real version of the service (the 22 is not necessarily an OpenSSH 9.x with the passwords disabled and fail2ban)
+  - "exposed" only means `tcp_assets.is_active=1`, and it **does not mean that it is really open to the world** — it can be inside the intranet / behind the isolation of a VPC / the domain can resolve to a placeholder of 0.0.0.0
+  - the detection of a Chinese title only looks at the CJK range U+4E00-U+9FFF
+- **The derived fields**: the snapshot holds a new `host_ip_map` at the top level (subdomain→IP), and the dashboard uses it to fill the IP column of the tcp_assets back.
+  The source of the derivation is `web_subdomains.raw_json.host_ip`; **the first-seen wins**, so the old value is shown when the domain changes its IP (it really changes very seldom).
+  If the structure of the `raw_json` ever changes (when `host_ip` is renamed for instance), this SQL of the snapshot has to change with it.
+- **There is no real screenshot** — the "Site Details" is a view of the metadata; the tab of the screenshots of the sites was replaced in the early v1, and a real screenshot needs the output of an external `gowitness` / `aquatone` scan in the table `web_screenshots`
+- **The page embeds everything** — the tab of the site details renders 2269 rows × 8 columns ≈ 1MB of HTML; the data of the window of the hash→subdomains is ≈ 50KB of embedded JSON; the page as a whole is ~1.8MB, the filtering happens on the client with no round trip over the network
 
-### 与 snapshot 的关系
+### The relation with the snapshot
 
-dashboard 启动时**直接读 SQLite 数据库**并缓存渲染结果。**缓存刷新由时间触发**，不再是文件 mtime 触发：
+The dashboard **reads the SQLite database directly** when it starts and it caches the result of the rendering. **The refresh of the cache is triggered by the time**, it is not triggered by the mtime of a file any more:
 
-| 触发方式 | 行为 | 频率/时机 |
+| The way it is triggered | What it does | The frequency / the moment |
 |---|---|---|
-| 时间触发 | 每次请求检查距上次 reload 是否已过 `reload_interval` 秒，超过则重渲 | 默认 30s；用 env `DASHBOARD_RELOAD=N` 覆盖 |
-| 主动触发 | `GET /refresh` 立刻重渲，返回 `reloaded` | 不限频率 |
+| by the time | every request checks whether the `reload_interval` seconds have passed since the last reload, and it renders again when they have | 30s by default; the env `DASHBOARD_RELOAD=N` overrides it |
+| on purpose | `GET /refresh` renders again at once and answers `reloaded` | it is not rate limited |
 
-所以：
+So:
 
 ```bash
-# 1) 浏览器刷新 → 大多数情况下 30s 内会看到新数据（受 reload_interval 控制）
-# 2) 想立刻刷新：
+# 1) refresh the browser → in most of the cases you see the new data within 30s (the reload_interval decides)
+# 2) to refresh it at once:
 curl http://127.0.0.1:8765/refresh
-# 浏览器再刷一次即可
+# refresh the browser once more
 
-# 3) 想调刷新频率（比如改成 10s）：
+# 3) to change the frequency of the refresh (to make it 10s for instance):
 DASHBOARD_RELOAD=10 python3 lib/dashboard.py
 ```
 
-无需重启 dashboard。
+The dashboard does not have to be restarted.
 
-### 排错
+### The troubleshooting
 
 ```bash
-# 起不来？通常是端口占用
+# it does not start? it is usually the port that is taken
 python3 lib/dashboard.py
-# 日志会写 "dashboard listening on http://127.0.0.1:8765"
+# the log writes "dashboard listening on http://127.0.0.1:8765"
 
-# 端口冲突
-ss -tlnp | grep 8765         # 看谁占了
-python3 lib/dashboard.py --port 9999   # 换个端口，-L 也跟着改
+# the conflict of the port
+ss -tlnp | grep 8765         # to see who holds it
+python3 lib/dashboard.py --port 9999   # take another port, -L changes with it
 
-# SSH 隧道通了但页面打不开
-curl -I http://localhost:8765/health   # 本机
-curl -I http://127.0.0.1:8765/health   # 远端 SSH 进去后
-# 哪一步 200 哪一步 fail 就定位在哪头
+# the tunnel of the SSH works but the page does not open
+curl -I http://localhost:8765/health   # on this machine
+curl -I http://127.0.0.1:8765/health   # after you went into the remote over the SSH
+# the step that answers 200 and the step that fails is where the problem is
 
-# systemd 接管后 dashboard 不响应（用户 2026-08-28 之后）
-systemctl --user status dashboard     # 看是不是 active / 内存 / 最近错误
-journalctl --user -u dashboard -n 100 --no-pager   # 看启动报错
-systemctl --user restart dashboard    # 改完代码 / 怀疑卡死后手动重启
-# 进程在但 health 不返回 → 看 fd 状态
+# the dashboard does not answer once systemd took it over (the user, after 2026-08-28)
+systemctl --user status dashboard     # to see whether it is active / the memory / the last errors
+journalctl --user -u dashboard -n 100 --no-pager   # to see the error of the startup
+systemctl --user restart dashboard    # restart it by hand after a change of the code / when it hangs
+# the process is there but the health does not answer → look at the state of the fd
 lsof -p $(pgrep -f 'lib/dashboard.py' | head -1) | grep TCP
-# CLOSE_WAIT 大量堆积 → socket 未回收,kill 重启
-pkill -9 -f 'lib/dashboard.py'    # systemd 30s 后会按 Restart=on-failure 自动拉起
+# a lot of CLOSE_WAIT piles up → the socket was not reclaimed, kill it and restart it
+pkill -9 -f 'lib/dashboard.py'    # systemd brings it back on its own after 30s, it is Restart=on-failure
 ```
 
-## Onboarding 新业务
+## The onboarding of a new business
 
-`run_one_business.sh` 在发现 `businesses` 表里有某业务名但**没有任何 scope**（scope_name='可测资产'）时，会**跳过 pdtm** 并在 summary.md 标 `needs_onboarding`，而不是让它因 "DB 中业务 X 没有可测资产" 直接退出。这样 cron 跑不会因为有个新业务就炸掉。
+When `run_one_business.sh` finds a business name in the `businesses` table but **no scope at all** (scope_name='可测资产'), it **skips pdtm** and marks `needs_onboarding` in the summary.md, instead of quitting with "the business X of the database has no measurable asset". That way the run of the cron does not fall over because of a new business.
 
-### 首次 onboard 一个新业务（手动）
+### The first onboarding of a new business (by hand)
 
 ```bash
-# 1. 准备 input/ 目录：target.txt 是可测域，exclude.txt 是非可测域
+# 1. prepare the input/ directory: the target.txt holds the measurable domains, the exclude.txt the ones that are not measurable
 mkdir -p input/业务名
 cat > input/业务名/target.txt <<EOF
 main.example.com
@@ -475,44 +477,44 @@ cat > input/业务名/exclude.txt <<EOF
 mail.example.com
 EOF
 
-# 2. 用 pipeline.sh 的 -i 入口：会自动 INSERT 业务行 + 把 target/exclude 写进 scopes
+# 2. use the entry -i of pipeline.sh: it INSERTs the row of the business + it writes the target/exclude into the scopes
 cd /opt/srcradar/pdtm
 ./pipeline.sh -b 业务名 -i /opt/srcradar/input/业务名
 
-# 3. 验证
-sqlite3 ../db/recon.sqlite3 "SELECT asset FROM scopes WHERE business_id=(SELECT id FROM businesses WHERE business_name='业务名')"
+# 3. the verification
+sqlite3 ../db/recon.sqlite3 "SELECT asset FROM scopes WHERE business_id=(SELECT id FROM businesses WHERE business_name='
 
-# 4. 之后每日 cron 即可：run_one_business.sh 业务名 走 DB 路径
+# 4. the daily cron takes it from there: run_one_business.sh 业务名 goes through the path of the DB
 /opt/srcradar/daily/run_one_business.sh 业务名
 ```
 
-### 后续每日 cron 自动跑
+### The daily cron that follows
 
-业务在 `businesses` 表里有行 + 至少一条 `可测资产` scope → cron 会自动按 `recon_business_config` 跑（默认 `enabled=1, web=1, tcp=0, icp=1`，enscan 是手动阶段）。
-`-type` 参数是 `daily_monitor.sh / run_one_business.sh` **手动运行**时的单次覆盖，对 cron 无影响（cron 写死 `-type pdtm,icp`，enscan 不在 cron 里）。
+The business has a row in the `businesses` table + at least one scope of `可测资产` → the cron runs it on its own, following the `recon_business_config` (the default is `enabled=1, web=1, tcp=0, icp=1`, and enscan is the stage that is run by hand).
+The parameter `-type` is the override of a single run of the **manual** run of `daily_monitor.sh / run_one_business.sh`, it has no effect on the cron (the cron hardcodes `-type pdtm,icp`, and enscan is not part of the cron).
 
-### 跳过不想跑的业务
+### Skipping a business that should not run
 
-把 `recon_business_config` 对应行的 `enabled` 改 0，cron 就跳过该业务（其它字段保留，恢复时只改回 1）：
+Set the `enabled` of the matching row of `recon_business_config` to 0, and the cron skips that business (the other fields stay, and to restore it you only put the 1 back):
 
 ```sql
--- 暂停
+-- pause it
 UPDATE recon_business_config SET enabled=0 WHERE business_id=(SELECT id FROM businesses WHERE business_name='业务名');
--- 恢复
+-- restore it
 UPDATE recon_business_config SET enabled=1 WHERE business_id=(SELECT id FROM businesses WHERE business_name='业务名');
--- 关掉某业务 icp 备案刷新（保留 web/tcp）
+-- turn the refresh of the filing of the icp of a business off (web/tcp stay)
 UPDATE recon_business_config SET icp=0 WHERE business_id=(SELECT id FROM businesses WHERE business_name='业务名');
 ```
 
-直接调 `run_one_business.sh 业务名`（不走调度器）会绕过 config —— 手动调用是显式操作，不受 gate。
+Calling `run_one_business.sh <business name>` directly (without the scheduler) bypasses the config — a manual call is an explicit action, it does not go through the gate.
 
-## 已知问题
+## The known problems
 
-### 单字符 subdomain / Wildcard DNS 噪声（`http://j/` 这类）
+### The subdomain of one character / the noise of the wildcard DNS (the kind of `http://j/`)
 
-**现象**：dashboard「站点详情」tab 里出现 N 行形如 `http://a/` / `http://j/` / `http://0/` 的条目 —— URL 无法访问，对资产盘点无价值。
+**The symptom**: the tab "Site Details" of the dashboard holds N rows of the shape `http://a/` / `http://j/` / `http://0/` — the URL cannot be reached and it is of no value for the inventory of the assets.
 
-**证据**（DB 实查，2026-07-26 那批数据）：
+**The evidence** (looked up in the database, the batch of 2026-07-26):
 
 ```sql
 SELECT subdomain, port, url, raw_json FROM web_subdomains
@@ -524,441 +526,440 @@ WHERE instr(subdomain, '.') = 0 AND subdomain='a' AND port=80 LIMIT 3;
 | `'a'` | `'http://a'` | `"http://aliondemandfiles.example.com [403] [238] ..."` |
 | `'a'` | `'http://a'` | `"http://al.example.com [200] [50331] ..."` |
 
-字段对不上：`subdomain='a'` 是扫描器喂进去的输入前缀，但 `raw_json` 里 HTTP 实际命中的是 `aliondemandfiles.example.com`（wildcard DNS 重定向目标）。`url='http://a'` 缺 `.example.com` 后缀，是 scanner 拼接 bug。
+The fields do not match: `subdomain='a'` is the prefix of the input that the scanner fed in, but the HTTP really hit `aliondemandfiles.example.com` in `raw_json` (the target of the redirection of the wildcard DNS). The `url='http://a'` misses the `.example.com` suffix, it is a bug of the concatenation of the scanner.
 
-**信息密度**（典型一批）：
+**The density of the information** (a typical batch):
 
 ```
-215 条 → 72 个 hash → 6 个 IP（全是 wildcard CDN 收口）
-所有 first_seen/fetched_at 同一次扫描批次（< 1 分钟内）
-全部 is_active=1
-response_hash 是占位符 '<status_code>|<content_length>' 字符串，不是真内容指纹
+215 rows → 72 hashes → 6 IPs (all of them the closure of a wildcard CDN)
+every first_seen/fetched_at comes from the same batch of the scan (less than a minute)
+all of them are is_active=1
+the response_hash is the placeholder of the string '<status_code>|<content_length>', it is not a real fingerprint of the content
 ```
 
-**根因**（涉及三层）：
+**The root cause** (it involves three layers):
 
-1. **`pdtm/check_wildcard.sh`** 检测到 `*.example.com` 有泛解析，但单字符 permutation 候选没在 HTTP 探测前被剔除
-2. **httpx 探测** 时 DNS 被 wildcard 收口到 CDN IP，HTTP 请求落到真实域名（如 `aliondemandfiles.example.com`）的服务器
-3. **`pdtm/import_scan_results.py`** 存库时只保留输入前缀 `a` 作为 `subdomain`，没把真实命中域名写到 canonical 字段
+1. **`pdtm/check_wildcard.sh`** detected that `*.example.com` has a wildcard resolution, but the candidates of a permutation of one character were not dropped before the probe of the HTTP
+2. **The probe of httpx**: the DNS is closed on the IP of the CDN by the wildcard, so the HTTP request lands on the server of the real domain (such as `aliondemandfiles.example.com`)
+3. **`pdtm/import_scan_results.py`** keeps only the prefix of the input `a` as the `subdomain` when it stores the row, it does not write the domain that was really hit into the canonical field
 
-**当前缓解**（已生效）：
+**The mitigation of the moment** (it is in place):
 
-- `lib/dashboard.py:_build_sites` 第一行过滤 `if '.' in subdomain` —— 215 条 no-dot 全部从显示剔除
-- 按 hash 去重 + count 列：sites-table 从 46,911 行 → 179 行；gzip 后页面 45.8 KB（之前 25 MB）
+- The first line of `lib/dashboard.py:_build_sites` filters with `if '.' in subdomain` — the 215 rows without a dot all leave the display
+- The deduplication by hash + the count column: the sites-table goes from 46,911 rows → 179 rows; the page weighs 45.8 KB once gzipped (it was 25 MB before)
 
-**治本（待办，建议在 pdtm 侧做）**：
+**The real fix (to do, it is better done on the side of pdtm)**:
 
-两种方案，二选一：
+Two options, pick one:
 
-1. **`pdtm/permutation_cache.py` filter 阶段丢单字符 permutation**（推荐）：
+1. **`pdtm/permutation_cache.py` drops the permutations of one character in its filter stage** (the one that is recommended):
    ```python
    parts = permutation.lower().rstrip(".").split(".")
    if len(parts[0]) <= 2:
-       continue   # 单 / 双字符 permutation 跳过
+        continue   # the permutations of one / two characters are skipped
    ```
-   直接不探测，每天少 200+ 次 httpx 请求（实测单字符扫描耗时几分钟）。
+   They are not probed at all, and every day 200+ httpx requests are saved (the scan of the single characters takes a few minutes to run).
 
-2. **`pdtm/import_scan_results.py` 检测 wildcard redirect 后写真实命中域名**：
+2. **`pdtm/import_scan_results.py` writes the domain that was really hit when it detects a wildcard redirection**:
    ```python
    if item.get("wildcard_redirect"):
        record["subdomain"] = item["resolved_domain"]
    ```
-   保留数据但替换为 canonical 名字，dashboard 当前过滤规则可同步放宽。
+   The data is kept but it is replaced by the canonical name, and the filter of the dashboard can be relaxed at the same time.
 
-**判断有没有意义**：
+**Whether it is worth it**:
 
-| 用途 | 价值 |
+| The use | The value |
 |---|---|
-| 真实资产盘点 | ❌ 215 条 ≠ 215 站点，真相是 6 个 CDN IP |
-| 监控内容变化 | ❌ 占位符 hash，无 diff 价值 |
-| 检测 wildcard DNS 状态 | ✅ 这些条目本身就是泛解析开启的证据 |
-| 历史趋势 | ❌ 同批次产生，重跑还是同样的 215 条 |
+| the inventory of the real assets | ❌ 215 rows ≠ 215 sites, the truth is 6 CDN IPs |
+| the monitoring of a change of the content | ❌ the hash of a placeholder, no value for a diff |
+| the detection of the state of the wildcard DNS | ✅ these rows are the proof that the wildcard resolution is on |
+| the history of the trend | ❌ they come out of the same batch, a rerun gives the same 215 rows |
 
-## 失败处理
+## The handling of a failure
 
-| 失败点 | 行为 |
+| The point of the failure | What it does |
 |---|---|
-| `snapshot.py` before 失败 | 直接退出，previous.json 不轮换 |
-| 单业务某阶段失败 | 对应位 bit 置 1，继续下一业务；summary.md 标 ⚠（按阶段列） |
-| snapshot after 失败 | 退出，previous.json 不轮换（before 也保留） |
-| diff.py 失败 | 报告失败，但 after.json 保留，下次可手工重 diff |
-| 没有 previous.json | 写 baseline + summary.md「首次运行」 |
+| the before of `snapshot.py` fails | it quits right away, the previous.json is not rotated |
+| a stage of a business fails | the matching bit is set to 1 and it goes on with the next business; the summary.md marks it with ⚠ (by stage) |
+| the after of the snapshot fails | it quits, the previous.json is not rotated (the before is kept as well) |
+| diff.py fails | it reports the failure, but the after.json is kept, and the diff can be done again by hand |
+| there is no previous.json | it writes the baseline + a summary.md of the "first run" |
 
-如果整轮都失败，**previous.json 不轮换**——下次还能有 baseline 可比。
+When the whole round fails, **the previous.json is not rotated** — the next run still has a baseline to compare with.
 
-## 清理历史
+## The cleaning of the history
 
-报告默认全保留。如需定期清理：
+The reports are all kept by default. When they have to be cleaned regularly:
 
 ```bash
-# 保留最近 30 天的 reports
+# keep the reports of the last 30 days
 find /opt/srcradar/daily/reports -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
-# 保留最近 30 天的 snapshots
+# keep the snapshots of the last 30 days
 find /opt/srcradar/daily/snapshots -maxdepth 1 -name '2*_after.json' -mtime +30 -delete
-# 日志同
+# the logs as well
 find /opt/srcradar/daily/logs -name '2*.log' -mtime +30 -delete
 ```
 
-## 排错
+## The troubleshooting
 
 ```bash
-# 看最近一次跑的日志
+# look at the log of the last run
 tail -f /opt/srcradar/daily/logs/$(ls -t /opt/srcradar/daily/logs/ | grep -v cron | head -1)
 
-# 当前 baseline 时间戳
+# the timestamp of the current baseline
 python3 -c "import json; d=json.load(open('/opt/srcradar/daily/snapshots/previous.json')); print('captured_at:', d['captured_at']); print('rows:', sum(d['row_counts'].values()))"
 
-# 锁被占？
+# is the lock taken?
 ls -la /opt/srcradar/daily/.lock
-fuser /opt/srcradar/daily/.lock 2>/dev/null   # 看持有锁的 PID
+fuser /opt/srcradar/daily/.lock 2>/dev/null   # the PID that holds the lock
 ```
 
-## Web Hash 评分
+## The scoring of the web hashes
 
-`web_hashes` 表有三个评分相关字段：
+The table `web_hashes` has three fields that belong to the scoring:
 
-| 字段 | 类型 | 谁写 | 说明 |
+| Field | Type | Who writes it | What it is |
 |---|---|---|---|
-| `score` | INTEGER NULL | cron / 手动 | 0-100 的人工/自动评分；NULL = 未评分 |
-| `description` | TEXT NOT NULL DEFAULT '' | **仅手动** | 运营备注；cron 完全不读不写 |
-| `score_initialized_at` | TEXT NULL | cron | NULL = 未评分；非 NULL = 该 hash 已被 cron 评过分（**不会再被自动重评**）|
+| `score` | INTEGER NULL | the cron / by hand | a manual or automatic score between 0 and 100; NULL = it was not scored |
+| `description` | TEXT NOT NULL DEFAULT '' | **by hand only** | a note of the operator; the cron neither reads nor writes it |
+| `score_initialized_at` | TEXT NULL | the cron | NULL = it was not scored; not NULL = that hash was already scored by the cron (**it is never scored again automatically**)|
 
-### 评分规则（baseline 50；INT 0..100）
+### The rules of the scoring (the baseline is 50; the INT goes from 0 to 100)
 
 ```
 score = 50
   + 20  if any active web_subdomain has CJK chars in title (U+4E00-U+9FA5)
   + 20  if subdomain_count == 1
          OR COUNT(DISTINCT subdomain) over active web_subdomains == 1
-         （即 HTTP/HTTPS 同一站点视为一个站点）
+          (that is, an HTTP and an HTTPS of the same site count as one site)
   - 20  if ALL active web_subdomains have empty/null title
 ```
 
-### Cron 行为
+### The behaviour of the cron
 
-cron（每日 `daily_monitor.sh` 跑 → 触发 `pdtm/import_scan_results.py`）：
+The cron (the daily run of `daily_monitor.sh` → it triggers `pdtm/import_scan_results.py`):
 
-- **只给新增 hash 设初始 score**：`pdtm/import_scan_results.py:_upsert_web_records`
-  检测"INSERT vs UPDATE"，对**新插入**的 hash id 调
-  `daily/lib/score.py score-new --ids <ids>` 写 score + `score_initialized_at`
-- **不动 description**：cron 完全不读不写该字段
-- **不动已有 hash 的 score**：SQL 里有 `score_initialized_at IS NULL` 守门，
-  已有分的不被覆盖（哪怕下次扫到 hash 内容变了）
-- **失活的 hash 也评分**：算法用所有 ws（含 `is_active=0` 的历史 ws），
-  失活 hash 仍能拿到一个分数（通常 30 或 50，作为"已失活"信号）
-- **subprocess 失败吞掉**（best-effort）：写库失败本身已经 commit，评分失败不重试；
-  下次 cron 跑时仍未评分的 hash 会被补评
+- **It only gives the initial score to the new hashes**: `pdtm/import_scan_results.py:_upsert_web_records`
+  tells an "INSERT" from an "UPDATE", and it calls
+  `daily/lib/score.py score-new --ids <ids>` for the **newly inserted** hash ids to write the score and the `score_initialized_at`
+- **It does not touch the description**: the cron neither reads nor writes that field
+- **It does not touch the score of a hash that exists already**: the SQL has the guard `score_initialized_at IS NULL`,
+  a hash that has a score is not overwritten (not even when the content of the hash changed on the next scan)
+- **It scores the hashes that went inactive as well**: the algorithm uses every ws (the historical ws of the `is_active=0` ones included),
+  and an inactive hash still gets a score (30 or 50 usually, as the signal of "it went inactive")
+- **A failed subprocess is swallowed** (best-effort): the write of the database is committed already, and a failed scoring is not retried;
+  the hashes that are still unscored when the next run of the cron happens are scored then
 
-### 一次性初始化
+### The initialization of everything at once
 
-schema 改完后已对所有现存 hash 跑过 init。重新跑：
+The init was already run on every hash that existed after the change of the schema. To run it again:
 
 ```bash
 python3 lib/score.py init --db /opt/srcradar/db/recon.sqlite3
 # {"mode": "init", "updated": N}
 ```
 
-幂等：只动 `score_initialized_at IS NULL` 的行。
+It is idempotent: it only touches the rows whose `score_initialized_at IS NULL`.
 
-### 手动改分（dashboard REST endpoint）
+### Changing a score by hand (the REST endpoint of the dashboard)
 
 ```
 POST /api/hash/<id>/edit
 Content-Type: application/x-www-form-urlencoded
 
-score=<int 0..100>          # 必填
-description=<str>           # 可选，默认 ''
+score=<int 0..100>          # required
+description=<str>           # optional, '' by default
 ```
 
-响应 JSON：
+The JSON of the answer:
 ```json
 {"ok": true, "id": 2, "score": 85, "description": "..."}
 ```
 
-错误：`400 bad params` / `404 hash not found` / `500 db error`。
+The errors: `400 bad params` / `404 hash not found` / `500 db error`.
 
-写入成功后立即局部更新 dashboard `_State.cached_snap` + `_State.cached_snap_json`，
-**不需要等 reload**。`description` 长度上限 500 字符。
+Once the write succeeded, the dashboard updates `_State.cached_snap` + `_State.cached_snap_json` right away,
+**there is no need to wait for the reload**. The length of the `description` is limited to 500 characters.
 
-`curl` 示例：
+An example of `curl`:
 ```bash
 curl -si -X POST -d "score=85&description=核心业务网关" \
   http://127.0.0.1:8765/api/hash/42/edit
 ```
 
-### 跨项目依赖（pdtm → daily）
+### The dependency between the projects (pdtm → daily)
 
-`pdtm/import_scan_results.py:persist()` 写完库后，通过 **subprocess** 调
-`daily/lib/score.py score-new --db <db> --ids <id1,id>` 给新 hash 打分。
+`pdtm/import_scan_results.py:persist()` calls
+`daily/lib/score.py score-new --db <db> --ids <id1,id>` through a **subprocess** once the
+database is written, to score the new hashes.
 
-**这是 pdtm → daily 的单向 subprocess 调用**：
+**It is a one way subprocess call from pdtm to daily**:
 
-- daily 失败不会影响 pdtm（写库已 commit）
-- daily 升级 score.py 时 pdtm 不需要改动
-- 路径解析：`Path(import_scan_results.py).parent.parent / "daily" / "lib" / "score.py"`
-  假设两者并列在 `~/tools/<repo>/` 下
+- a failure of daily does not affect pdtm (the write of the database is committed)
+- pdtm does not have to change when daily upgrades score.py
+- the resolution of the path: `Path(import_scan_results.py).parent.parent / "daily" / "lib" / "score.py"`
+  it assumes that the two of them sit next to each other under `~/tools/<repo>/`
 
-`cmd_scan_onesite()`(dashboard "加一行看看" 轻量路径)**不调** score.py:
-手动加的 hash 留给运营在 dashboard 里手动设分。
+`cmd_scan_onesite()` (the light path of the dashboard, "add one row and see") **does not** call score.py:
+a hash that was added by hand is left to the operator to score by hand in the dashboard.
 
-## URL 资产扫描(ffuf / URLFinder / gau)→ `web_hash_urls`
+## The scan of the URL assets (ffuf / URLFinder / gau) → `web_hash_urls`
 
-URL 粒度的资产盘点。**dashboard 手动触发**(`POST /<业务>/scan-urls`)
-**+ 可选的每日自动 stage**(`daily-url`,用户 2026-08-26 拍板;见 §"每日 URL 扫描")。
-2026-08-26 之前仅手动;之后**接 diff.py**,扫描后与上次结果对比,产出 `added/changed/deactivated` CSV。
+An inventory of the assets at the granularity of the URL. **Triggered by hand from the dashboard** (`POST /<business>/scan-urls`)
+**+ an optional daily stage** (`daily-url`, the user decided on 2026-08-26; see the section on the daily URL scan).
+Before 2026-08-26 it was only by hand; after that it **is hooked to diff.py**, and the result of the scan is compared with the one of the last run, which produces the CSV of `added/changed/deactivated`.
 
-### 表 `web_hash_urls`
+### The table `web_hash_urls`
 
-挂在 `web_hashes` 之下,N:1 扩展(同一 hash 多个子域可共享 URL 集合)。
+It hangs under `web_hashes`, it is an extension of N:1 (the same hash can share a set of URLs across several subdomains).
 
 ```
-字段                类型            说明
+field                type               what it is
 hash_id             INTEGER NOT NULL  → web_hashes.id
 business_id         INTEGER NOT NULL  → businesses.id
-subdomain           TEXT NOT NULL     扫描时的来源子域(Q4:冗余字段便于分析)
+subdomain           TEXT NOT NULL     the subdomain of the source at the time of the scan (Q4: a redundant field that makes the analysis easier)
 source              TEXT NOT NULL     'ffuf' | 'urlfinder' | 'gau'
-scheme/host/port    可空              拆 urlparse 得到
-url                 TEXT NOT NULL     完整 URL
-path                TEXT              仅 path(便于聚合)
-status_code         INTEGER           ffuf 实测;urlfinder+gau NULL
-content_type/length INTEGER           ffuf 实测;urlfinder+gau NULL
-word_count          INTEGER           ffuf 命中词数
+scheme/host/port    nullable           it comes from the split of urlparse
+url                 TEXT NOT NULL     the whole URL
+path                TEXT              the path only (it makes the aggregation easier)
+status_code         INTEGER           measured by ffuf; NULL for urlfinder+gau
+content_type/length INTEGER           measured by ffuf; NULL for urlfinder+gau
+word_count          INTEGER           the number of the words that ffuf hit
 first_seen/last_seen/fetched_at  TEXT NOT NULL
 is_active           INTEGER NOT NULL DEFAULT 1
-is_static           INTEGER NULL      路径后缀 .js / .css 判定(用户 2026-08-26)
-change_type         INTEGER NOT NULL DEFAULT 0  接 diff 后(用户 2026-08-26)
-UNIQUE (hash_id, subdomain, url, source)   ← 逻辑键,无 raw_json
+is_static           INTEGER NULL      the suffix of the path decides it: .js / .css (the user on 2026-08-26)
+change_type         INTEGER NOT NULL DEFAULT 0  it is hooked to the diff (the user on 2026-08-26)
+UNIQUE (hash_id, subdomain, url, source)   ← the logical key, there is no raw_json
 ```
 
-逻辑键:`(hash_id, subdomain, url, source)` — 同 URL 三次扫描(三个 source)算三条独立行,
-便于按 source 切分历史。`web_hashes.url_count` 是 `web_hash_urls.is_active=1` 的 COUNT 缓存,
-由 `scan_urls.py:persist()` 末尾显式 UPDATE(无 trigger 自动维护)。
+The logical key: `(hash_id, subdomain, url, source)` — the same URL that was scanned three times (three sources) counts as three rows of their own,
+so that the history can be split by source. `web_hashes.url_count` is the cache of the COUNT of the rows of `web_hash_urls.is_active=1`,
+and it is written by an explicit UPDATE at the end of `scan_urls.py:persist()` (no trigger maintains it).
 
-迁移:`python3 lib/migrate_urls.py /path/to/db`(幂等)。
+The migration: `python3 lib/migrate_urls.py /path/to/db` (it is idempotent).
 
-#### `is_static` 语义(用户 2026-08-26 拍板)
+#### The semantics of `is_static` (the user decided on 2026-08-26)
 
-`scan_urls.py:_detect_is_static()` 算每个 path:
-- 取 path 中最后一个 `.` 之后的小写后缀
-- 没有 `.` →` 0 (非静态)
-- 后缀 == `js` 或 `css` → 1 (静态)
-- 其它后缀(`.png` / `.jpg` / `.svg` / `.woff` 等)→` 0 (非静态,只看 js/css)
-- 后缀为空(路径以 `.` 结尾,如 `/v1/`)→` 0 (非静态)
+`scan_urls.py:_detect_is_static()` computes it for every path:
+- it takes the lowercase suffix after the last `.` of the path
+- there is no `.` → `0` (not static)
+- the suffix is `js` or `css` → 1 (static)
+- the other suffixes (`.png` / `.jpg` / `.svg` / `.woff` and the like) → `0` (not static, only js/css count)
+- the suffix is empty (the path ends with a `.`, such as `/v1/`) → `0` (not static)
 
-写入时机:`persist()` 内每次 INSERT / ON CONFLICT UPDATE 同步计算(不会漂)。
-旧行(`is_static IS NULL`)在 dashboard 染色逻辑里**忽略**,但路径后缀字符串仍按
-旧逻辑兼容(`p.endswith('.js') || p.endswith('.css')`)。
+When it is written: `persist()` computes it on every INSERT / ON CONFLICT UPDATE (it does not drift).
+The old rows (`is_static IS NULL`) are **ignored** by the colouring logic of the dashboard, but the string of the suffix of the path stays
+compatible with the old logic (`p.endswith('.js') || p.endswith('.css')`).
 
-触发器 `trg_whu_au` 在 WHEN 子句 `AND NEW.is_static = 0`,**静态行永远不参与 change_type 标记**,
-严格满足"只有满足当前子域 && 非 js/css 才可能修改 change_type"。详见 §"每日 URL 扫描"。
+The trigger `trg_whu_au` carries `AND NEW.is_static = 0` in its WHEN clause, so **a static row never takes part in the marking of the change_type**,
+and it satisfies strictly that "only a subdomain that holds now && a path that is not js/css can change the change_type". See the section on the daily URL scan.
 
-#### `change_type` bitmask(用户 2026-08-26 拍板,接 diff.py)
+#### The bitmask of the `change_type` (the user decided on 2026-08-26, it is hooked to diff.py)
 
-对齐 web_subdomains:
-| 值 | 含义 |
+It is aligned with web_subdomains:
+| Value | What it means |
 |---|---|
 | 0 | clean |
-| 1 | inserted (AI 触发) |
-| 2 | content changed |
-| 4 | reactivated(is_active 0→1 且 OLD.last_seen < 上次成功扫描) |
-| 6 | reactivated + content changed |
+| 1 | inserted (the AI triggers it) |
+| 2 | the content changed |
+| 4 | reactivated (is_active 0→1 and OLD.last_seen < the last successful scan) |
+| 6 | reactivated + the content changed |
 
-触发器:`trg_whu_ai`(INSERT 置 1) + `trg_whu_au`(UPDATE 走 bitmask 逻辑)。
-diff.py 在每次 `daily_monitor.sh` 末尾把 `change_type > 0` 的行读出来分类 + 原子重置为 0,
-报告产出 `added_web_hash_urls.csv` / `changed_web_hash_urls.csv` /
-`deactivated_web_hash_urls.csv`(新增三张 csv,与现有 6 张表一致格式)。
+The triggers: `trg_whu_ai` (the INSERT sets 1) + `trg_whu_au` (the UPDATE goes through the logic of the bitmask).
+At the end of every `daily_monitor.sh` the diff.py reads the rows whose `change_type > 0`, classifies them and resets them to 0 atomically,
+and the report produces the `added_web_hash_urls.csv` / `changed_web_hash_urls.csv` /
+`deactivated_web_hash_urls.csv` (three new CSV, with the same format as the six tables that already exist).
 
-### 三个扫描器(`pdtm/scan_urls.py`)
+### The three scanners (`pdtm/scan_urls.py`)
 
-| 工具 | 路径 | 命令 |
+| Tool | Path | Command |
 |---|---|---|
 | ffuf | `~/go/bin/ffuf` | `ffuf -u https://host/FUZZ -w wordlist ...` |
-| URLFinder(中文版 by pingc0y) | `~/tools/URLFinder/URLFinder` | `URLFinder -m 3 -s all -o <dir> -u <url>` |
+| URLFinder (the Chinese edition by pingc0y) | `~/tools/URLFinder/URLFinder` | `URLFinder -m 3 -s all -o <dir> -u <url>` |
 | gau | `~/go/bin/gau` | `gau --threads 5 --timeout 30 <domain>` |
 
-**注意 gau 的 `--timeout` 是纯数字秒**(不是 `"30s"`)。
+**Note that the `--timeout` of gau is a number of seconds** (it is not `"30s"`).
 
-工具路径 hardcode 在 `scan_urls.py` 顶部常量,目录搬动需手动改常量。
-URLFinder 是个人工具,**输出格式不锁定**;`run_urlfinder()` 兼容 JSON dict / JSON list / 纯文本三种退路。
+The paths of the tools are hardcoded in the constants at the top of `scan_urls.py`, and moving the directory means editing the constants by hand.
+URLFinder is a personal tool and **its output format is not fixed**; `run_urlfinder()` copes with a JSON dict, a JSON list and plain text.
 
-### Dashboard 入口
+### The entry point of the dashboard
 
-| 路径 | 用途 |
+| Path | What it does |
 |---|---|
-| `POST /<业务>/scan-urls` | 表单提交 → subprocess 调 `pdtm/scan_urls.py scan-urls` |
-| `GET /<业务>/urls/<hash_id>` | URL 详情页,**按 hash_id 实时查 SQL**(严格 lazy,不进 snapshot) |
-| 业务页"站点详情" tab 末尾新增列 | 每行末尾 `URL 详情` 按钮 → 跳到上面 GET 页面(新窗口) |
+| `POST /<business>/scan-urls` | the form is submitted → a subprocess calls `pdtm/scan_urls.py scan-urls` |
+| `GET /<business>/urls/<hash_id>` | the page of the details of the URLs, **it queries the SQL in real time by hash_id** (strictly lazy, it does not go into the snapshot) |
+| a new column at the end of the tab "Site Details" of the page of the business | a button `URL details` at the end of every row → it goes to the GET page above (in a new window) |
 
-业务页"任务状态" tab 顶部新增折叠面板「URL 资产扫描」,字段:
-- `hosts`(必填,≤ 50 子域,每行一个)
-- `sources`(多选 checkbox:ffuf / urlfinder / gau,至少 1 个)
-- `wordlist`(仅 ffuf 生效,默认 `~/tools/wordlists/SecLists-master/Discovery/Web-Content/common.txt`)
+A new folding panel "URL asset scan" at the top of the tab "Task Status" of the page of the business, the fields:
+- `hosts` (required, ≤ 50 subdomains, one per line)
+- `sources` (the checkboxes of a multiple choice: ffuf / urlfinder / gau, at least one)
+- `wordlist` (only for ffuf, the default is `~/tools/wordlists/SecLists-master/Discovery/Web-Content/common.txt`)
 
-整体超时 600s(用户拍板:大字典 ffuf 单 host 可能 5min+)。进程超时 / 异常 / 失败
-都通过统一的 `_render_scan_result` 绿/红 panel 返回,**不主动 reload**(把
-`_State.last_reload_ts = 0`,下次 GET 自动 reload)。
+The overall timeout is 600s (the user decided: a big wordlist can take 5min+ for a single host with ffuf). A timeout of the process / an
+exception / a failure all come back through the unified `_render_scan_result` with a green/red panel, and it **does not reload on its own** (it puts
+`_State.last_reload_ts = 0`, and the next GET reloads by itself).
 
-### URL 详情页 (`/<业务>/urls/<hash_id>`)
+### The page of the details of the URLs (`/<business>/urls/<hash_id>`)
 
-`lib/dashboard.py:_serve_urls_detail()` 渲染,实时查 `web_hash_urls`(独立
-SQLite 连接,5s timeout,只读)。每张表对应一个 `source`,**展示顺序硬编码**:
-**urlfinder → ffuf → gau**(用户决策),空 source 自动跳过。
+`lib/dashboard.py:_serve_urls_detail()` renders it and it queries the `web_hash_urls` in real time (a separate
+SQLite connection, a timeout of 5s, read-only). Every table corresponds to one `source` and **the order of the display is hardcoded**:
+**urlfinder → ffuf → gau** (the decision of the user), and an empty source is skipped by itself.
 
-#### 视觉风格(ant-table)
+#### The visual style (ant-table)
 
-提炼自 `~/tools/URLFinder/demo.html`(~3KB inline CSS,不引入完整 Ant Design
-库)。特征:浅灰表头 `#fafafa`、1px 浅灰分隔线、tabular-nums 数字列、风险行底色
-贴近 ant-design token(red `#fff1f0` / yellow `#fffbe6` / green `#fcffe6`)。
-详见 `_serve_urls_detail` 末尾 `<style>` 块。
+It is taken from `~/tools/URLFinder/demo.html` (~3KB of inline CSS, the whole Ant Design
+library is not pulled in). Its features: the head of the table is a light grey `#fafafa`, the separator is a light grey of 1px, the numeric columns use tabular-nums, and the
+background of a risky row is close to the token of ant-design (red `#fff1f0` / yellow `#fffbe6` / green `#fcffe6`).
+See the `<style>` block at the end of `_serve_urls_detail`.
 
-**列宽自适应**(`table-layout: auto` + `word-break: break-all`),由该列最长
-内容决定。长 URL / 路径 / title **多行展示**,不横向滚动;表头 `white-space: nowrap`
-保持整齐;数字列 `min-width: 48px` 防被空字符串压到 0 宽度。
+**The width of the columns adapts** (`table-layout: auto` + `word-break: break-all`), and it is the longest content of the column that decides it.
+A long URL / path / title **is shown on several lines** and it does not scroll sideways; the head of the table keeps `white-space: nowrap`
+so that it stays neat; a numeric column has `min-width: 48px` so that an empty string does not squash it to a width of 0.
 
-#### 各 source 列差异
+#### The difference between the columns of the sources
 
-| 列 | urlfinder | ffuf | gau |
+| Column | urlfinder | ffuf | gau |
 |---|---|---|---|
 | URL / path / status / bytes / host:port / risk / danger / last_seen | ✓ | ✓ | ✓ |
 | **title** | ✓ | — | — |
-| **words** | ✓(留位) | ✓ | 有数据时显示,空值 — |
+| **words** | ✓ (the place is kept) | ✓ | shown when there is data, an empty value — |
 | **redirect** | ✓ | — | — |
 | **link_source** | ✓ | — | — |
 
-ffuf / gau 没 urlfinder_extra 字段(title/字段 / redirect / link_source)的数据,
-所以隐藏;`words` 列所有 source 都保留以视觉对齐。
+ffuf and gau have no data for the field urlfinder_extra (title/the fields / redirect / link_source),
+so it is hidden; the column `words` is kept for every source so that the view stays aligned.
 
-#### 4 个 checkbox 筛选(URL 详情页顶)
+#### The 4 checkboxes of the filter (at the top of the page of the details of the URLs)
 
-| checkbox | 默认 | 过滤字段 | 备注 |
+| The checkbox | The default | The field it filters | The remark |
 |---|---|---|---|
-| 仅显示当前子域 | **未勾** | `tr.data-host === sample_subdomain` | 早期版本用 `data-subdomain` 比较,因为同一 hash 下所有 URL 的 `subdomain` 字段相等,**永远全匹配**,看似失效。改用 URL 实际 host 后能正确过滤掉杂 host(如从 large-assets 子域扫到的 test-internal.example 这种) |
-| 仅显示 status=200 | 未勾 | `tr.data-status === '200'` | — |
-| 去除 .js / .css | 未勾 | `tr.data-static === '1'` | 后端按 `path` 后缀判;`?query` / `#fragment` 已在 `scan_urls._parse_url()` 阶段剥离 |
-| **仅显示新增或改变**(用户 2026-08-26) | 未勾 | `ct & 1` 或 `ct & 2` 且 `host == sample_subdomain` 且 `is_static=0` | 联动**当前子域 && 非静态**(硬编码,用户拍板**分离**于「去除 .js / .css」toggle)。语义:只看本轮 scan-urls / daily-url 阶段产生的"新增 / 内容变"行 |
+| only the current subdomain | **not ticked** | `tr.data-host === sample_subdomain` | the early version compared with `data-subdomain`, and because the field `subdomain` is the same for every URL of a hash, it **always matched everything** and looked broken. With the real host of the URL it filters the hosts that do not belong (such as the test-internal.example that was scanned from the subdomain large-assets) |
+| only status=200 | not ticked | `tr.data-status === '200'` | — |
+| remove .js / .css | not ticked | `tr.data-static === '1'` | the backend decides by the suffix of the `path`; the `?query` and the `#fragment` are already stripped at the stage of `scan_urls._parse_url()` |
+| **only the new ones or the ones that changed** (the user on 2026-08-26) | not ticked | `ct & 1` or `ct & 2` and `host == sample_subdomain` and `is_static=0` | it is tied to the **current subdomain && not static** (hardcoded, the user decided that it is **separate** from the toggle of removing the .js / .css). The semantics: it only looks at the rows of the "new / the content changed" that the stage of the scan-urls / daily-url of this round produced |
 
-4 个 checkbox **叠加生效**;`applyFilters()` 在每次 change 事件里跑,顺序遍历所有
-checkbox 状态。过滤不修改 DOM,只设 `tr.style.display = 'none'`。
+The 4 checkboxes **stack**; `applyFilters()` runs on every change event and it walks through the state of
+all of them in order. The filter does not touch the DOM, it only sets `tr.style.display = 'none'`.
 
-每张表的 `<h3 class="src-heading">` 实时显示 `· 可见 N/M 条`(`count-chip`),
-让用户能直观看到 checkbox 触发了过滤。
+The `<h3 class="src-heading">` of every table shows `· visible N/M rows` (`count-chip`) in real time,
+so that the reader sees right away that a checkbox triggered the filter.
 
-#### 默认染色(用户 2026-08-26)
+#### The colouring of the default (the user on 2026-08-26)
 
-URL 详情页的 `<tr>` **默认就对** "当前子域 && 非 js/css && change_type > 0" 的行加
-CSS class 染色,**不需要勾任何 toggle** 就直接可见:
+The `<tr>` of the page of the details of the URLs **already get** the CSS class of the colouring
+of the rows of "the current subdomain && not js/css && change_type > 0", and they are visible **without ticking any toggle**:
 
-| class | 触发条件 | 颜色 |
+| class | The condition | The colour |
 |---|---|---|
-| `row-new` | `change_type & 1`(INSERT 新增) | 浅绿 `#f6ffed` |
-| `row-changed` | `change_type & 2`(内容变) | 浅蓝 `#e6f7ff` |
-| `row-reactivated` | `change_type & 4` 或 `6`(复活) | 浅橙 `#fff7e6` |
+| `row-new` | `change_type & 1` (the INSERT, it is new) | a light green `#f6ffed` |
+| `row-changed` | `change_type & 2` (the content changed) | a light blue `#e6f7ff` |
+| `row-reactivated` | `change_type & 4` or `6` (it came back) | a light orange `#fff7e6` |
 
-染色 class 与现有 `.risk-high/.risk-med/.risk-low/.risk-info`(按 status_code)
-叠加:CSS 是 `tr.risk-X.row-Y`,互不冲突。
-具体见 `_serve_urls_detail` 末尾 `<style>` 块的 `.urls-table tbody > tr.row-*` 段。
+The class of the colouring stacks with the existing `.risk-high/.risk-med/.risk-low/.risk-info` (by status_code):
+the CSS is `tr.risk-X.row-Y`, and they do not collide.
+See the section `.urls-table tbody > tr.row-*` of the `<style>` block at the end of `_serve_urls_detail`.
 
-#### 列头排序(只 status / bytes)
+#### The sorting of the head of the columns (only status / bytes)
 
-仅 `status` 和 `bytes` 两列可点击排序,其它列不可点击。三态循环:
+Only the two columns `status` and `bytes` can be clicked to sort, the other ones cannot. The cycle of three states:
 
 ```
 none → click → asc  → click → desc → click → none
 ```
 
-- `status` / `bytes` 都是数字列,直接数值比较
-- **空值排末尾**(asc / desc 都一样):`status_code IS NULL` / `content_length IS NULL` 的行被推到表底
-- 排序前给每行打 `data-_idx` 标签,点第 3 次恢复**原始入库顺序**
-- 排序不重置筛选状态(两个独立维度,可叠加)
-- 表头视觉:默认 `⇅` 灰、active `▲` / `▼` 蓝色
+- `status` and `bytes` are both numeric columns, they are compared by their value directly
+- **The empty values go to the end** (the same in asc and in desc): the rows of `status_code IS NULL` / `content_length IS NULL` are pushed to the bottom of the table
+- Every row is tagged with `data-_idx` before the sorting, and a third click restores the **original order of the insertion**
+- The sorting does not reset the state of the filter (they are two independent dimensions, they stack)
+- The head of the table: `⇅` grey by default, `▲` / `▼` blue when it is active
 
-#### `sample_subdomain` 来源
+#### The source of the `sample_subdomain`
 
-URL 详情页顶显示当前 hash 的「来源子域」,取数优先级:
+The top of the page of the details of the URLs shows the "subdomain of the source" of the current hash, the priority of the source of the value:
 
-1. `web_subdomains` 表里该 hash 的 subdomain(`ORDER BY is_active DESC, subdomain`)
-2. fallback: `web_hash_urls` 里该 hash 第一行 URL 的 `subdomain`(同一 hash 下所有
-   URL 通常来自同一 subdomain)
+1. the subdomain of that hash in the table `web_subdomains` (`ORDER BY is_active DESC, subdomain`)
+2. the fallback: the `subdomain` of the URL of the first row of that hash in `web_hash_urls` (all the URLs of the same hash usually come from the same subdomain)
 
-也用作「仅显示当前子域」checkbox 的过滤基准。
+It is also the base of the filter of the checkbox "only the current subdomain".
 
-### 不接 cron / diff.py 的设计取舍
+### The trade-off of not hooking it to the cron / to diff.py
 
-~~历史版本(2026-08-26 之前)~~:URL 资产扫描仅 dashboard 手动,不接 cron / diff.py。
-**当前状态**:已接 diff.py(产出 `added/changed/deactivated_web_hash_urls.csv`),
-并提供 `daily-url` stage 让 cron 自动跑 — 详见 §"每日 URL 扫描"。
+~~The old version (before 2026-08-26)~~: the scan of the URL assets was only by hand from the dashboard, it was not hooked to the cron / to diff.py.
+**The state of the moment**: it is hooked to diff.py (it produces the `added/changed/deactivated_web_hash_urls.csv`),
+and it offers a `daily-url` stage so that the cron runs it on its own — see the section on the daily URL scan.
 
-## 每日 URL 扫描(daily-url stage,用户 2026-08-26 拍板)
+## The daily URL scan (the daily-url stage, the user decided on 2026-08-26)
 
-dashboard 手动 scan-urls 适合单点验证;**批量、每日**的资产追踪由 `daily-url` stage
-负责。读 `web_subdomain_scan_schedule` 表,按 `enabled=1` 的 subdomain 自动跑,
-结果通过 trigger 写 `change_type`,再由 diff.py 产出 CSV。
+The manual scan-urls of the dashboard fits the verification of a single point; the tracking of the assets
+**in bulk and every day** is the job of the `daily-url` stage. It reads the table `web_subdomain_scan_schedule`, it runs on its own
+the subdomains whose `enabled=1`, the result is written to the `change_type` by a trigger, and then the diff.py produces the CSV.
 
-### 配置:`web_subdomain_scan_schedule` 表
+### The configuration: the table `web_subdomain_scan_schedule`
 
 ```sql
 CREATE TABLE web_subdomain_scan_schedule (
     id, business_id, subdomain,
-    sources     TEXT DEFAULT 'urlfinder',  -- 逗号分隔,默认 urlfinder
-    last_run_at TEXT,                      -- 上次成功扫描时间
+     sources     TEXT DEFAULT 'urlfinder',  -- separated by commas, urlfinder by default
+     last_run_at TEXT,                      -- the time of the last successful scan
     enabled     INTEGER DEFAULT 1,
     created_at, updated_at,
     UNIQUE (business_id, subdomain)
 );
 ```
 
-**1 subdomain = 1 行**。`enabled=0` 不会被 cron 跑(但 row 保留)。
-迁移:`python3 lib/migrate_schedule.py /path/to/db`(幂等)。
+**1 subdomain = 1 row**. A row of `enabled=0` is not run by the cron (the row stays).
+The migration: `python3 lib/migrate_schedule.py /path/to/db` (it is idempotent).
 
-### dashboard 加入/移除 schedule
+### Adding a schedule to the dashboard / removing it
 
-`POST /<业务>/schedule/toggle`,body:
+`POST /<business>/schedule/toggle`, the body:
 ```
 subdomain=<FQDN>&action=add|remove
 ```
-返回纯 JSON:`{ok, action, created|removed, schedule_state}`。
-**add** 是 `INSERT OR IGNORE`(同 (biz, sub) 重复 → created=0 幂等)。
-**remove** 是 `DELETE`(行不存在也算 ok)。
-操作成功后前端 `location.reload()` 反映新状态 + 按钮文案。
+It answers a plain JSON: `{ok, action, created|removed, schedule_state}`.
+The **add** is an `INSERT OR IGNORE` (the same (biz, sub) again → created=0, it is idempotent).
+The **remove** is a `DELETE` (it is ok when the row does not exist).
+When the operation succeeded the front end calls `location.reload()` to show the new state and the new wording of the button.
 
-按钮位置:URL 详情页(`/<业务>/urls/<hash_id>`)顶部,chip 显示当前状态:
+The place of the button: the top of the page of the details of the URLs (`/<business>/urls/<hash_id>`), the chip shows the state of the moment:
 
-| 状态 | 按钮文案 | data-action |
+| The state | The wording of the button | data-action |
 |---|---|---|
-| `enabled`(已加入) | "移除每日扫描" | `remove` |
-| `absent`(未加入) | "加入每日扫描" | `add` |
-| `disabled`(暂停) | "移除每日扫描" | `remove` |
+| `enabled` (it is in the schedule) | "Remove the daily scan" | `remove` |
+| `absent` (it is not in the schedule) | "Add the daily scan" | `add` |
+| `disabled` (it is paused) | "Remove the daily scan" | `remove` |
 
 ### `daily-url` stage
 
-放在 `run_one_business.sh` 的固定顺序最末:`enscan → pdtm → icp → daily-url`。
+It goes at the very end of the fixed order of `run_one_business.sh`: `enscan → pdtm → icp → daily-url`.
 
 ```bash
-./daily_monitor.sh -type pdtm,icp,daily-url   # 手动跑全部
-./daily_monitor.sh -type daily-url             # 只跑 daily-url
+./daily_monitor.sh -type pdtm,icp,daily-url   # run everything by hand
+./daily_monitor.sh -type daily-url             # run the daily-url only
 ```
 
-> ⚠ **cron 行不变**(写死 `-type pdtm,icp`)。daily-url 默认**不进 cron**,由用户手动
-> 触发或单独挂 cron。需要时:` install_cron.sh` 加 `-type pdtm,icp,daily-url`,或
-> `crontab -e` 加独立行。
+> ⚠ **the cron line does not change** (it hardcodes `-type pdtm,icp`). The daily-url does **not** go into the cron by default, the user triggers it
+> by hand or hangs it on a cron of its own. When it is needed: `install_cron.sh` with `-type pdtm,icp,daily-url`, or
+> `crontab -e` with a line of its own.
 
-`run_stage_daily_url()` 内部:
-1. 读 `enabled=1` 的 schedule 行 → 子域列表 + sources
-2. 分 batch(每批 ≤ `DAILY_URL_BATCH_MAX`,**用户拍板:50000**,文档常量)
-3. 每 batch subprocess 调 `pdtm/scan_urls.py scan-urls --sources <batch sources>`
-4. **batch 退出码 0 才**为该 batch 涉及的所有 sub UPDATE `last_run_at`(= 当前时间)
-5. 失败保留旧 `last_run_at`(下次补跑按"上次成功"为基线)
-6. 任一 batch 失败 → 设 bit3(退出码 8)
+Inside `run_stage_daily_url()`:
+1. it reads the rows of the schedule whose `enabled=1` → the list of the subdomains + the sources
+2. it splits them into batches (every batch ≤ `DAILY_URL_BATCH_MAX`, **the user decided: 50000**, a constant of the documentation)
+3. every batch calls `pdtm/scan_urls.py scan-urls --sources <the sources of the batch>` as a subprocess
+4. **only when the exit code of the batch is 0** it UPDATEs the `last_run_at` of all the subs of that batch (= the current time)
+5. a failure keeps the old `last_run_at` (the next run that catches up uses the "last success" as its baseline)
+6. a failure of any batch → it sets bit3 (the exit code 8)
 
-**batch 上限 50000 是文档常量**(写在 `run_one_business.sh` 顶部 `DAILY_URL_BATCH_MAX`,
-需要调整时改一处)。**实际限制在 `scan_urls.py:MAX_HOSTS = 50`** —— 单次
-subprocess 调用子域上限是 50 个;`DAILY_URL_BATCH_MAX` 是 wrapper 层 batch 上限,
-理论上应该远小于此(避免单 subprocess 超时)。两者关系:
-- `DAILY_URL_BATCH_MAX=50000` 是 wrapper 层的"单次跑多少批就退出"上限(防失控)
-- `scan_urls.MAX_HOSTS=50` 是 scan_urls 内部的"单进程最多多少 host"
-- 因此 daily-url 通常一次只发 1 个 batch(≤ 50 sub),剩下的明天再跑
+**The limit of 50000 of a batch is a constant of the documentation** (it is written in the `DAILY_URL_BATCH_MAX` at the top of
+`run_one_business.sh`, and it is changed in one place when it has to be adjusted). **The real limit is `scan_urls.py:MAX_HOSTS = 50`** — the limit of the
+subdomains of a single call of the subprocess is 50; `DAILY_URL_BATCH_MAX` is the limit of a batch of the wrapper layer, and it should in theory be far below that (to avoid a timeout of a single subprocess). The relation between the two:
+- `DAILY_URL_BATCH_MAX=50000` is the limit of the "how many batches before it quits" of the wrapper layer (it keeps the run from running away)
+- `scan_urls.MAX_HOSTS=50` is the "how many hosts at most in one process" inside scan_urls
+- therefore the daily-url usually sends only one batch (≤ 50 subs), and the rest runs the next day
 
-**典型流**(例:`ExampleCo` 业务 schedule 表有 5 个 enabled 子域):
+**The typical flow** (for instance: the schedule of the business `ExampleCo` holds 5 enabled subdomains):
 ```
 run_stage_daily_url: 5 sub(s), 1 batch(es)
 daily-url batch: 1-5 / 5, sources=urlfinder
@@ -968,36 +969,36 @@ daily-url batch: 1-5 / 5, sources=urlfinder
 run_one] daily-url ok: 5 sub(s) scanned
 ```
 
-无 schedule 行时返回 0(rc=0),不设 bit3,日志一行 "no schedule rows"。
+When there is no row of the schedule it answers 0 (rc=0), it does not set bit3, and it writes one line "no schedule rows" in the log.
 
-### 复活 vs bulk-deactivate-then-UPSERT 语义(与 web_subdomains 对齐)
+### The semantics of the revival against the bulk-deactivate-then-UPSERT (aligned with web_subdomains)
 
-`web_hash_urls.is_active` 当前**只由 ON CONFLICT UPDATE 翻 1**(不会自然 0→1 复活)。
-触发器 `trg_whu_au` 区分两种场景:
-- **真正复活**(`OLD.last_seen < COALESCE(schedule.last_run_at, OLD.last_seen)`)→ 4 / 6
-- **bulk-deactivate-then-UPSERT 同 run**:无 schedule 行 → 等价于 `last_seen < last_seen` = FALSE → 置 0(不变)
+The `web_hash_urls.is_active` is currently **only flipped to 1 by the ON CONFLICT UPDATE** (it does not come back to life by itself).
+The trigger `trg_whu_au` tells the two cases apart:
+- **a real revival** (`OLD.last_seen < COALESCE(schedule.last_run_at, OLD.last_seen)`) → 4 / 6
+- **a bulk-deactivate-then-UPSERT in the same run**: there is no row of the schedule → it is equivalent to `last_seen < last_seen` = FALSE → it is set to 0 (it does not change)
 
-意味着:首次开启每日扫描时,**第一次跑的所有扫描结果都不会被标复活**(因为没有 last_run_at 基线)。
-这是有意为之 —— 第一次跑 = baseline,后续才能 diff。
+It means: when the daily scan is turned on for the first time, **none of the results of the first run is marked as a revival** (because there is no baseline of last_run_at).
+That is on purpose — the first run is the baseline, and only after that can there be a diff.
 
-### 失败处理
+### The handling of a failure
 
-| 失败点 | 行为 |
+| The point of the failure | What it does |
 |---|---|
-| `scan_urls.py` 退出码非 0 | batch 失败计数 +1;**不**写该 batch 的 `last_run_at` |
-| 任 batch 失败 | exit 8;`summary.md` 标 "daily-url FAILED" |
-| 所有 batch 都失败 | 同上;次日会按"上次成功"补跑 |
-| 业务无 enabled schedule | 跳过,exit 0(不设 bit3) |
-| `daily_monitor.sh` 调用 `-type` 不含 `daily-url` | 该 stage 不跑;不影响其它 stage |
+| the exit code of `scan_urls.py` is not 0 | the counter of the failed batches grows by 1; it **does not** write the `last_run_at` of that batch |
+| a batch failed | exit 8; the `summary.md` marks "daily-url FAILED" |
+| every batch failed | the same; the next day it catches up with the "last success" |
+| the business has no enabled schedule | it is skipped, exit 0 (it does not set bit3) |
+| the `-type` of `daily_monitor.sh` does not hold `daily-url` | that stage does not run; the other stages are not affected |
 
-### 已知问题(Q7)
+### The known problems (Q7)
 
-| 现象 | 状态 |
+| The symptom | The state |
 |---|---|
-| 扫描器如果传入了不在 `web_subdomains.is_active=1` 里的 subdomain,会把"孤儿 URL"写到 `web_hash_urls` | dashboard 前端校验 subdomain,但 bypass 后会污染。后续若加 soft FK check,需要加自动 deactivate |
-| `URLFinder` 输出格式不稳定(个人工具,version 不锁) | parser 容错 + 三种退路 JSON dict / list / 纯文本 |
-| gau 在 wayback 被 429 时仍输出 0 URL | gau 失败属于环境问题,代码层面已捕获并 log,不影响其它 source 写入 |
-| ffuf 对外网/外业务乱扫 | **手动触发**,风险远低于 cron;但建议在 dashboard 表单上保持默认不勾 ffuf(默认勾 urlfinder) |
-| daily-url 阶段没进 cron 行(用户 2026-08-26 决策) | 手动触发或单独挂 cron。需要时 `crontab -e` 加 `-type daily-url` 行;不要直接改 `install_cron.sh` 默认值 |
-| `web_hash_urls` 增长快(每子域每天 ~3000 行,5w sub/天 = 15w 行) | 当前**无清理**;长期会爆表。建议运营按需清理老数据(待办:加 retention 阶段,30 天前自动归档) |
-| toggle "仅显示新增或改变" 必须在 trigger 写过 change_type 后才生效 | 每次 daily_monitor.sh 跑完 diff 后 change_type 被 reset=0;**下次 cron 跑前 toggle 永远空**。如果想"持续看到上一轮 diff",需要保留 run_marker 状态(或改 trigger 为不 reset — 与 web_subdomains 走同一条路) |
+| when the scanner is given a subdomain that is not in `web_subdomains.is_active=1`, it writes the "orphan URLs" to `web_hash_urls` | the front end of the dashboard checks the subdomain, but a bypass pollutes the table. When a soft FK check is added later, it needs an automatic deactivate |
+| the output format of `URLFinder` is not stable (a personal tool, the version is not pinned) | the parser copes with it + three ways out: a JSON dict / a list / plain text |
+| gau still outputs 0 URLs when wayback answers 429 | a failure of gau is a problem of the environment, the code catches it and logs it, and the write of the other sources is not affected |
+| ffuf scans the outside of the network / the businesses of the others | it is **triggered by hand**, the risk is far lower than with the cron; but it is better to keep ffuf unticked by default on the form of the dashboard (urlfinder is ticked by default) |
+| the daily-url stage is not part of the cron line (the decision of the user on 2026-08-26) | it is triggered by hand or it hangs on a cron of its own. When it is needed, `crontab -e` with a `-type daily-url` line; the default of `install_cron.sh` must not be edited |
+| `web_hash_urls` grows fast (about 3000 rows per subdomain and per day, 5w subs a day = 15w rows) | there is **no cleaning** at the moment; the table will burst in the long run. It is better that the operator cleans the old data when it is needed (to do: a retention stage that archives what is older than 30 days) |
+| the toggle "only the new ones or the ones that changed" only works once a trigger has written a change_type | the change_type is reset to 0 every time the diff ran at the end of the daily_monitor.sh; **the toggle is always empty before the next run of the cron**. To "keep seeing the diff of the last round", the state of the run_marker has to be kept (or the trigger has to stop resetting it — the same road as the one of web_subdomains) |
