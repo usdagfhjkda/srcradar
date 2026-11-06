@@ -43,13 +43,13 @@ usage() {
 
 check_deps() {
     local rc=0
-    command -v python3 >/dev/null 2>&1 || { err "缺 python3"; rc=2; }
-    command -v gpg >/dev/null 2>&1      || { err "缺 gpg (apt: gnupg)"; rc=2; }
-    command -v curl >/dev/null 2>&1     || { err "缺 curl (Resend HTTP API 调用需要)"; rc=2; }
+    command -v python3 >/dev/null 2>&1 || { err "$(t public.notify.install.python3_missing)"; rc=2; }
+    command -v gpg >/dev/null 2>&1      || { err "$(t public.notify.install.gpg_missing)"; rc=2; }
+    command -v curl >/dev/null 2>&1     || { err "$(t public.notify.install.curl_missing)"; rc=2; }
     [ -f "${SCRIPT_DIR}/notify_send.sh" ] \
-        || { err "notify_send.sh 缺失"; rc=3; }
+        || { err "$(t public.notify.install.notify_send_script_missing)"; rc=3; }
     [ -f "${SCRIPT_DIR}/lib/notify_config.py" ] \
-        || { err "lib/notify_config.py 缺失"; rc=3; }
+        || { err "$(t public.notify.install.notify_config_py_missing)"; rc=3; }
     return $rc
 }
 
@@ -139,7 +139,7 @@ verify() {
     # payload directory is writable
     mkdir -p "$PAYLOAD_DIR" 2>/dev/null && chmod 0700 "$PAYLOAD_DIR" \
         && printf "  OK payload dir: %s\n" "$PAYLOAD_DIR" \
-        || { warn "payload 目录不可写 ($PAYLOAD_DIR)"; }
+        || { warn "$(t public.notify.install.payload_dir_not_writable PAYLOAD_DIR="$PAYLOAD_DIR")"; }
     return $rc
 }
 

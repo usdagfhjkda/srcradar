@@ -41,24 +41,24 @@ usage() {
 
 check_deps() {
     local rc=0
-    command -v go >/dev/null 2>&1        || { err "缺 go (apt: golang-go;建议 >= 1.22)"; rc=2; }
-    command -v python3 >/dev/null 2>&1   || { err "缺 python3"; rc=2; }
-    command -v curl >/dev/null 2>&1      || { err "缺 curl"; rc=2; }
-    command -v git >/dev/null 2>&1       || { err "缺 git"; rc=2; }
+    command -v go >/dev/null 2>&1        || { err "$(t public.katana.install.go_missing)"; rc=2; }
+    command -v python3 >/dev/null 2>&1   || { err "$(t public.katana.install.python3_missing)"; rc=2; }
+    command -v curl >/dev/null 2>&1      || { err "$(t public.katana.install.curl_missing)"; rc=2; }
+    command -v git >/dev/null 2>&1       || { err "$(t public.katana.install.git_missing)"; rc=2; }
 
     # mmh3 Python module (algo_diff + response_hash algorithm dependency)
     python3 -c "import mmh3" 2>/dev/null \
-        || { err "缺 python3 mmh3 (pip install mmh3)"; rc=2; }
+        || { err "$(t public.katana.install.mmh3_missing)"; rc=2; }
 
     # key files
     [ -f "${SCRIPT_DIR}/katana_enrich.sh" ] \
-        || { err "katana_enrich.sh 缺失"; rc=3; }
+        || { err "$(t public.katana.install.katana_enrich_script_missing)"; rc=3; }
     [ -f "${SCRIPT_DIR}/lib/katana_runner.py" ] \
-        || { err "lib/katana_runner.py 缺失"; rc=3; }
+        || { err "$(t public.katana.install.katana_runner_py_missing)"; rc=3; }
     [ -f "${SCRIPT_DIR}/lib/risks.py" ] \
-        || { err "lib/risks.py 缺失"; rc=3; }
+        || { err "$(t public.katana.install.risks_py_missing)"; rc=3; }
     [ -f "${SCRIPT_DIR}/lib/schema_map.py" ] \
-        || { err "lib/schema_map.py 缺失"; rc=3; }
+        || { err "$(t public.katana.install.schema_map_py_missing)"; rc=3; }
 
     return $rc
 }
@@ -130,7 +130,7 @@ case "$MODE" in
         log "$(t public.katana_install.checking)"
         check_deps
         rc=$?
-        [ $rc -eq 0 ] && log "自检通过"
+        [ $rc -eq 0 ] && log "$(t public.katana.install.self_check_passed)"
         exit $rc
         ;;
     --uninstall)

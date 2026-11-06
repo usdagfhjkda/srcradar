@@ -47,25 +47,25 @@ usage() {
 
 check_deps() {
     local rc=0
-    command -v python3 >/dev/null 2>&1 || { err "缺 python3"; rc=2; }
-    command -v bash >/dev/null 2>&1    || { err "缺 bash"; rc=2; }
-    command -v pgrep >/dev/null 2>&1   || { err "缺 pgrep (apt: procps)"; rc=2; }
-    command -v df >/dev/null 2>&1      || { err "缺 df (coreutils)"; rc=2; }
-    command -v uptime >/dev/null 2>&1  || { err "缺 uptime (apt: procps)"; rc=2; }
-    command -v nproc >/dev/null 2>&1   || { err "缺 nproc (apt: coreutils)"; rc=2; }
-    command -v awk >/dev/null 2>&1     || { err "缺 awk"; rc=2; }
-    command -v crontab >/dev/null 2>&1 || warn "缺 crontab (apt: cron),后续 install_cron.sh 会失败"
+    command -v python3 >/dev/null 2>&1 || { err "$(t public.health.install.python3_missing)"; rc=2; }
+    command -v bash >/dev/null 2>&1    || { err "$(t public.health.install.bash_missing)"; rc=2; }
+    command -v pgrep >/dev/null 2>&1   || { err "$(t public.health.install.pgrep_missing)"; rc=2; }
+    command -v df >/dev/null 2>&1      || { err "$(t public.health.install.df_missing)"; rc=2; }
+    command -v uptime >/dev/null 2>&1  || { err "$(t public.health.install.uptime_missing)"; rc=2; }
+    command -v nproc >/dev/null 2>&1   || { err "$(t public.health.install.nproc_missing)"; rc=2; }
+    command -v awk >/dev/null 2>&1     || { err "$(t public.health.install.awk_missing)"; rc=2; }
+    command -v crontab >/dev/null 2>&1 || warn "$(t public.health.install.crontab_missing)"
 
     [ -f "$SCRIPT_DIR/health_check.sh" ] \
-        || { err "health_check.sh 缺失"; rc=3; }
+        || { err "$(t public.health.install.health_check_script_missing)"; rc=3; }
     [ -f "$SCRIPT_DIR/lib/health_check.py" ] \
-        || { err "lib/health_check.py 缺失"; rc=3; }
+        || { err "$(t public.health.install.health_check_py_missing)"; rc=3; }
     [ -f "$SCRIPT_DIR/lib/health_config.py" ] \
-        || { err "lib/health_config.py 缺失"; rc=3; }
+        || { err "$(t public.health.install.health_config_py_missing)"; rc=3; }
     [ -f "$SCRIPT_DIR/lib/thresholds.py" ] \
-        || { err "lib/thresholds.py 缺失"; rc=3; }
+        || { err "$(t public.health.install.thresholds_py_missing)"; rc=3; }
     [ -f "$SCRIPT_DIR/install_cron.sh" ] \
-        || { err "install_cron.sh 缺失"; rc=3; }
+        || { err "$(t public.health.install.install_cron_script_missing)"; rc=3; }
     return $rc
 }
 
@@ -73,13 +73,13 @@ check_deps() {
 check_notify_dep() {
     local rc=0
     [ -f "$NOTIFY_SEND" ] \
-        || { err "依赖缺失: ../notify/notify_send.sh (health 复用其推送通道)"; rc=4; }
+        || { err "$(t public.health.install.notify_send_dependency_missing)"; rc=4; }
     [ -f "$NOTIFY_CONFIG_PY" ] \
-        || { err "依赖缺失: ../notify/lib/notify_config.py"; rc=4; }
+        || { err "$(t public.health.install.notify_config_dependency_missing)"; rc=4; }
     command -v gpg >/dev/null 2>&1  \
-        || { err "缺 gpg (apt: gnupg),notify 模块会失败"; rc=4; }
+        || { err "$(t public.health.install.gpg_missing)"; rc=4; }
     command -v curl >/dev/null 2>&1 \
-        || { err "缺 curl,notify 模块会失败"; rc=4; }
+        || { err "$(t public.health.install.curl_missing)"; rc=4; }
     return $rc
 }
 
@@ -134,11 +134,11 @@ verify() {
     printf "  OK curl:       %s\n" "$(command -v curl 2>/dev/null || echo MISSING)"
     printf "  OK crontab:    %s\n" "$(command -v crontab 2>/dev/null || echo MISSING)"
 
-    [ -f "$SCRIPT_DIR/health_check.sh" ]  && printf "  OK health_check.sh\n"   || { err "health_check.sh 缺失"; rc=1; }
-    [ -f "$SCRIPT_DIR/lib/health_check.py" ] && printf "  OK lib/health_check.py\n" || { err "lib/health_check.py 缺失"; rc=1; }
-    [ -f "$SCRIPT_DIR/lib/health_config.py" ] && printf "  OK lib/health_config.py\n" || { err "lib/health_config.py 缺失"; rc=1; }
-    [ -f "$SCRIPT_DIR/lib/thresholds.py" ] && printf "  OK lib/thresholds.py\n" || { err "lib/thresholds.py 缺失"; rc=1; }
-    [ -f "$SCRIPT_DIR/install_cron.sh" ] && printf "  OK install_cron.sh\n" || { err "install_cron.sh 缺失"; rc=1; }
+    [ -f "$SCRIPT_DIR/health_check.sh" ]  && printf "  OK health_check.sh\n"   || { err "$(t public.health.install.health_check_script_missing)"; rc=1; }
+    [ -f "$SCRIPT_DIR/lib/health_check.py" ] && printf "  OK lib/health_check.py\n" || { err "$(t public.health.install.health_check_py_missing)"; rc=1; }
+    [ -f "$SCRIPT_DIR/lib/health_config.py" ] && printf "  OK lib/health_config.py\n" || { err "$(t public.health.install.health_config_py_missing)"; rc=1; }
+    [ -f "$SCRIPT_DIR/lib/thresholds.py" ] && printf "  OK lib/thresholds.py\n" || { err "$(t public.health.install.thresholds_py_missing)"; rc=1; }
+    [ -f "$SCRIPT_DIR/install_cron.sh" ] && printf "  OK install_cron.sh\n" || { err "$(t public.health.install.install_cron_script_missing)"; rc=1; }
 
     if [ -f "$NOTIFY_SEND" ]; then
         printf "$(t public.install.health_notify_send_ok)" "$NOTIFY_SEND"
@@ -152,7 +152,7 @@ verify() {
     fi
 
     [ -f "$EXAMPLE_CONF" ] && printf "  OK config/health.conf.example\n" \
-        || { err "example 模板缺失"; rc=1; }
+        || { err "$(t public.health.install.example_template_missing)"; rc=1; }
 
     # the real conf is optional; hint about it but do not fail verify
     if [ -f "$TARGET_CONF" ]; then
@@ -176,7 +176,7 @@ verify() {
 
     # logs/ directory is writable
     mkdir -p "$SCRIPT_DIR/logs" 2>/dev/null && printf "  OK logs/ dir: %s\n" "$SCRIPT_DIR/logs" \
-        || { warn "logs/ 目录不可写"; }
+        || { warn "$(t public.health.install.logs_dir_not_writable)"; }
 
     # bash version (the script uses set -euo pipefail; requires >=4 for ${var:-})
     local bash_major

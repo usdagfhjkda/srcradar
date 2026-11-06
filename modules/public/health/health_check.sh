@@ -74,8 +74,8 @@ parse_args() {
 main() {
     parse_args "$@"
 
-    command -v python3 >/dev/null 2>&1 || { err "缺 python3"; exit 2; }
-    [ -f "$HEALTH_CHECK_PY" ] || { err "lib/health_check.py 缺失: $HEALTH_CHECK_PY"; exit 2; }
+    command -v python3 >/dev/null 2>&1 || { err "$(t public.health.health_check.python3_missing)"; exit 2; }
+    [ -f "$HEALTH_CHECK_PY" ] || { err "$(t public.health.health_check.health_check_py_missing HEALTH_CHECK_PY="$HEALTH_CHECK_PY")"; exit 2; }
     mkdir -p "$LOG_DIR"
     touch "$HEALTH_LOG" 2>/dev/null || true
 
@@ -91,7 +91,7 @@ main() {
             EFFECTIVE_CONFIG="$EXAMPLE_CONF"
         else
             warn "$(t public.health_check.config_all_missing)"
-            EFFECTIVE_CONFIG="${SCRIPT_DIR}/lib/thresholds.py"  # 任意存在的路径,trigger DEFAULT 分支
+            EFFECTIVE_CONFIG="${SCRIPT_DIR}/lib/thresholds.py"  # any existing path, triggers the DEFAULT branch
         fi
     fi
 
@@ -104,7 +104,7 @@ main() {
         exit 3
     fi
     log "report: ${LOG_DIR}/health_report.md"
-    [ "$DRYRUN" = "1" ] && log "--dryrun: 已生成报告,未发邮件"
+    [ "$DRYRUN" = "1" ] && log "$(t public.health.health_check.dryrun_report_generated)"
 
     # write the INFO line to health.log (a trace of every run; a failure here
     # does not affect the main flow)
