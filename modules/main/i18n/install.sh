@@ -117,7 +117,7 @@ write_lang_conf() {
 # Resolution order (handled by modules/main/i18n/i18n.{py,sh}):
 #   1) the SRCDAR_LANG environment variable
 #   2) the lang field in this file
-#   3) zh as the default
+#   3) en as the default
 #
 # Accepted values: zh (Chinese) / en (English)
 #
@@ -129,7 +129,7 @@ EOF
 }
 
 main() {
-    local mode="install" lang="zh"
+    local mode="install" lang="en"
     while [ $# -gt 0 ]; do
         case "$1" in
             --check) mode="check"; shift ;;

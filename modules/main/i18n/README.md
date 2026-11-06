@@ -43,7 +43,7 @@ Every tool follows this one chain:
 1. SRCDAR_LANG environment variable   highest priority, for CI and
                                      temporary overrides
 2. the lang field in config/lang.conf  the operator's persistent choice
-3. zh as the default                   the fallback when no config exists
+3. en as the default                   the fallback when no config exists
 ```
 
 Language aliases accepted by `SRCDAR_LANG` and by `lang.conf`:
@@ -54,8 +54,8 @@ Language aliases accepted by `SRCDAR_LANG` and by `lang.conf`:
 | `en` / `en-US` / `en_US` / `english` | `en` |
 | anything else | treated as unset, resolution continues |
 
-**The default is `zh`** — that matches the behaviour before this module
-existed, so existing deployments see no change.
+**The default is `en`** — it matches the language of the documentation, and
+a deployment that carries a `config/lang.conf` keeps the language of it.
 
 ---
 
@@ -76,7 +76,7 @@ print(t("install.module_ok", {"area": "main", "name": "pdtm"}))
 ```
 
 `t()` resolves a missing key by trying the active language, then the
-default language (`zh`), and finally the key name itself.
+default language (`en`), and finally the key name itself.
 
 ### The language of a thread
 

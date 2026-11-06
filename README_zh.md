@@ -258,6 +258,7 @@ srcradar daily dashboard --host 0.0.0.0
 | `lib/diff.py` | 快照对比 → 增量报告 | added/reactivated/deactivated/changed/deleted |
 | `lib/dashboard.py` | 127.0.0.1 只读 Web,4 tab | 任务状态/站点详情/端口服务/风险等级 |
 | `ENScan_GO/` | 第三方爱企查客户端,作为子进程 | vendored 源码 + `outs/` xlsx 落盘 |
+| `i18n/` | 用户可见输出的语言 (zh/en 词表) | [README](./modules/main/i18n/README.md) |
 | `db/recon.sqlite3` | 共享数据,所有模块写入 | WAL + busy_timeout 5s,允许并发读 |
 
 ---
@@ -292,6 +293,24 @@ srcradar daily dashboard --host 0.0.0.0
 - **装 cron / 卸 cron / 单业务手动跑 / 拍快照 / dashboard** → [`daily/README.md`](./modules/main/daily/README_zh.md)
 - **入 scope / 跑全流程 pipeline** → [`pdtm/README.md`](./modules/main/pdtm/README_zh.md)
 - **法律实体反查(db_align) flags** → [`db_align/README.md`](./modules/public/db_align/README.md)
+
+### 输出的语言
+
+用户可见输出(工具的 `--help`、运行时消息、dashboard 页面、每日报告与
+邮件正文)跟随同一个设置。解析顺序:
+
+1. `SRCDAR_LANG` 环境变量(供 CI 与临时覆盖)
+2. `config/lang.conf` 的 `lang` 字段(operator 的持久选择)
+3. 默认 `en`
+
+`config/lang.conf` 由 i18n 模块的安装脚本生成,之后不会被覆盖:
+
+```bash
+bash modules/main/i18n/install.sh --yes --lang zh   # 中文
+bash modules/main/i18n/install.sh --yes --lang en   # 英文
+```
+
+dashboard 还支持按请求指定语言:`?lang=zh` 或 `?lang=en` 覆盖该页的设置。
 
 ### 常见任务命令
 

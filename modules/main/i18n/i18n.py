@@ -12,7 +12,7 @@ Responsibilities:
 Language resolution:
     1. SRCDAR_LANG environment variable
     2. the lang field in config/lang.conf
-    3. zh as the default
+    3. en as the default
 
 Message table: locales/<lang>.json next to this file.
 Missing key: the active language is tried first, then the default
@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bootstrap import find_repo_root  # noqa: E402
 
 MODULE_DIR = Path(__file__).resolve().parent
-DEFAULT_LANG = "zh"
+DEFAULT_LANG = "en"
 KNOWN_LANGS = ("zh", "en")
 CONFIG_FILENAME = "lang.conf"
 NL = chr(10)

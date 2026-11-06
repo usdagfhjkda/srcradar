@@ -125,7 +125,7 @@ def main():
     reset_lang()
     zh_lang = re.search(r'<html lang="([^"]+)"', zh_page)
     en_lang = re.search(r'<html lang="([^"]+)"', en_page)
-    check("the default page is Chinese", zh_lang and zh_lang.group(1) == "zh-CN",
+    check("the page of the zh config is Chinese", zh_lang and zh_lang.group(1) == "zh-CN",
           zh_lang.group(1) if zh_lang else "?")
     check("the page with ?lang=en is English", en_lang and en_lang.group(1) == "en",
           en_lang.group(1) if en_lang else "?")

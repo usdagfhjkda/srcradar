@@ -14,7 +14,7 @@
 # Language resolution (identical to i18n.py):
 #   1. SRCDAR_LANG environment variable
 #   2. the lang field in config/lang.conf
-#   3. zh as the default
+#   3. en as the default
 #
 # Message table: modules/main/i18n/locales/<lang>.json
 # Loading strategy: i18n.py dump exports every key/value pair once, and
@@ -99,14 +99,14 @@ _i18n_conf_lang() {
     [ -n "$lang" ] && printf '%s' "$lang"
 }
 
-# Active language: SRCDAR_LANG > config/lang.conf > zh.
+# Active language: SRCDAR_LANG > config/lang.conf > en.
 i18n_resolve_lang() {
     local lang
     lang="$(_i18n_normalize "${SRCDAR_LANG:-}")"
     [ -n "$lang" ] && { printf '%s' "$lang"; return 0; }
     lang="$(_i18n_normalize "$(_i18n_conf_lang)")"
     [ -n "$lang" ] && { printf '%s' "$lang"; return 0; }
-    printf 'zh'
+    printf 'en'
 }
 
 i18n_lang() {
@@ -133,7 +133,7 @@ I18N_LOADED=""
 i18n_load() {
     local lang="${1:-}"
     [ -n "$lang" ] || lang="$(i18n_resolve_lang)"
-    [ -n "$lang" ] || lang="zh"
+    [ -n "$lang" ] || lang="en"
 
     if [ ! -f "$I18N_DIR/i18n.py" ]; then
         printf '[i18n] ERROR: i18n.py not found at %s\n' "$I18N_DIR" >&2

@@ -258,6 +258,7 @@ srcradar daily dashboard --host 0.0.0.0
 | `lib/diff.py` | the comparison of the snapshots → the incremental report | added/reactivated/deactivated/changed/deleted |
 | `lib/dashboard.py` | the read only web of 127.0.0.1, 4 tabs | Task Status/Site Details/Port Services/Risk Level |
 | `ENScan_GO/` | the client of 爱企查 of a third party, it runs as a subprocess | the source is vendored + the xlsx of the `outs/` lands on the disk |
+| `i18n/` | the language of the user-visible output (the zh and en tables) | [README](./modules/main/i18n/README.md) |
 | `db/recon.sqlite3` | the shared data, every module writes to it | WAL + a busy_timeout of 5s, the concurrent reads are allowed |
 
 ---
@@ -292,6 +293,29 @@ The detailed documentation sits next to the scripts:
 - **install the cron / remove the cron / run a single business by hand / take a snapshot / the dashboard** → [`daily/README.md`](./modules/main/daily/README.md)
 - **enter the scopes / run the whole pipeline** → [`pdtm/README.md`](./modules/main/pdtm/README.md)
 - **the flags of the reverse lookup of the legal entities (db_align)** → [`db_align/README.md`](./modules/public/db_align/README.md)
+
+### The language of the output
+
+The user-visible output (the `--help` of the tools, the runtime messages,
+the pages of the dashboard, the daily report and the body of the mail)
+follows one setting. The resolution order is:
+
+1. the `SRCDAR_LANG` environment variable (for the CI and the temporary
+   overrides)
+2. the `lang` field of `config/lang.conf` (the persistent choice of the
+   operator)
+3. `en` as the default
+
+`config/lang.conf` is written by the installer of the i18n module, and
+it is never overwritten afterwards:
+
+```bash
+bash modules/main/i18n/install.sh --yes --lang zh   # Chinese
+bash modules/main/i18n/install.sh --yes --lang en   # English
+```
+
+The dashboard also takes the language per request: `?lang=zh` or
+`?lang=en` overrides the setting for that one page.
 
 ### The commands of the common tasks
 
