@@ -96,6 +96,7 @@ PY
 
 # 4. the user-visible output holds no Chinese
 python3 "$REPO/modules/main/i18n/check_no_chinese.py" "$REPO" || FAIL=1
+python3 "$REPO/modules/main/i18n/check_no_chinese_sh.py" "$REPO" || FAIL=1
 
 # 5. the line endings
 if grep -rlU $'\r' --include="*.py" --include="*.sh" --include="*.json" \
