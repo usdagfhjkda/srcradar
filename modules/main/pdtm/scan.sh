@@ -70,7 +70,7 @@ command -v python3 >/dev/null 2>&1 || {
     exit 1
 }
 [ -f "target_glob.py" ] || {
-    echo "$(t main.scan.missing_target_glob)" >&2
+    echo "$(t main.scan.missing_target_glob cwd="$(pwd)")" >&2
     exit 1
 }
 
@@ -331,7 +331,7 @@ if [ "$ALTERX_RUN_THIS_TURN" = "1" ] && [ "$LINES" -gt 0 ]; then
             lines=$(wc -l < "$cur")
             half=$(( (lines + 1) / 2 ))
             if [ "$half" -lt 1 ] || [ "$half" -ge "$lines" ]; then
-                echo "$(t main.scan.alterx_est_still_high enrich_flag=${enrich_flag:-no-enrich} lines=$lines est=$est)" >&2
+                echo "$(t main.scan.alterx_est_still_high enrich_flag="${enrich_flag:-no-enrich}" lines="$lines" est="$est")" >&2
                 break
             fi
             halved="$ALTERX_TMPDIR/halved.$$.$RANDOM"
@@ -345,7 +345,7 @@ if [ "$ALTERX_RUN_THIS_TURN" = "1" ] && [ "$LINES" -gt 0 ]; then
             cur="$halved"
         done
         if [ "$attempts" -gt 0 ]; then
-            echo "$(t main.scan.alterx_halved enrich_flag=${enrich_flag:-no-enrich} attempts=$attempts est=$est orig=$orig)" >&2
+            echo "$(t main.scan.alterx_halved enrich_flag="${enrich_flag:-no-enrich}" attempts="$attempts" est="$est" orig="$orig")" >&2
         fi
         echo "$cur"
     }

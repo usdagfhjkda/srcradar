@@ -447,7 +447,7 @@ fi
 
 if has_stage pdtm; then
     if [ -n "${GUARD_BIZ_ID:-}" ] && [ "${GUARD_SCOPE_COUNT:-0}" = "0" ]; then
-        log "$(t main.run_one_business.needs_onboarding BIZ=$BIZ GUARD_BIZ_ID=$GUARD_BIZ_ID)"
+        log "$(t main.run_one_business.needs_onboarding biz="$BIZ" scope="可测资产")"
         if [ -n "${WARNINGS_FILE:-}" ]; then
             printf '%s\t%s\n' \
                 "$(t main.run_one_business.needs_onboarding scope='可测资产' biz="$BIZ")" \

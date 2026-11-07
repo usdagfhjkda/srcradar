@@ -96,8 +96,8 @@ else
     : > "exclude.txt"
 fi
 
-echo "$(t main.scope_import.business BUSINESS=$BUSINESS)"
-echo "$(t main.scope_import.input_dir INPUT_PATH=$INPUT_PATH)"
+echo "$(t main.scope_import.business BUSINESS="$BUSINESS")"
+echo "$(t main.scope_import.input_dir INPUT_PATH="$INPUT_PATH")"
 
 # check_wildcard: probe whether the domains in target.txt resolve as a wildcard;
 # the result goes to wildcard.txt / no_wildcard.txt.
@@ -107,13 +107,13 @@ echo "$(t main.scope_import.input_dir INPUT_PATH=$INPUT_PATH)"
 TMP_LOG=$(mktemp)
 if [ -z "$SKIP_WILDCARD" ]; then
     if ! ./check_wildcard.sh "target.txt" > "$TMP_LOG" 2>&1; then
-        echo "$(t main.scope_import.wildcard_failed TMP_LOG=$TMP_LOG)" >&2
+        echo "$(t main.scope_import.wildcard_failed TMP_LOG="$TMP_LOG")" >&2
         tail -10 "$TMP_LOG" >&2
         exit 1
     fi
     W_N=$(wc -l < "$WILDCARD_OUT" 2>/dev/null || echo 0)
     N_N=$(wc -l < "$NO_WILDCARD_OUT" 2>/dev/null || echo 0)
-    echo "$(t main.scope_import.wildcard_counts W_N=$W_N N_N=$N_N)"
+    echo "$(t main.scope_import.wildcard_counts W_N="$W_N" N_N="$N_N")"
 else
     : > "$WILDCARD_OUT"
     echo "$(t main.scope_import.wildcard_skipped)"
@@ -129,7 +129,7 @@ cleanup() {
     rm -f "$TMP_T" "$TMP_E" "$TMP_LOG"
     if [ "$rc" -ne 0 ]; then
         if [ "$INPUT_GENERATED" = "1" ]; then
-            echo "$(t main.scope_import.failed rc=$rc)" >&2
+            echo "$(t main.scope_import.failed rc="$rc")" >&2
         fi
         return 0
     fi
@@ -149,11 +149,11 @@ cleanup() {
             else
                 if [ -f "$INPUT_PATH/target.txt" ]; then
                     rm -f "$INPUT_PATH/target.txt"
-                    echo "$(t main.scope_import.cleaned_external_target INPUT_PATH=$INPUT_PATH)"
+                    echo "$(t main.scope_import.cleaned_external_target INPUT_PATH="$INPUT_PATH")"
                 fi
                 if [ -f "$INPUT_PATH/exclude.txt" ]; then
                     rm -f "$INPUT_PATH/exclude.txt"
-                    echo "$(t main.scope_import.cleaned_external_exclude INPUT_PATH=$INPUT_PATH)"
+                    echo "$(t main.scope_import.cleaned_external_exclude INPUT_PATH="$INPUT_PATH")"
                 fi
                 # rmdir if now empty (best-effort; not fatal if non-empty)
                 rmdir "$INPUT_PATH" 2>/dev/null &&                     echo "[+] $(t main.scope_import.cleaned path="$INPUT_PATH")"
@@ -199,8 +199,8 @@ fi
 
 if [ -n "$DRY_RUN" ]; then
     echo "$(t main.scope_import.dry_run)"
-    echo "$(t main.scope_import.dry_run_measurable T_LINES=$T_LINES)"
-    echo "$(t main.scope_import.dry_run_not_measurable E_LINES=$E_LINES)"
+    echo "$(t main.scope_import.dry_run_measurable T_LINES="$T_LINES")"
+    echo "$(t main.scope_import.dry_run_not_measurable E_LINES="$E_LINES")"
     echo "    DB: $DB"
     echo "$(t main.scope_import.dry_run_done)"
     exit 0
@@ -281,12 +281,13 @@ counts = {row[0]: row[1] for row in conn.execute(
     (bid,),
 )}
 conn.close()
+_scope_counts = {
+    'targets': len(targets), 'excludes': len(excludes),
+    'measurable': counts.get('可测资产', 0), 'not_measurable': counts.get('非可测资产', 0),
+}
 print(
     f"[scope_import] business='{biz}' id={bid}: "
-    f"{_t('main.scope_import.counts', {
-        'targets': len(targets), 'excludes': len(excludes),
-        'measurable': counts.get('可测资产', 0), 'not_measurable': counts.get('非可测资产', 0),
-    })}"
+    f"{_t('main.scope_import.counts', _scope_counts)}"
 )
 PY
 

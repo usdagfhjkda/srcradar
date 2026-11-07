@@ -196,7 +196,7 @@ if [ "$AUTO" = "1" ]; then
     AUTO_TARGET="$AUTO_INPUT_DIR/target.txt"
     trap 'rm -rf "$AUTO_INPUT_DIR"' EXIT
 
-    echo "$(t main.add_business.ymicp_query NAME=$NAME YMICP_BASE=$YMICP_BASE YMICP_PAGES=$YMICP_PAGES)"
+    echo "$(t main.add_business.ymicp_query NAME="$NAME" YMICP_BASE="$YMICP_BASE" YMICP_PAGES="$YMICP_PAGES")"
 
     # icp_mapp_query.py --endpoint web --out-domains <file>:
     #   - calls /query/web (the website filing, not the mini program /query/mapp)
@@ -211,19 +211,19 @@ if [ "$AUTO" = "1" ]; then
 
     if ! printf '%s\n' "$NAME" | python3 "$YMICP_SCRIPT" "${YMICP_ARGS[@]}"; then
         rc=$?
-        echo "$(t main.add_business.ymicp_failed rc=$rc)" >&2
-        echo "$(t main.add_business.temp_dir_kept AUTO_INPUT_DIR=$AUTO_INPUT_DIR)" >&2
+        echo "$(t main.add_business.ymicp_failed rc="$rc")" >&2
+        echo "$(t main.add_business.temp_dir_kept AUTO_INPUT_DIR="$AUTO_INPUT_DIR")" >&2
         trap - EXIT
         exit $rc
     fi
 
     if [ ! -s "$AUTO_TARGET" ]; then
         echo "$(t main.add_business.target_empty)"
-        echo "$(t main.add_business.temp_dir_kept_debug AUTO_INPUT_DIR=$AUTO_INPUT_DIR)"
+        echo "$(t main.add_business.temp_dir_kept_debug AUTO_INPUT_DIR="$AUTO_INPUT_DIR")"
         trap - EXIT  # the temporary directory is kept, so that the user can cat it
     else
         n=$(wc -l < "$AUTO_TARGET")
-        echo "$(t main.add_business.target_count n=$n)"
+        echo "$(t main.add_business.target_count n="$n")"
     fi
 fi
 

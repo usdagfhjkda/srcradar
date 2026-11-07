@@ -36,7 +36,7 @@ load_config_set() {
 
     local parsed
     if ! parsed="$(python3 "$lib_dir/load_config.py" "$cfg" 2>/dev/null)"; then
-        echo "$(t main.load_config.parse_failed cfg=$cfg)" >&2
+        echo "$(t main.load_config.parse_failed cfg="$cfg")" >&2
         return 3
     fi
     [ -z "$parsed" ] && return 3

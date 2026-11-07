@@ -7,6 +7,9 @@
 #   3. every lookup in the tree hits a key
 #   4. the user-visible output holds no Chinese any more
 #   5. the files are LF only
+#   6. every placeholder of a body is really filled by its call site
+#      (a body that holds a shell-style $VAR passes 1-5 and prints the
+#      variable name to the user, so this check is what catches it)
 #
 # Usage: bash modules/main/i18n/verify_i18n.sh [repo]
 #
@@ -70,6 +73,9 @@ for path in pathlib.Path(".").rglob("*"):
     # the implementation of the lookup itself is not a caller
     if str(path).endswith("modules/main/i18n/i18n.py"):
         continue
+    # the placeholder checker holds the patterns of the lookups
+    if str(path).endswith("modules/main/i18n/check_placeholders.py"):
+        continue
     try:
         src = path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
@@ -105,6 +111,9 @@ if grep -rlU $'\r' --include="*.py" --include="*.sh" --include="*.json" \
 else
     note "ok: the files are LF only"
 fi
+
+# 6. every placeholder is filled by its call site
+python3 "$REPO/modules/main/i18n/check_placeholders.py" "$REPO" || FAIL=1
 
 if [ "$FAIL" -eq 0 ]; then
     echo "I18N ACCEPTED"

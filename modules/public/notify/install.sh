@@ -107,7 +107,7 @@ verify() {
     # non-TTY (--check) does not require the real values to exist, but the example must be there.
     if [ -t 0 ]; then
         if [ -f "$TARGET_CONF" ]; then
-            printf "$(t public.install.notify_real_config_ok)" "$TARGET_CONF"
+            printf "%s\n" "$(t public.install.notify_real_config_ok TARGET_CONF="$TARGET_CONF")"
         else
             warn "$(t public.install.notify_real_config_missing)"
         fi

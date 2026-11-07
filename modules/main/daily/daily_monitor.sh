@@ -415,7 +415,7 @@ if [ -x "$ALGO_DIFF_CPP_BIN" ]; then
         fi
     fi
     if [ -n "$HTTPX_BIN_EFF" ] && [ ! -x "$HTTPX_BIN_EFF" ]; then
-        say "$(t main.daily_monitor.httpx_not_executable HTTPX_BIN_EFF=$HTTPX_BIN_EFF)"
+        say "$(t main.daily_monitor.httpx_not_executable HTTPX_BIN_EFF="$HTTPX_BIN_EFF")"
         HTTPX_BIN_EFF=""
     fi
     # The 3-package scheme: on by default (2 = 2 extra samples, so 3 packages

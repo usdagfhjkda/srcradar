@@ -65,7 +65,7 @@ check_deps() {
 
 install_katana_bin() {
     if command -v katana >/dev/null 2>&1; then
-        log "$(t public.katana_install.already_in_path)"
+        log "$(t public.katana_install.already_in_path path="$(command -v katana)")"
         return 0
     fi
     log "go install projectdiscovery/katana/v2/cmd/katana@latest"
@@ -83,9 +83,9 @@ install_katana_bin() {
 
 write_example() {
     if [ -f "$EXAMPLE_CONF" ]; then
-        log "$(t public.katana_install.example_exists EXAMPLE_CONF=$EXAMPLE_CONF)"
+        log "$(t public.katana_install.example_exists EXAMPLE_CONF="$EXAMPLE_CONF")"
     else
-        log "$(t public.katana_install.writing_example EXAMPLE_CONF=$EXAMPLE_CONF)"
+        log "$(t public.katana_install.writing_example EXAMPLE_CONF="$EXAMPLE_CONF")"
         mkdir -p "$(dirname "$EXAMPLE_CONF")"
         cat > "$EXAMPLE_CONF" <<'CONFEOF'
 # katana module config placeholder template
@@ -119,7 +119,7 @@ CONFEOF
 uninstall() {
     # do not delete the katana binary (the user may have installed it globally)
     rm -f "$TARGET_CONF"
-    log "$(t public.katana_install.conf_removed TARGET_CONF=$TARGET_CONF)"
+    log "$(t public.katana_install.conf_removed TARGET_CONF="$TARGET_CONF")"
     log "$(t public.katana_install.binary_not_removed)"
 }
 

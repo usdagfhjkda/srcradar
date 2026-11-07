@@ -140,7 +140,7 @@ if [ -d "$SCAN_DIR" ] && [ -n "$(ls -A "$SCAN_DIR" 2>/dev/null)" ]; then
     ls -la "$SCAN_DIR/" >&2
     echo "" >&2
     echo "$(t main.pipeline.leftover_usually)" >&2
-    echo "$(t main.pipeline.leftover_attaches BUSINESS=$BUSINESS)" >&2
+    echo "$(t main.pipeline.leftover_attaches BUSINESS="$BUSINESS")" >&2
     echo "$(t main.pipeline.leftover_clean_first)" >&2
     echo "      rm -rf $SCAN_DIR && mkdir -p $SCAN_DIR" >&2
     exit 2
@@ -252,13 +252,13 @@ PY
 )
         if [ -z "$BIZ_ID" ]; then
             rm -f "$TMP_T" "$TMP_E"
-            echo "$(t main.pipeline.business_not_in_db BUSINESS=$BUSINESS)" >&2
+            echo "$(t main.pipeline.business_not_in_db BUSINESS="$BUSINESS")" >&2
             exit 1
         fi
 
         if [ ! -s "$TMP_T" ]; then
             rm -f "$TMP_T" "$TMP_E"
-            echo "$(t main.pipeline.no_measurable_scope BUSINESS=$BUSINESS)" >&2
+            echo "$(t main.pipeline.no_measurable_scope BUSINESS="$BUSINESS")" >&2
             exit 1
         fi
 
@@ -289,7 +289,7 @@ cleanup_input() {
         return 0
     fi
     if [ $rc -ne 0 ] && [ -n "$KEEP_ON_FAIL" ]; then
-        echo "$(t main.pipeline.failed rc=$rc)"
+        echo "$(t main.pipeline.failed rc="$rc")"
         return 0
     fi
 
@@ -316,7 +316,7 @@ cleanup_input() {
     fi
 
     if [ "$INPUT_GENERATED" = 1 ]; then
-        echo "$(t main.pipeline.cleaned_temp_input TARGET_FILE=$TARGET_FILE EXCLUDE_FILE=$EXCLUDE_FILE)"
+        echo "$(t main.pipeline.cleaned_temp_input TARGET_FILE="$TARGET_FILE" EXCLUDE_FILE="$EXCLUDE_FILE")"
         # v0.1.0: also rm INPUT_PATH/target.txt + exclude.txt when INPUT_PATH
         # is an external dir. Mirrors scope_import.sh behaviour. Failed
         # runs already rm these by virtue of unconditional trap.

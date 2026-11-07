@@ -80,13 +80,13 @@ while IFS= read -r line || [ -n "$line" ]; do
 
   if [ "$is_wildcard" = "yes" ]; then
     echo "$line" >> "$WILDCARD_OUT"
-    echo "$(t main.check_wildcard.wildcard_line line=$line)"
+    echo "$(t main.check_wildcard.wildcard_line line="$line")"
   else
     echo "$line" >> "$NORMAL_OUT"
     if [[ "$line" == *\** ]]; then
-      echo "$(t main.check_wildcard.normal_line line=$line)"
+      echo "$(t main.check_wildcard.normal_line line="$line")"
     else
-      echo "$(t main.check_wildcard.precise_line line=$line)"
+      echo "$(t main.check_wildcard.precise_line line="$line")"
     fi
   fi
 done < "$INPUT"
@@ -94,6 +94,6 @@ done < "$INPUT"
 echo
 echo "$(t main.check_wildcard.done)"
 _i18n_val=$(wc -l < "$WILDCARD_OUT")
-echo "$(t main.check_wildcard.wildcard_out count="$_i18n_val")"
+echo "$(t main.check_wildcard.wildcard_out out_file="$WILDCARD_OUT" count="$_i18n_val")"
 _i18n_val=$(wc -l < "$NORMAL_OUT")
-echo "$(t main.check_wildcard.normal_out count="$_i18n_val")"
+echo "$(t main.check_wildcard.normal_out out_file="$NORMAL_OUT" count="$_i18n_val")"

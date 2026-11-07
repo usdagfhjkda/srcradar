@@ -65,8 +65,8 @@ def should_run(db_path: str, business_id: int, cadence_days: int) -> tuple[bool,
     age = datetime.now(timezone.utc).timestamp() - last_ts
     age_days = age / 86400.0
     if age_days >= cadence_days:
-        return True, t("main.alterx_runs.overdue", {"age_days": age_days, "cadence_days": cadence_days})
-    return False, t("main.alterx_runs.not_due", {"age_days": age_days, "cadence_days": cadence_days})
+        return True, t("main.alterx_runs.overdue", {"age_days": f"{age_days:.1f}", "cadence_days": cadence_days})
+    return False, t("main.alterx_runs.not_due", {"age_days": f"{age_days:.1f}", "cadence_days": cadence_days})
 
 
 def mark_ran(db_path: str, business_id: int, wordlist_hash: str,

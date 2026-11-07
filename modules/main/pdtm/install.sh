@@ -59,7 +59,7 @@ check_go() {
 # ---- install the pdtm orchestrator (go install into ~/go/bin/) ----
 install_pdtm_bin() {
     if command -v pdtm >/dev/null 2>&1 || [ -x "$HOME/go/bin/pdtm" ]; then
-        log "$(t main.pdtm_install.already_present HOME=$HOME)"
+        log "$(t main.pdtm_install.already_present HOME="$HOME")"
         return 0
     fi
     log "go install pdtm -> $HOME/go/bin/pdtm"
@@ -85,7 +85,7 @@ install_pdtm_tools() {
     local miss=0
     for t in dnsx httpx subfinder alterx naabu; do
         if [ ! -x "$HOME/.pdtm/go/bin/$t" ]; then
-            warn "$(t main.pdtm_install.tool_missing t=$t HOME=$HOME)"
+            warn "$(t main.pdtm_install.tool_missing t="$t" HOME="$HOME")"
         else
             printf "  OK %s\n" "$t"
         fi
@@ -100,15 +100,15 @@ install_cdnmatch() {
     local bin="$SCRIPT_DIR/bin/cdnmatch"
 
     if [ ! -d "$cdn_dir" ]; then
-        err "$(t main.pdtm_install.cdn_dir_missing cdn_dir=$cdn_dir)"
+        err "$(t main.pdtm_install.cdn_dir_missing cdn_dir="$cdn_dir")"
         return 3
     fi
     if [ -x "$bin" ]; then
-        log "$(t main.pdtm_install.cdnmatch_exists bin=$bin)"
+        log "$(t main.pdtm_install.cdnmatch_exists bin="$bin")"
         return 0
     fi
     if [ ! -d "$vendor_dir" ]; then
-        log "$(t main.pdtm_install.cloning_cdncheck vendor_dir=$vendor_dir)"
+        log "$(t main.pdtm_install.cloning_cdncheck vendor_dir="$vendor_dir")"
         git clone --depth 1 https://github.com/projectdiscovery/cdncheck.git "$vendor_dir"
     fi
     (
@@ -118,7 +118,7 @@ install_cdnmatch() {
         go build -o "$bin" .
     )
     [ -x "$bin" ] || { err "$(t main.pdtm_install.cdnmatch_missing path="$bin")"; return 4; }
-    log "$(t main.pdtm_install.cdnmatch_installed bin=$bin)"
+    log "$(t main.pdtm_install.cdnmatch_installed bin="$bin")"
     return 0
 }
 
@@ -159,7 +159,7 @@ install_massdns() {
     cp /tmp/massdns/bin/massdns "$dst"
     rm -rf /tmp/massdns
     [ -x "$dst" ] || { err "massdns install failed: $dst"; return 3; }
-    log "$(t main.pdtm_install.massdns_installed dst=$dst)"
+    log "$(t main.pdtm_install.massdns_installed dst="$dst")"
     return 0
 }
 
@@ -302,7 +302,7 @@ uninstall() {
     # shellcheck disable=SC2115
     rm -rf -- "$SCRIPT_DIR/bin" "$SCRIPT_DIR/cdncheck"
     log "$(t main.pdtm_install.cleaned)"
-    log "$(t main.pdtm_install.orchestrator_stays HOME=$HOME)"
+    log "$(t main.pdtm_install.orchestrator_stays HOME="$HOME")"
     return 0
 }
 

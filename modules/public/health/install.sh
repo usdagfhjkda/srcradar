@@ -141,7 +141,7 @@ verify() {
     [ -f "$SCRIPT_DIR/install_cron.sh" ] && printf "  OK install_cron.sh\n" || { err "$(t public.health.install.install_cron_script_missing)"; rc=1; }
 
     if [ -f "$NOTIFY_SEND" ]; then
-        printf "$(t public.install.health_notify_send_ok)" "$NOTIFY_SEND"
+        printf "%s\n" "$(t public.install.health_notify_send_ok NOTIFY_SEND="$NOTIFY_SEND")"
     else
         err "$(t public.install.health_notify_send_missing NOTIFY_SEND=$NOTIFY_SEND)"; rc=1
     fi
@@ -156,7 +156,7 @@ verify() {
 
     # the real conf is optional; hint about it but do not fail verify
     if [ -f "$TARGET_CONF" ]; then
-        printf "$(t public.install.health_real_config_ok)" "$TARGET_CONF"
+        printf "%s\n" "$(t public.install.health_real_config_ok TARGET_CONF="$TARGET_CONF")"
     else
         warn "$(t public.install.health_real_config_missing)"
     fi
