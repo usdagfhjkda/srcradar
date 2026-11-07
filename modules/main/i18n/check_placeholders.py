@@ -27,7 +27,6 @@ Usage: python3 check_placeholders.py [repo]
 import json
 import os
 import re
-import subprocess
 import sys
 
 REPO = sys.argv[1] if len(sys.argv) > 1 else "."
@@ -165,9 +164,23 @@ def python_call_args(src):
         yield key, names
 
 
+def source_files():
+    """every shell and python file of the working tree
+
+    The scan must not depend on the git index: a file that is not tracked
+    yet (a new script) is still part of the tree the gate checks.
+    """
+    skip_dirs = {".git", "__pycache__", ".ruff_cache", ".pytest_cache",
+                 ".mypy_cache", ".hermes", "vendor", ".vendor"}
+    for root, dirs, files in os.walk("."):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for name in files:
+            if name.endswith((".sh", ".py")):
+                yield os.path.join(root, name)[2:]  # drop the leading ./
+
+
 passed = {}
-for path in subprocess.run(["git", "ls-files", "*.sh", "*.py"], capture_output=True,
-                           text=True, check=False).stdout.split():
+for path in source_files():
     try:
         src = open(path, encoding="utf-8").read()
     except (UnicodeDecodeError, OSError):
@@ -181,8 +194,7 @@ for path in subprocess.run(["git", "ls-files", "*.sh", "*.py"], capture_output=T
 # the python call sites that pass a VARIABLE: the body of such a key cannot
 # be checked by name, so the key is exempt from check 2
 variable_call = set()
-for path in subprocess.run(["git", "ls-files", "*.sh", "*.py"], capture_output=True,
-                           text=True, check=False).stdout.split():
+for path in source_files():
     try:
         src = open(path, encoding="utf-8").read()
     except (UnicodeDecodeError, OSError):
