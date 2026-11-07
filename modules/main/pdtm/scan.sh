@@ -19,6 +19,8 @@
 export PATH="$PATH:$HOME/.pdtm/go/bin"
 source "$(cd "$(dirname "$0")" && pwd)/../lib/load_config.sh"
 load_config_set "$(cd "$(dirname "$0")" && pwd)/../../../config/pdtm.conf" "$(cd "$(dirname "$0")" && pwd)/../lib"
+# shellcheck source=modules/main/lib/resolve_resolvers.sh
+source "$(cd "$(dirname "$0")" && pwd)/../lib/resolve_resolvers.sh"
 # 2026-10-03: source resolve_tools.sh - the httpx/dnsx paths are read from
 # config/pdtm.conf automatically (env override > the conf injection > the default
 # fallback), the hardcoded ~/.pdtm/go/bin/ is gone.
@@ -37,7 +39,10 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/
 # resolvers_file, the others through RESOLVERS_CSV.
 # See README section 8-11, the cross-tool trap matrix (the cdncheck=-file trap, the
 # subfinder=-csv trap).
-resolvers_file="${resolvers_file:-resolvers}"
+# the list in effect: the helper resolves the field of the conf, the set
+# that the operator picked and the language (the auto mode)
+resolvers_file="$(resolve_resolvers_file)" || {
+    echo "$(t main.scan.resolvers_unreadable file="$resolvers_file")" >&2; exit 1; }
 RESOLVERS_CSV="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
 [ -z "$RESOLVERS_CSV" ] && { echo "[-] $(t main.scan.resolvers_unreadable file="$resolvers_file")" >&2; exit 1; }
 TARGET="target.txt"

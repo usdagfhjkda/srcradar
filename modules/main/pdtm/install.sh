@@ -28,6 +28,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# the helper resolves the resolver list that is in effect
+# shellcheck source=modules/main/lib/resolve_resolvers.sh
+source "$SCRIPT_DIR/../lib/resolve_resolvers.sh"
 cd "$SCRIPT_DIR"
 
 log()  { printf '[pdtm] %s\n' "$*"; }
@@ -267,7 +270,27 @@ write_wordlists_config() {
     local cfg="$SCRIPT_DIR/../../../config/pdtm.conf"
     local tool_dir="$HOME/.pdtm/go/bin"
     local resolvers="$SCRIPT_DIR/resolvers"
+    # the set that the operator picked. The field is never overwritten, so
+    # an install does not reset the choice; the default is the global set.
+    local resolver_set_val="global"
+    if [ -f "$cfg" ]; then
+        resolver_set_val="$(sed -n 's/^[[:space:]]*resolver_set[[:space:]]*=[[:space:]]*//p' \
+                               "$cfg" | head -1 | tr -d '"\''[:space:]')"
+        [ -n "$resolver_set_val" ] || resolver_set_val="global"
+    fi
     mkdir -p "$(dirname "$cfg")"
+
+    # the path of the list that the set resolves to. The field of the conf
+    # stays in the scope of the helper, so the custom set still resolves to
+    # the path that the operator wrote.
+    local resolvers_file_val
+    resolver_set="$resolver_set_val"
+    resolvers_file="$(sed -n 's/^[[:space:]]*resolvers_file[[:space:]]*=[[:space:]]*//p' \
+                         "$cfg" | head -1 | tr -d '"\''[:space:]')"
+    resolvers_file_val="$(resolve_resolvers_file || true)"
+    if [ -z "$resolvers_file_val" ]; then
+        resolvers_file_val="$resolvers/global"
+    fi
 
     local tmp
     tmp="$(mktemp)"
@@ -276,6 +299,7 @@ write_wordlists_config() {
             /^wordlists_dir=/ { next }
             /^httpx_bin=/     { next }
             /^dnsx_bin=/      { next }
+            /^resolver_set=/  { next }
             /^resolvers_file=/ { next }
             { print }
         ' "$cfg" > "$tmp" || cp /dev/null "$tmp"
@@ -285,7 +309,8 @@ write_wordlists_config() {
 wordlists_dir=$wl_dir
 httpx_bin=$tool_dir/httpx
 dnsx_bin=$tool_dir/dnsx
-resolvers_file=$resolvers
+resolver_set=$resolver_set_val
+resolvers_file=$resolvers_file_val
 EOF
 
     mv "$tmp" "$cfg"
@@ -294,7 +319,8 @@ EOF
     log "  wordlists_dir=$wl_dir"
     log "  httpx_bin=$tool_dir/httpx"
     log "  dnsx_bin=$tool_dir/dnsx"
-    log "  resolvers_file=$resolvers"
+    log "  resolver_set=$resolver_set_val"
+    log "  resolvers_file=$resolvers_file_val"
 }
 
 # ---- uninstall ----

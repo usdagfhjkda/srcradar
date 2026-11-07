@@ -405,13 +405,17 @@ if [ -x "$ALGO_DIFF_CPP_BIN" ]; then
         source "$RECON_ROOT/main/lib/load_config.sh"
         # shellcheck disable=SC1090
         source "$RECON_ROOT/main/pdtm/lib/resolve_tools.sh"
+        # shellcheck source=modules/main/lib/resolve_resolvers.sh
+        source "$RECON_ROOT/main/lib/resolve_resolvers.sh"
         # inject the httpx_bin / resolvers_file from the conf into the scope of this script
         load_config_set "$PDTMCONF_EFF" "$RECON_ROOT/main/lib"
         if [ -z "$HTTPX_BIN_EFF" ]; then
             HTTPX_BIN_EFF="$(resolve_tool httpx "$HOME/.pdtm/go/bin/httpx")"
         fi
         if [ -z "$RESOLVERS_EFF" ]; then
-            RESOLVERS_EFF="${resolvers_file:-}"
+            # the list in effect: the helper resolves the field of the conf,
+            # the set that the operator picked and the language (auto)
+            RESOLVERS_EFF="$(resolve_resolvers_file || true)"
         fi
     fi
     if [ -n "$HTTPX_BIN_EFF" ] && [ ! -x "$HTTPX_BIN_EFF" ]; then

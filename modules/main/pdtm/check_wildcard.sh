@@ -26,13 +26,18 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/
 SCRIPT_DIR_CW="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR_CW/../lib/load_config.sh"
 load_config_set "$SCRIPT_DIR_CW/../../../config/pdtm.conf" "$SCRIPT_DIR_CW/../lib"
+# shellcheck source=modules/main/lib/resolve_resolvers.sh
+source "$SCRIPT_DIR_CW/../lib/resolve_resolvers.sh"
 
 # ---- config ----
 INPUT="${1:-/dev/stdin}"
 WILDCARD_OUT="wildcard.txt"
 NORMAL_OUT="no_wildcard.txt"
 # resolver source stays consistent with the ./resolvers file (see README section 8-11)
-resolvers_file="${resolvers_file:-resolvers}"
+# the list in effect: the helper resolves the field of the conf, the set
+# that the operator picked and the language (the auto mode)
+resolvers_file="$(resolve_resolvers_file)" || {
+    echo "$(t main.check_wildcard.resolvers_unreadable file="$resolvers_file")" >&2; exit 1; }
 RESOLVERS="$(tr '\n' ',' < "$resolvers_file" | sed 's/,$//')"
 [ -z "$RESOLVERS" ] && { echo "[-] $(t main.check_wildcard.resolvers_unreadable file="$resolvers_file")" >&2; exit 1; }
 PROBES=3

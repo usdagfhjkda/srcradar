@@ -617,11 +617,11 @@ find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
 
 - cdncheck 是唯一在主流水线里被反向坑的工具(已通过 cdnmatch 间接解决)。**新代码不要再直调 `cdncheck` 二进制**;若要 fallback,见 已知问题 §10 的 `cdncheck -cdn -waf` + CSV + `< /dev/null` 三件套。
 - subfinder 是反向坑 —— 它写文档说接受 CSV,但**实测 CSV 路径 0 命中**。所以唯一一次 file 调用在 `scan.sh:182/378`(subfinder);同文件内 dnsx 改用 CSV。
-- scanner.sh / check_wildcard.sh 不调 subfinder,统一用 CSV 形式,均从 `pdtm/resolvers` 文件派生。
+- scanner.sh / check_wildcard.sh 不调 subfinder,统一用 CSV 形式,均从当前生效的名单派生(见 resolver 集合一节)。
 
 **统一约定(2026-08-01 起)**:
 
-- **单一事实源 = `pdtm/resolvers` 文件**。改这个文件,所有脚本的 CSV 与 file 视图自动跟随。
+- **单一事实源 = 当前生效的名单**。即 `config/pdtm.conf` 的 `resolver_set` 字段所指的那个集合文件。改这个文件,所有脚本的 CSV 与 file 视图自动跟随。
 - **派生方式**(`scanner.sh` / `scan.sh` / `check_wildcard.sh` 各按需):
   ```bash
   RESOLVERS_FILE="${RESOLVERS_FILE:-resolvers}"   # subfinder 走这条
@@ -631,9 +631,9 @@ find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
   - subfinder → `-r "$RESOLVERS_FILE"`(file,必须)
   - dnsx / httpx / naabu / cdncheck(未来兜底)→ `-r "$RESOLVERS"` 或 `-r "$RESOLVERS_CSV"`(CSV)
 - **环境覆写**:`export RESOLVERS_FILE=/path/to/file ./scanner.sh` 一行切换全部。
-- **DNS 选型规则**:`pdtm/resolvers` 文件排序原则 = **延迟快 → 慢**(用户按实测 / 业务场景自行排序,具体名单见仓库)。
+- **DNS 选型规则**:名单排序原则 = **延迟快 → 慢**(用户按实测 / 业务场景自行排序,具体名单见仓库)。
 
-**`pdtm/resolvers` 文件**:仓库内当前名单由 install.sh 自动维护,请直接查看 `pdtm/resolvers` 文件本身。
+**名单**:放在 `modules/main/pdtm/resolvers/` 下,一个集合一个文件(`cn` = 境内解析器,`global` = 国际公共解析器)。当前生效的集合由 `config/pdtm.conf` 的 `resolver_set` 字段决定,`./manage/set_resolvers.sh --set cn|global|auto` 用来切换。`auto` 模式跟随语言:中文即境内集合,其它语言即 global 集合。安装脚本只在字段缺失时写默认值,所以安装不会重置已做的选择。
 
 ### 12. 8 月 2 日合入的修复与新行为(cdncheck 之后的二次体检)
 
@@ -687,7 +687,7 @@ scanner.sh inside pipeline  600 秒 timeout,0 输出
 
 #### 12.4 resolvers 文件排序
 
-`pdtm/resolvers` 文件按延迟高低排序(快 → 慢)。具体名单由 install.sh 自动维护,详细取值见仓库文件本身。
+当前生效的名单按延迟高低排序(快 → 慢)。各集合放在 `modules/main/pdtm/resolvers/` 下,详细取值见仓库文件本身。
 
 #### 12.5 残留:精确子域在 glob case 下仍触发 wasted subfinder 调用
 

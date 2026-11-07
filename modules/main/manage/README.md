@@ -17,6 +17,8 @@ manage/
 ├── add_business.sh          # the main script that adds a business
 ├── set_config.sh            # shows / changes the recon_business_config of one business
 ├── set_lang.sh              # shows / changes the language of the user-visible output
+└── set_resolvers.sh         # shows / changes the DNS resolver set that is in effect
+├── set_lang.sh              # shows / changes the language of the user-visible output
 └── seeds/                   # the seed data of the businesses (TSV, tracked by git)
 ```
 
@@ -115,6 +117,33 @@ alone, and the file is written atomically.
 
 `SRCDAR_CONFIG_DIR` overrides the directory of the config, exactly like the
 lookup does, so a test or a container can keep its own setting.
+
+## The DNS resolver set: `set_resolvers.sh`
+
+The lists live in `modules/main/pdtm/resolvers/`, one file per set:
+
+| The set | The content |
+|---|---|
+| `cn` | the resolvers of the domestic operators |
+| `global` | the public resolvers of the world |
+
+The domestic resolvers answer the foreign names differently from the
+public ones, and the difference shows in the assets that are collected.
+
+```bash
+./manage/set_resolvers                  # shows the set in effect
+./manage/set_resolvers --set cn         # the domestic set
+./manage/set_resolvers --set global     # the public resolvers of the world
+./manage/set_resolvers --set auto       # the language decides
+```
+
+The `auto` mode follows the language: the Chinese language means the
+domestic set, every other language means the global set. The language is
+the field that `set_lang.sh` writes, so the two settings stay in step.
+
+The choice is the `resolver_set` field of `config/pdtm.conf`. The
+installer writes the default only when the field is missing, so an install
+does not reset the choice of the operator.
 
 ## The adjustment of the configuration of a business: `set_config.sh`
 

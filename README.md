@@ -622,11 +622,11 @@ A new `pdtm/cdnmatch/` — a Go wrapper that calls the internal `Check()` (the t
 
 - cdncheck is the only tool of the main pipeline that is trapped the other way round (it was solved indirectly through cdnmatch). **The new code must not call the `cdncheck` binary any more**; for a fallback, see the three pieces `cdncheck -cdn -waf` + the CSV + `< /dev/null` of the known problem §10.
 - subfinder is trapped the other way round — its documentation says that it accepts a CSV, but **the CSV path was measured with 0 hits**. So the only call with a file is the one of subfinder at `scan.sh:182/378`; the dnsx of the same file uses the CSV.
-- scanner.sh / check_wildcard.sh do not call subfinder, they use the form of the CSV everywhere, and it is derived from the file `pdtm/resolvers`.
+- scanner.sh / check_wildcard.sh do not call subfinder, they use the form of the CSV everywhere, and it is derived from the list that is in effect (see the section of the resolver set below).
 
 **The unified convention (since 2026-08-01)**:
 
-- **The single source of truth = the file `pdtm/resolvers`**. Change that file and the CSV and the file view of every script follow by themselves.
+- **The single source of truth = the list that is in effect**. It is the file of the set that the `resolver_set` field of `config/pdtm.conf` points to. Change that file and the CSV and the file view of every script follow by themselves.
 - **The derivation** (each of `scanner.sh` / `scan.sh` / `check_wildcard.sh` takes what it needs):
   ```bash
   RESOLVERS_FILE="${RESOLVERS_FILE:-resolvers}"   # subfinder goes through this one
@@ -636,9 +636,9 @@ A new `pdtm/cdnmatch/` — a Go wrapper that calls the internal `Check()` (the t
   - subfinder → `-r "$RESOLVERS_FILE"` (the file, it is mandatory)
   - dnsx / httpx / naabu / cdncheck (the fallback of the future) → `-r "$RESOLVERS"` or `-r "$RESOLVERS_CSV"` (the CSV)
 - **The override of the environment**: `export RESOLVERS_FILE=/path/to/file ./scanner.sh` switches all of them with one line.
-- **The rule of the choice of the DNS**: the order of the file `pdtm/resolvers` = **the fast latency → the slow one** (the user sorts it by the measurement / by the business case, the exact list is in the repository).
+- **The rule of the choice of the DNS**: the order of the list = **the fast latency → the slow one** (the user sorts it by the measurement / by the business case, the exact list is in the repository).
 
-**The file `pdtm/resolvers`**: the list that is in the repository at the moment is maintained by install.sh automatically, so look at the file `pdtm/resolvers` itself.
+**The lists**: they live in `modules/main/pdtm/resolvers/`, one file per set (`cn` = the domestic resolvers, `global` = the public resolvers of the world). The set that is in effect is the `resolver_set` field of `config/pdtm.conf`, and `./manage/set_resolvers.sh --set cn|global|auto` changes it. The `auto` mode follows the language: the Chinese language means the domestic set, every other language means the global set. The installer writes the default only when the field is missing, so an install does not reset the choice.
 
 ### 12. The fixes and the new behaviours that were merged on the 2nd of August (the second check up after the cdncheck)
 
@@ -692,7 +692,7 @@ The output of `target_glob.py:49` was `(?:^|\.){escaped}$` — the syntax of a n
 
 #### 12.4 The order of the resolvers file
 
-The file `pdtm/resolvers` is sorted by the latency (the fast one → the slow one). The exact list is maintained by install.sh automatically, and the detailed values are in the file of the repository itself.
+The list that is in effect is sorted by the latency (the fast one → the slow one). The sets live in `modules/main/pdtm/resolvers/`, and the detailed values are in the files of the repository itself.
 
 #### 12.5 What is left: the exact subdomain still triggers a wasted call of subfinder in the case of a glob
 

@@ -12,6 +12,8 @@ manage/
 ├── add_business.sh          # 新增业务主脚本
 ├── set_config.sh            # 查看 / 改单个业务的 recon_business_config
 ├── set_lang.sh              # 查看 / 切换用户可见输出的语言
+└── set_resolvers.sh         # 查看 / 切换当前生效的 DNS resolver 集合
+├── set_lang.sh              # 查看 / 切换用户可见输出的语言
 └── seeds/                   # 业务 seed 数据 (TSV, git 跟踪)
 ```
 
@@ -99,6 +101,30 @@ i18n 模块的安装脚本（`i18n/install.sh --lang`）**不会**覆盖已存�
 
 `SRCDAR_CONFIG_DIR` 可以覆盖配置目录（和查找侧一致），所以测试或容器
 可以有自己的设置。
+
+## DNS resolver 集合：`set_resolvers.sh`
+
+名单放在 `modules/main/pdtm/resolvers/` 下,一个集合一个文件:
+
+| 集合 | 内容 |
+|---|---|
+| `cn` | 境内运营商的解析器 |
+| `global` | 国际公共解析器 |
+
+境内解析器对境外域名的应答与国际公共解析器不同,差异会体现在采到的资产上。
+
+```bash
+./manage/set_resolvers                  # 查看当前生效的集合
+./manage/set_resolvers --set cn         # 切到境内集合
+./manage/set_resolvers --set global     # 切到国际公共解析器
+./manage/set_resolvers --set auto       # 跟随语言
+```
+
+`auto` 模式跟随语言:中文即境内集合,其它语言即 global 集合。语言由
+`set_lang.sh` 写入,两者天然同步。
+
+选择记录在 `config/pdtm.conf` 的 `resolver_set` 字段。安装脚本只在字段缺失
+时写默认值,所以安装不会重置已做的选择。
 
 ## 业务级配置调整：`set_config.sh`
 
