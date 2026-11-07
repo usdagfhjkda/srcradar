@@ -11,6 +11,7 @@ manage/
 ├── README.md                # 本文件
 ├── add_business.sh          # 新增业务主脚本
 ├── set_config.sh            # 查看 / 改单个业务的 recon_business_config
+├── set_lang.sh              # 查看 / 切换用户可见输出的语言
 └── seeds/                   # 业务 seed 数据 (TSV, git 跟踪)
 ```
 
@@ -72,6 +73,32 @@ ExampleCo(湖南)信息技术有限公司	核心
   ```bash
   cd ../db_align && ./bin/db_align -n '<业务名>' -all
   ```
+
+## 输出的语言：`set_lang.sh`
+
+命令行、dashboard、日报和邮件正文共用一个设置，解析顺序是：
+
+1. `SRCDAR_LANG` 环境变量（临时，给 CI 用）
+2. `config/lang.conf` 的 `lang` 字段（持久的选择）
+3. 默认 `en`
+
+`set_lang.sh` 读写这个 `lang` 字段，所以它改的是持久选择：
+
+```bash
+./manage/set_lang.sh                    # 查看当前语言
+./manage/set_lang.sh --lang zh          # 切到中文
+./manage/set_lang.sh --lang en          # 切到英文
+```
+
+i18n 模块的安装脚本（`i18n/install.sh --lang`）**不会**覆盖已存在的
+`config/lang.conf`（那里 operator 的选择优先）。`set_lang.sh` 才是专门的
+切换入口。
+
+别名会归一化（`zh-CN` / `cn` / `chinese` → `zh`，`en-US` / `english` →
+`en`），不支持的语言会被拒绝且文件不动，文件是原子写入的。
+
+`SRCDAR_CONFIG_DIR` 可以覆盖配置目录（和查找侧一致），所以测试或容器
+可以有自己的设置。
 
 ## 业务级配置调整：`set_config.sh`
 

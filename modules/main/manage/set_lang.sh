@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# set_lang.sh — show or change the language of the user-visible output.
+#
+# Usage:
+#   ./manage/set_lang.sh                    # show the language in effect
+#   ./manage/set_lang.sh --lang zh          # switch to Chinese
+#   ./manage/set_lang.sh --lang en          # switch to English
+#
+# The language of the CLI, of the dashboard, of the daily report and of the
+# mail body follows one setting. Its resolution order is:
+#
+#   1. the SRCDAR_LANG environment variable  (temporary, for the CI)
+#   2. the lang field of config/lang.conf    (the persistent choice)
+#   3. en as the default
+#
+# This script reads and writes the lang field of config/lang.conf, so it
+# changes the persistent choice. It is the counterpart of the installer of
+# the i18n module, which never overwrites an existing config (the operator's
+# choice wins there); this one is the deliberate switch.
+#
+# Rules:
+#   - without --lang nothing is written; the current language is shown
+#   - the language is normalised: zh / zh-CN / cn / chinese -> zh,
+#     en / en-US / english -> en
+#   - an unknown language is refused, the file is left alone
+#   - the file is written atomically (a temporary file + a rename), so a
+#     crash cannot leave a half-written config behind
+#   - SRCDAR_CONFIG_DIR overrides the directory of the config, exactly like
+#     the lookup does (a test or a container scenario)
+#
+# Exit codes:
+#   0  success
+#   1  bad argument or unknown language
+#   2  the config directory could not be found
+
+set -euo pipefail
+
+
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
+
+LANG_ARG=""
+
+usage() {
+    sed -n '3,8p' "$0"
+    exit "${1:-0}"
+}
+
+# ---- the config directory: the same resolution as the lookup ---------------
+# SRCDAR_CONFIG_DIR wins, then the config/ directory of the repository root.
+# The root is the one the lookup computed (I18N_ROOT of i18n.sh), so the two
+# sides cannot drift apart. RECON_ROOT is the modules/ directory, not the
+# root, so it cannot be used here.
+config_dir() {
+    if [ -n "${SRCDAR_CONFIG_DIR:-}" ]; then
+        printf '%s' "$SRCDAR_CONFIG_DIR"
+    elif [ -n "${I18N_ROOT:-}" ]; then
+        printf '%s/config' "$I18N_ROOT"
+    else
+        printf '%s' ""
+    fi
+}
+
+# Map a language alias onto a known code; print nothing when unrecognised.
+normalize_lang() {
+    case "$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z' | tr -d ' ')" in
+        zh|zh-cn|zh_cn|zh-hans|cn|chinese) printf 'zh' ;;
+        en|en-us|en_us|english)             printf 'en' ;;
+        *)                                  printf '' ;;
+    esac
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --lang)  [ $# -ge 2 ] || { echo "$(t main.set_lang.arg_needs_value)" >&2; usage 1; }
+                  LANG_ARG="$2"; shift 2 ;;
+        -h|--help) usage 0 ;;
+        *) echo "$(t main.set_lang.unknown_arg arg="$1")" >&2; usage 1 ;;
+    esac
+done
+
+CONF_DIR="$(config_dir)"
+if [ -z "$CONF_DIR" ]; then
+    echo "the repository root could not be located" >&2
+    exit 2
+fi
+CONF_FILE="$CONF_DIR/lang.conf"
+
+# ---- show ------------------------------------------------------------------
+current_lang() {
+    # the environment variable wins over the file, exactly like the lookup
+    local from_env
+    from_env="$(normalize_lang "${SRCDAR_LANG:-}")"
+    if [ -n "$from_env" ]; then
+        printf '%s' "$from_env"
+        return 0
+    fi
+    if [ -f "$CONF_FILE" ]; then
+        local from_file
+        from_file="$(sed -n 's/^[[:space:]]*lang[[:space:]]*=[[:space:]]*//p' \
+                       "$CONF_FILE" 2>/dev/null | head -1 | tr -d '"'\''[:space:]')"
+        from_file="$(normalize_lang "$from_file")"
+        [ -n "$from_file" ] && { printf '%s' "$from_file"; return 0; }
+    fi
+    printf 'en'
+}
+
+CURRENT="$(current_lang)"
+
+if [ -z "$LANG_ARG" ]; then
+    # nothing to write: report the language in effect
+    echo "$(t main.set_lang.current lang="$CURRENT")"
+    if [ -n "${SRCDAR_LANG:-}" ]; then
+        echo "$(t main.set_lang.current_from_env lang="$CURRENT")"
+    fi
+    exit 0
+fi
+
+# ---- switch ----------------------------------------------------------------
+NEW_LANG="$(normalize_lang "$LANG_ARG")"
+if [ -z "$NEW_LANG" ]; then
+    echo "$(t main.set_lang.unsupported lang="$LANG_ARG")" >&2
+    exit 1
+fi
+
+if [ ! -d "$CONF_DIR" ]; then
+    if ! mkdir -p "$CONF_DIR" 2>/dev/null; then
+        echo "$(t main.set_lang.config_dir_failed path="$CONF_DIR")" >&2
+        exit 2
+    fi
+fi
+
+# The file keeps the comment header of the one the installer writes, so the
+# operator still sees how the language is resolved.
+cat > "$CONF_FILE.tmp.$$" <<EOF
+# srcradar — UI language config (auto-generated by modules/main/i18n/install.sh)
+#
+# lang selects the language of user-visible output:
+#   - command line --help and runtime messages
+#   - the dashboard pages
+#   - the daily report and the notification email body
+#
+# Resolution order (handled by modules/main/i18n/i18n.{py,sh}):
+#   1) the SRCDAR_LANG environment variable
+#   2) the lang field in this file
+#   3) en as the default
+#
+# Accepted values: zh (Chinese) / en (English)
+#
+# This file lives under .gitignore and is not tracked; delete it and
+# install.sh will regenerate it.
+lang=$NEW_LANG
+EOF
+mv -f "$CONF_FILE.tmp.$$" "$CONF_FILE"
+
+if [ "$NEW_LANG" = "$CURRENT" ]; then
+    echo "$(t main.set_lang.unchanged lang="$NEW_LANG")"
+else
+    echo "$(t main.set_lang.changed from="$CURRENT" to="$NEW_LANG")"
+fi
+echo "$(t main.set_lang.path path="$CONF_FILE")"

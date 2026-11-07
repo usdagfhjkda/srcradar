@@ -16,6 +16,7 @@ manage/
 ├── README.md                # this file
 ├── add_business.sh          # the main script that adds a business
 ├── set_config.sh            # shows / changes the recon_business_config of one business
+├── set_lang.sh              # shows / changes the language of the user-visible output
 └── seeds/                   # the seed data of the businesses (TSV, tracked by git)
 ```
 
@@ -85,6 +86,35 @@ Once the row of the business is in the database:
   ```bash
   cd ../db_align && ./bin/db_align -n '<business name>' -all
   ```
+
+## The language of the output: `set_lang.sh`
+
+The command line, the dashboard, the daily report and the mail body all
+follow one setting. The resolution order is:
+
+1. the `SRCDAR_LANG` environment variable (temporary, for the CI)
+2. the `lang` field of `config/lang.conf` (the persistent choice)
+3. `en` as the default
+
+`set_lang.sh` reads and writes the `lang` field, so it changes the
+persistent choice:
+
+```bash
+./manage/set_lang.sh                    # shows the language in effect
+./manage/set_lang.sh --lang zh          # switches to Chinese
+./manage/set_lang.sh --lang en          # switches to English
+```
+
+The installer of the i18n module (`i18n/install.sh --lang`) never
+overwrites an existing `config/lang.conf`, because the choice of the
+operator wins there. `set_lang.sh` is the deliberate switch.
+
+The aliases are normalised (`zh-CN` / `cn` / `chinese` → `zh`, `en-US` /
+`english` → `en`), an unknown language is refused and the file is left
+alone, and the file is written atomically.
+
+`SRCDAR_CONFIG_DIR` overrides the directory of the config, exactly like the
+lookup does, so a test or a container can keep its own setting.
 
 ## The adjustment of the configuration of a business: `set_config.sh`
 
