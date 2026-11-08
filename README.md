@@ -24,7 +24,7 @@
 
 <br>
 
-**srcradar** is the pipeline of the mapping and of the monitoring of the SRC assets, all in one place: **a business and its scoped assets → the active mapping → the daily incremental diff → a local dashboard**. Its core parts:
+**srcradar** is the pipeline of the mapping and of the monitoring of the SRC assets, all in one place: **a business and the list of its scoped assets → the active mapping → the daily incremental diff → a local dashboard**. Its core parts:
 
 | The role | The module | The nature |
 |---|---|---|
@@ -51,7 +51,7 @@ srcradar only provides the **technical implementation**, it **does not take part
 
 **The operator carries the whole responsibility of the compliance.** It includes, without being limited to: the authorization of the target, the compliance of the cross border transfer of the data (the PIPL / the security assessment of the data that leaves the country), and the respect of the ToS of the data sources such as `爱企查/天眼查/七麦`.
 
-The whole legal terms are in [`LICENSE`](./LICENSE) (Apache-2.0) + [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md) (the additional restrictions of the use and the disclaimer) + [`NOTICE`](./NOTICE) (the thanks to the upstream) + the section of the statement of [`ymicp/README.md`](./modules/public/ymicp/README.md) (the notice of the module ymicp alone).
+The whole legal terms are in [`LICENSE`](./LICENSE) (Apache-2.0) + [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md) (the additional restrictions of the use and the disclaimer) + [`NOTICE`](./NOTICE) (the thanks to the upstream, and the notices of the optional plugins).
 
 > **The position of the tool**: srcradar is a tool of **information collection** (the enumeration of the subdomains / the resolution of the DNS / the probe of the ports / the probe of the HTTP / the scan of the URL assets), and it **does not exploit anything and does not trigger any PoC**. Use a dedicated vulnerability scanner when a vulnerability has to be verified.
 
@@ -59,11 +59,11 @@ The whole legal terms are in [`LICENSE`](./LICENSE) (Apache-2.0) + [`TERMS_ADDEN
 
 ## What it is
 
-For the operation of a SRC (a security response center), it turns "the name of a business → the graph of its legal entities → the active mapping of the assets → the daily incremental monitoring" into a single pipeline:
+For the operation of a SRC (a security response center), it turns "a business and the list of its scoped assets → the active mapping of the assets → the daily incremental monitoring" into a single pipeline:
 
 - **The contract of the data**: every output settles in one shared SQLite (`db/recon.sqlite3`), isolated by the name of the business
 - **The contract of the operation**: one round runs on its own every day at 03:00 Beijing time, it produces the incremental report + the local dashboard of the visualisation
-- **The contract of the collaboration**: it does not take the place of the upstream (`ENScan_GO`), it does not take the place of the downstream (the other asset mapping tools), it only connects and orchestrates
+- **The contract of the collaboration**: it does not take the place of the downstream (the other asset mapping tools), it only connects and orchestrates
 
 ---
 
@@ -84,9 +84,7 @@ cd srcradar
 
 # 3. install all the upstream dependencies (pdtm installs dnsx/httpx/subfinder/alterx/naabu/cdncheck
 #    -> cdnmatch -> the init-db on its own;
-#    main/{db,lib,manage,pdtm} are ticked by default, daily is not (it avoids the automatic registration of the cron);
-#    the plugins of the domestic registries (db_align / ymicp) are guided by install.sh on their own,
-#    they are for the targets of China only, see their README):
+#    main/{db,lib,manage,pdtm} are ticked by default, daily is not (it avoids the automatic registration of the cron)):
 ./install.sh                       # the interactive checklist (enter switches / 0 confirms / q quits)
 ./install.sh --skip-check          # the environment is known to be good, it skips check.sh and goes straight to the checklist
 
@@ -96,14 +94,6 @@ cd srcradar
 #      3) /opt/srcradar/db/recon.sqlite3 (it is fixed inside the docker image)
 #      4) /data/recon.sqlite3 (it is compatible with the old mount)
 #      5) the default of the modules (<repo>/modules/main/db/recon.sqlite3)
-
-# 4. (optional, the targets of China only) for the plugin of enscan, see [db_align/README.md](./modules/public/db_align/README.md) §installation
-#    (it marks the LOCKED tag, it needs a manual authorization; the run half automatically steps in — the cookie heals itself / the cache is cleared,
-#     see [db_align/README.md](./modules/public/db_align/README.md) §operation)
-
-# 5. (optional, the targets of China only) for the plugin of the reverse lookup of the filing of the mini programs, see [ymicp/README.md](./modules/public/ymicp/README.md) §deployment
-
-#    Outside China the scopes come from an input directory or from a seed TSV, the two plugins above are not needed.
 
 # once it is installed, look at what the dispatcher can do (it lists every pair of module/script, it is the cheat sheet of the usual ones)
 ./srcradar --list
@@ -144,7 +134,6 @@ There is no need to `cd modules/<x>/<y>` — the `./srcradar` of the root finds 
 ./srcradar db check_schema                    # it checks the drift of the schema
 ./srcradar pdtm scan -b exampleCo             # the active scan of a single business
 ./srcradar daily daily_monitor                 # it runs the daily pipeline by hand
-./srcradar ymicp icp_mapp_query -b exampleCo  # the reverse lookup of the filing
 ```
 
 The order of the resolution of the modules is `modules/private` → `modules/main` → `modules/public` (an internal module overrides a public one); the type of the script `.sh` comes before `.py`, and a `.sh` file has to carry the executable bit. `./srcradar --list` prints the whole list of the scripts.
@@ -199,15 +188,13 @@ srcradar daily dashboard --host 0.0.0.0
 ```
    ┌──────────────────────┐
    │   the business       │        e.g. "ExampleCo"
-   │   + its scopes       │
    └──────────┬───────────┘
               ▼
-   ┌────────────────────────┐        ┌──────────────────────────────┐
-   │  the scopes            ─────►   │ db_align (Go) — China only:  │
-   │  a target.txt, or      │        │ the graph of the legal       │
-   │  a seed TSV, or        │        │ entities (ENScan_GO)         │
-   │  db_align -scope       │        └──────────────────────────────┘
-   └────────────────────────┘     
+   ┌──────────────────────────┐
+   │ the scopes of a business │
+   │  a target.txt, or        │
+   │  a seed TSV              │
+   └──────────────────────────┘
               ▼
    ┌────────────────────────────────────┐
    │ db/recon.sqlite3  (WAL, shared)    │
@@ -216,30 +203,26 @@ srcradar daily dashboard --host 0.0.0.0
    │ tcp_assets                         │
    └────────────────────────────────────┘
                ▼
-   ┌────────────────────────┐                  ┌─────────────────────────────┐
-   │ pdtm (shell + py)      │                  │ ymicp (Python) — China only │
-   │ the 4 stages of the    │                  │ the reverse lookup of       │
-   │ active mapping:        │                  │ the filing of the mini      │
-   │ dnsx→naabu→httpx       │                  │ programs / of the WeChat    │
-   │ →import_scan_results   │                  │ accounts (the user          │
-   └────────────────────────┘                  │ deploys it)                 │
-                  └─────────────────────────────┘
-               ▼                               ▼
+   ┌────────────────────────┐
+   │ pdtm (shell + py)      │
+   │ the 4 stages of the    │
+   │ active mapping:        │
+   │ dnsx→naabu→httpx       │
+   │ →import_scan_results   │
+   └────────────────────────┘
+               ▼
    ┌──────────────────────────────────────────────────────────┐
    │ daily/  (cron + Python)                                  │
    │ snapshot.py → diff.py → reports/<run-id>/ + dashboard    │
    └──────────────────────────────────────────────────────────┘
 ```
 
-> **The path that works outside China**: the scopes come from an input directory (`target.txt`) or from a seed TSV, the pipeline of the active mapping and the daily diff do not need any plugin of the domestic registries. `db_align` and `ymicp` only add the legal entities and the filings of the Chinese registries, so they are optional for the rest of the world.
-
 <br>
 
 **The key invariants**
 
-- The modules are decoupled **by the name of the business**, the 1:N of `businesses.id` → `companies.business_id` is the boundary of the isolation
-- `db_align` does not write `web_subdomains` / `tcp_assets` / `permutation_state`, that is the ground of pdtm
-- pdtm does not write `mapp_records`, that is the ground of `db_align` + ymicp
+- The modules are decoupled **by the name of the business**, the `businesses.id` is the boundary of the isolation
+- The scope of a business is the only input of the mapping, the other modules do not widen it
 - `daily/` only reads the database and takes a snapshot, it never touches a table of a business
 
 > **The stdin of the tools of ProjectDiscovery has to be closed**: any call of `dnsx` / `httpx` / `naabu` / `subfinder` / `cdncheck` has to get `< /dev/null`, when the script that calls it is run from the outside by `bash script.sh`. Those tools close the stdin in a best-effort way, but it was measured that they park for good in a sub shell, and the pipeline hangs until the end of the time. `cdncheck` still needs it as a fallback, even though `pdtm/scanner.sh` goes through the offline path of `./bin/cdnmatch` and does not call the cdncheck binary any more.
@@ -250,11 +233,6 @@ srcradar daily dashboard --host 0.0.0.0
 
 | The module | The role | The details |
 |---|---|---|
-| `db_align/` | **the plugin of enscan (optional)**: the name of the business → the legal graph + the reverse lookup of the assets (a Go orchestrator) | [README](./modules/public/db_align/README.md) · [CLAUDE.md](./modules/public/db_align/CLAUDE.md) |
-| `internal/resolver` | the scoring of the several candidates of AQC, the strict mode refuses a weak match | `MinAcceptScore=80`, a weak match needs the bypass of `-broad` or `-pid` |
-| `internal/crawler` | the traversal of the tree of the holdings + the reverse lookup of the section of the assets | the guard of the cycles of `seen[pid]` in the process, the threshold of a holding is 51% by default |
-| `internal/store` | the upsert of the SQLite + the incremental migration of the schema | it only adds `service_type_map` / 2 indexes / `companies.group` |
-| `internal/permute` | the generation of the variants of the keywords + the conversion of the numbers ↔ the Chinese characters | it is covered by the unit tests |
 | `pdtm/` | the orchestration of the 4 stages of the active mapping | [README](./modules/main/pdtm/README.md) |
 | `pipeline.sh` | the orchestration of the top + the cleaning on its own | the mutual exclusion of `flock`, the scene of a failure can be kept on purpose |
 | `scan.sh` | the derivation of the subdomains + the two ways of the exact search / of the glob | without a `*` it goes through the fast path straight to dnsx, with a `*` it goes through subfinder → alterx → permutation |
@@ -264,13 +242,11 @@ srcradar daily dashboard --host 0.0.0.0
 | `bin/` | the directory of the build artefacts (cdnmatch is optional) | it does not come with the repository, the user builds it |
 | `target_glob.py` | `target.txt` → ERE + the extraction of the base | `(^&#124;\.)` is compliant with the POSIX ERE (the silent 0 match of the original PCRE is fixed) |
 | `import_scan_results.py` | `scan_results/` → the database | the deduplication by `response_hash` |
-| `ymicp/` | **the plugin of the integration (optional)**: the batch reverse lookup of the filing of the mini programs / of the WeChat accounts | [README](./modules/public/ymicp/README.md) |
 | `daily/` | the cron + the diff of the snapshots + the dashboard | [README](./modules/main/daily/README.md) |
-| `daily_monitor.sh` | the entry point of the cron + the orchestration of the several stages + the filter by the config | the mutual exclusion of `flock`; the fixed order of the stages: `enscan → pdtm → icp`; every business is filtered by `recon_business_config` |
+| `daily_monitor.sh` | the entry point of the cron + the orchestration of the several stages + the filter by the config | the mutual exclusion of `flock`; every business is filtered by `recon_business_config` |
 | `lib/snapshot.py` | the full snapshot of the 6 tables into JSON | it derives the `host_ip_map` that fills the IP column of the dashboard back |
 | `lib/diff.py` | the comparison of the snapshots → the incremental report | added/reactivated/deactivated/changed/deleted |
 | `lib/dashboard.py` | the read only web of 127.0.0.1, 4 tabs | Task Status/Site Details/Port Services/Risk Level |
-| `ENScan_GO/` | the client of 爱企查 of a third party, it runs as a subprocess | the source is vendored + the xlsx of the `outs/` lands on the disk |
 | `i18n/` | the language of the user-visible output (the zh and en tables) | [README](./modules/main/i18n/README.md) |
 | `manage/set_lang.sh` | shows / changes the language of the user-visible output | the installer never overwrites an existing `config/lang.conf`, so this is the deliberate switch |
 | `manage/set_resolvers.sh` | shows / changes the DNS resolver set that is in effect | `cn` / `global` / `auto`; the `auto` mode follows the language |
@@ -288,15 +264,12 @@ The database `db/recon.sqlite3`, the mode WAL + a busy_timeout of 5s.
 |---|---|---|
 | `businesses` | the dictionary of the SRC businesses (`id`, `business_name`) | anybody, it is unique by `business_name` |
 | `recon_business_config` | the switches of the stages of a business (`business_id`, `enabled`, `web`, `tcp`, `icp`) | a manual SQL; `daily_monitor.sh` reads it and filters by business |
-| `companies` | the legal entities (`business_id`, `unit_name`, `nature_name`, `main_licence`, `group`) | `db_align` + `ymicp` |
-| `mapp_records` | the filings and the light assets such as the ICP / the mini programs / the App / the WeChat accounts (`company_id`, `service_licence`, `service_type`) | `db_align` + `ymicp` |
-| `scopes` | the whitelist of the measurable and of the assets that are not measurable | **`db_align -scope`** / **`pdtm finalize_scope`** / **`manage/scope_import.sh`** (3 independent paths, any of them is enough) |
+| `scopes` | the whitelist of the measurable and of the assets that are not measurable | **`pdtm finalize_scope`** / **`manage/scope_import.sh`** (2 independent paths, any of them is enough) |
 | `web_subdomains` / `web_hashes` | the web assets + the library of the fingerprints | `pdtm/import_scan_results.py` |
 | `tcp_assets` | the assets of the TCP ports | `pdtm/import_scan_results.py` |
 | `permutation_state` | the cache of the state of the derivation of alterx (a cooling of 30 days per entry for the moment; **it has to become a wipe of the whole table per period**) | `pdtm/permutation_cache.py` |
-| `service_type_map` | the integer of `service_type` → the name that a human can read (it accumulates on its own) | an `INSERT OR IGNORE` when `db_align` upserts |
 
-The contract of the collaboration of the fields is in the README of each module — `db_align/README.md` §Caveats / `pdtm/README.md` §DB Schema.
+The contract of the collaboration of the fields is in the README of each module — `pdtm/README.md` §DB Schema.
 
 ---
 
@@ -309,7 +282,6 @@ The detailed documentation sits next to the scripts:
 - **add a business / change the switch of a business / the seed TSV** → [`manage/README.md`](./modules/main/manage/README.md)
 - **install the cron / remove the cron / run a single business by hand / take a snapshot / the dashboard** → [`daily/README.md`](./modules/main/daily/README.md)
 - **enter the scopes / run the whole pipeline** → [`pdtm/README.md`](./modules/main/pdtm/README.md)
-- **the flags of the reverse lookup of the legal entities (db_align)** → [`db_align/README.md`](./modules/public/db_align/README.md)
 
 ### The language of the output
 
@@ -363,8 +335,8 @@ install does not reset the choice of the operator.
 ### The commands of the common tasks
 
 > Every command runs from the root of the repository; `./srcradar --list` prints the whole list of the scripts.
-> The stages (`pdtm` / `icp` / `enscan` / `daily-url`) are configured with a 0/1 per business in the table `recon_business_config`
-> (web/tcp drive pdtm, icp drives ymicp, enscan is not gated). See the top of [`daily/run_one_business.sh`](./modules/main/daily/run_one_business.sh).
+> The stages (`pdtm` / `daily-url`) are configured with a 0/1 per business in the table `recon_business_config`
+> (web/tcp drive pdtm). See the top of [`daily/run_one_business.sh`](./modules/main/daily/run_one_business.sh).
 
 | The task | The command |
 |---|---|
@@ -374,20 +346,18 @@ install does not reset the choice of the operator.
 | look at / change the language of the output | `./srcradar manage set_lang [--lang zh\|en]` |
 | look at / change the DNS resolver set | `./srcradar manage set_resolvers [--set cn\|global\|auto]` |
 | run the whole flow of a single business (once the scopes are in, it is gated by the table of the configuration) | `./srcradar daily run_one_business <business name>` |
-| pull the tree of the holdings / the ICP / the mini programs by hand (the plugin of enscan) | see [`modules/public/db_align/README.md`](./modules/public/db_align/README.md) |
-| run the reverse lookup of the filing of the mini programs (the plugin of ymicp) | see [`modules/public/ymicp/README.md`](./modules/public/ymicp/README.md) |
-| install the cron (every day at 03:00 Beijing time, the cron line hardcodes `-type pdtm,icp`) | `./srcradar daily install_cron` |
+| install the cron (every day at 03:00 Beijing time) | `./srcradar daily install_cron` |
 | remove the cron | `./srcradar daily install_cron uninstall` |
 | see whether the cron is installed | `crontab -l \| grep daily_monitor` |
 | start the dashboard (127.0.0.1:8765 by default) | `./srcradar daily dashboard` |
 
-### The order of the three usual stages (it is fixed inside the pipeline / inside run_one_business)
+### The order of the stages (it is fixed inside the pipeline / inside run_one_business)
 
 ```
-enscan(db_align)  →  pdtm  →  icp(ymicp)  →  daily-url
-   ↓                  ↓         ↓                ↓
-  writes companies /    writes web_sub /  writes mapp_records /   writes web_hash_urls
-scopes            tcp_assets
+pdtm  →  daily-url
+  ↓              ↓
+writes web_sub /  writes web_hash_urls
+tcp_assets
 ```
 
 A failure of a stage does not block the stages that come after — `run_one_business.sh` returns an **exit code of a bit mask**:
@@ -395,8 +365,8 @@ A failure of a stage does not block the stages that come after — `run_one_busi
 | The bit | What it means |
 |---|---|
 | 1 (1) | pdtm failed |
-| 2 (2) | enscan failed |
-| 4 (4) | icp failed |
+| 2 (2) | the stage of the legal entities failed (it belongs to an optional plugin) |
+| 4 (4) | the stage of the filings failed (it belongs to an optional plugin) |
 | 8 (8) | daily-url failed |
 | 0 | everything is OK or it was skipped |
 
@@ -422,11 +392,9 @@ The executable capacity of this project rests on the following upstream projects
 
 | The upstream project | The role | The license | The maintenance relation |
 |---|---|---|---|
-| **[mssky9527/ENScan_GO](https://github.com/mssky9527/ENScan_GO)** (the original repository [wgpsec/ENScan_GO](https://github.com/wgpsec/ENScan_GO) moved) | the collection of the information of the companies (爱企查/天眼查/七麦/风鸟) | **Apache-2.0** | © 2023-2026 keac @ wgpsec |
 | **[projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)** | the active probe of the web | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
 | **[projectdiscovery/dnsx](https://github.com/projectdiscovery/dnsx)** | the batch resolution of the DNS | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
 | **projectdiscovery/cdncheck** (it is imported by [`modules/main/pdtm/cdnmatch`](./modules/main/pdtm/cdnmatch/), the source is not modified) | the offline classification of the CDN / of the WAF | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **modernc.org/sqlite** (a dependency of `db_align`) | the driver of a pure Go SQLite | **BSD-3-Clause** | © modernc.org/sqlite authors |
 
 ### The management of the packages and the external dependencies (the set of the tools that pdtm installs + the tools that are recommended)
 
@@ -445,7 +413,7 @@ The executable capacity of this project rests on the following upstream projects
 > **The mode of the integration**: every tool of this section is called through a `subprocess.run()` by a script such as `pdtm/scan_urls.py`, it is **not a fork of the source / an import**.
 > `massdns` and `shuffledns` are the only two tools of **GPL-3.0** here: they run as separate processes and they are not linked with the code of this repository; the whole text of their licenses comes with the mirror in `/usr/share/doc/srcradar/licenses/`, and the whole statement is in [`NOTICE`](./NOTICE). `pdtm` is the package manager, it is **not** the upstream of the code of these tools.
 >
-> **The versions of the upstream**: ENScan_GO_TAG=v1.4.0 (see `install.sh`). The tools of ProjectDiscovery are installed into `~/.pdtm/go/bin/` by `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck`, there is no lock (the user manages the upgrades).
+> **The versions of the upstream**: the tools of ProjectDiscovery are installed into `~/.pdtm/go/bin/` by `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck`, there is no lock (the user manages the upgrades). The versions of the optional plugins are in [`NOTICE`](./NOTICE).
 
 ### The data that comes with the repository (the word lists)
 
@@ -457,11 +425,7 @@ The word lists under `docker/wordlists/` **come with the repository**, they are 
 
 ### The statement of the third party services (the user deploys them)
 
-| The service | The provider | The license | The maintenance relation |
-|---|---|---|---|
-| **ymicp / ICP_Query** | [HG-ha / 一铭](https://github.com/HG-ha/ICP_Query) | ⚠️ **not declared** (on GitHub it is All rights reserved by default) | **not maintained by srcradar**, the README of the original project declares that it is for the learning and the exchange only |
-
-ymicp is the third party service that the `ymicp/` module of srcradar depends on, srcradar **does not** redistribute the server, **does not** pull the image on its own and **does not** endorse its compliance. See the section of the statement of [`ymicp/README.md`](./modules/public/ymicp/README.md).
+The optional plugins call the third party services that they declare in their own README. srcradar **does not** redistribute those servers, **does not** pull the images on its own and **does not** endorse their compliance. The whole statement is in [`NOTICE`](./NOTICE) and in [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md).
 
 ---
 
