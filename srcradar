@@ -112,6 +112,14 @@ for prefix in modules/private modules/main modules/public; do
 done
 
 if [ -z "${MODULE_PATH}" ]; then
+    # The module is not a local directory of the tree. It can be a virtual
+    # module: a module that lives in its own repository and that is not
+    # cloned yet. The installer of install.sh holds the list of the virtual
+    # modules, so the install of such a module is handed over to it: it
+    # clones the repository when it is missing and runs its install.sh.
+    if [ "${SCRIPT}" = "install" ]; then
+        exec "${ROOT_DIR}/install.sh" --module "${MODULE}" "$@"
+    fi
     printf '[srcradar] ERROR: module "%s" not found under modules/{main,public,private}/\n' "${MODULE}" >&2
     printf '       run "%s --list" to see available modules\n' "${BASH_SOURCE[0]}" >&2
     exit 3

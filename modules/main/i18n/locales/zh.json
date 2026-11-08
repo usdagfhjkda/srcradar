@@ -900,6 +900,8 @@
   "root.install.invalid_reply": "无效输入: '{reply}'(期望 1-{count} / 0 / q)",
   "root.install.module_failed": "[{area}/{name}] 失败 (exit={rc})",
   "root.install.module_installer_missing": "模块 {area}/{name} 的 install.sh 缺失或不可执行;跳过",
+  "root.install.module_installer_missing_required": "模块 {area}/{name} 的 install.sh 缺失或不可执行",
+  "root.install.module_not_found": "模块 {name} 未找到: 既不是本树的本地模块, 也不是虚拟模块",
   "root.install.no_modules": "无任何可安装模块;modules/ 目录为空",
   "root.install.nothing_selected": "未勾选任何模块;无操作",
   "root.install.picker_header": "srcradar installer — 勾选要安装的模块",
@@ -910,5 +912,6 @@
   "root.install.user_quit": "用户退出",
   "root.install.virtual_module_clone_failed": "[{vkey}] git clone 失败;中断 install",
   "root.install.virtual_module_cloning": "[{vkey}] 目录不存在;git clone {vurl} {vmdir}",
-  "root.install.virtual_module_not_public": "[{vkey}] standalone repo 尚未公开,请先创建 {vurl} 后重试;跳过"
+  "root.install.virtual_module_not_public": "[{vkey}] standalone repo 尚未公开,请先创建 {vurl} 后重试;跳过",
+  "root.install.virtual_module_not_public_required": "[{vkey}] standalone repo 尚未公开,请先创建 {vurl} 后重试"
 }

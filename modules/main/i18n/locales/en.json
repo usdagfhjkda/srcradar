@@ -900,6 +900,8 @@
   "root.install.invalid_reply": "Invalid input: '{reply}' (expected 1-{count} / 0 / q)",
   "root.install.module_failed": "[{area}/{name}] failed (exit={rc})",
   "root.install.module_installer_missing": "Module {area}/{name} has no executable install.sh; skipped",
+  "root.install.module_installer_missing_required": "Module {area}/{name} has no executable install.sh",
+  "root.install.module_not_found": "The module {name} was not found: it is neither a local module of the tree nor a virtual module",
   "root.install.no_modules": "No module to install; the modules/ directory is empty",
   "root.install.nothing_selected": "No module selected; nothing to do",
   "root.install.picker_header": "srcradar installer — select the modules to install",
@@ -910,5 +912,6 @@
   "root.install.user_quit": "The user quit",
   "root.install.virtual_module_clone_failed": "[{vkey}] git clone failed; the install is aborted",
   "root.install.virtual_module_cloning": "[{vkey}] the directory does not exist; git clone {vurl} {vmdir}",
-  "root.install.virtual_module_not_public": "[{vkey}] the standalone repo is not public yet; create {vurl} first and retry; skipped"
+  "root.install.virtual_module_not_public": "[{vkey}] the standalone repo is not public yet; create {vurl} first and retry; skipped",
+  "root.install.virtual_module_not_public_required": "[{vkey}] the standalone repo is not public yet; create {vurl} first and retry"
 }

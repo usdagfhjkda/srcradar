@@ -27,6 +27,10 @@
 #   for ./srcradar to use, so nothing has to be done by hand
 #   ./install.sh --no-init-db     # do not create the DB
 #   ./install.sh --offline        # skip every network call (the clone is assumed to be done)
+#   ./install.sh --module <name> [args...]
+#                                # install a single module by name (the local modules
+#                                # first, then the virtual ones); it is the path that
+#                                # "./srcradar <name> install" takes
 #   ./install.sh -h|--help
 #
 # The checklist interaction:
@@ -55,7 +59,7 @@ warn() { printf '[install][warn] %s\n' "$*" >&2; }
 err()  { printf '[install][err]  %s\n' "$*" >&2; }
 
 usage() {
-    sed -n '2,30p' "$0"
+    sed -n '2,34p' "$0"
 }
 
 # ---- the prerequisite: run ./check.sh ----
@@ -350,10 +354,99 @@ ask_checklist() {
     return 0
 }
 
+# ---- resolve a module name to <area> <name> [<vname>] ----
+# The order is the same as the one of the dispatcher: the local modules
+# first (private > main > public), then the virtual ones.
+# A virtual module is named by the name of the directory it lands in (the
+# same string the dispatcher resolves), and the name of its repository is
+# accepted as well: the repo of the comparison engine is
+# srcradar-algo-diff-cpp but it lands in modules/public/algo_diff_cpp/, and
+# the two strings are different.
+# The output: "<area> <name> <vname>" on stdout, the return code 0 when the
+# module was found, 1 when it is neither a local nor a virtual module. The
+# third field is empty for a local module.
+resolve_module() {
+    local name="$1"
+    local area
+
+    # the local modules: the same order as the dispatcher
+    for area in private main public; do
+        if [ -d "$SCRIPT_DIR/modules/$area/$name" ]; then
+            printf '%s %s\n' "$area" "$name"
+            return 0
+        fi
+    done
+
+    # the virtual modules: the name is the directory the module lands in
+    local vname vdirname
+    for vname in "${!VIRTUAL_NAMES[@]}"; do
+        vdirname="${VIRTUAL_DIRS[$vname]:-$vname}"
+        if [ "$vdirname" = "$name" ]; then
+            printf '%s %s %s\n' "${VIRTUAL_NAMES[$vname]}" "$vdirname" "$vname"
+            return 0
+        fi
+    done
+    # the name of the repository is accepted as well
+    for vname in "${!VIRTUAL_NAMES[@]}"; do
+        if [ "$vname" = "$name" ]; then
+            printf '%s %s %s\n' "${VIRTUAL_NAMES[$vname]}" "${VIRTUAL_DIRS[$vname]:-$vname}" "$vname"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# ---- install a single module by name ----
+# It is the path of "./srcradar <module> install": the dispatcher hands the
+# name over when the module is not a local directory of the tree.
+# The module is resolved by resolve_module (the local modules first, then
+# the virtual ones), and a virtual module that is not on the disk yet is
+# cloned first.
+# The arguments are passed to the install.sh of the module.
+install_one_module() {
+    local name="$1"; shift
+    local area modname vname resolved
+
+    resolved="$(resolve_module "$name")" || {
+        err "$(t root.install.module_not_found name="$name")"
+        return 3
+    }
+    read -r area modname vname <<< "$resolved"
+
+    # a virtual module: it lands in a directory of its own repository, so it
+    # is cloned when the directory is not on the disk yet.
+    local mdir="$SCRIPT_DIR/modules/$area/$modname"
+    if [ -n "$vname" ] && [ ! -d "$mdir" ]; then
+        local vkey="$area/$vname"
+        local vurl="https://github.com/usdagfhjkda/$vname.git"
+        # it probes with ls-remote first, the same way the checklist does
+        if ! git ls-remote --heads "$vurl" >/dev/null 2>&1; then
+            err "$(t root.install.virtual_module_not_public_required vkey="$vkey" vurl="$vurl")"
+            return 3
+        fi
+        log "$(t root.install.virtual_module_cloning vkey="$vkey" vurl="$vurl" vmdir="$mdir")"
+        if ! git clone "$vurl" "$mdir"; then
+            err "$(t root.install.virtual_module_clone_failed vkey="$vkey")"
+            return 3
+        fi
+    fi
+
+    local minstall="$mdir/install.sh"
+    if [ ! -x "$minstall" ]; then
+        err "$(t root.install.module_installer_missing_required area="$area" name="$modname")"
+        return 3
+    fi
+
+    run_module "$area" "$modname" "$@"
+}
+
 main() {
     MODE="interactive"
     DO_INIT_DB=1
     SKIP_CHECK=0
+    MODULE_NAME=""
+    MODULE_ARGS=()
     # shellcheck disable=SC2034  # OFFLINE is accepted as a no-op flag for compatibility
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -362,10 +455,33 @@ main() {
             --init-db)      DO_INIT_DB=1; shift ;;
             --no-init-db)   DO_INIT_DB=0; shift ;;
             --offline)      OFFLINE=1; shift ;;
+            --module)
+                # the single module mode: the name of the module, then the
+                # arguments of its install.sh
+                if [ $# -lt 2 ]; then
+                    err "unknown arg: $1 (it needs the name of a module)"; usage; exit 1
+                fi
+                MODE="single-module"
+                MODULE_NAME="$2"
+                shift 2
+                MODULE_ARGS=("$@")
+                break
+                ;;
             -h|--help)      usage; exit 0 ;;
             *) err "unknown arg: $1"; usage; exit 1 ;;
         esac
     done
+
+    if [ "$MODE" = "single-module" ]; then
+        # The module is installed on its own: the checklist does not run, and
+        # the check of the environment is left to the install.sh of the module
+        # (it checks its own dependencies).
+        if [ -z "$MODULE_NAME" ]; then
+            err "unknown arg: --module (it needs the name of a module)"; usage; exit 1
+        fi
+        install_one_module "$MODULE_NAME" ${MODULE_ARGS[@]+"${MODULE_ARGS[@]}"}
+        exit $?
+    fi
 
     if [ "$MODE" = "check-only" ]; then
         run_check || { err "$(t root.install.check_stage_failed_check_only)"; exit 2; }
