@@ -275,7 +275,7 @@ write_wordlists_config() {
     local resolver_set_val="global"
     if [ -f "$cfg" ]; then
         resolver_set_val="$(sed -n 's/^[[:space:]]*resolver_set[[:space:]]*=[[:space:]]*//p' \
-                               "$cfg" | head -1 | tr -d '"\''[:space:]')"
+                               "$cfg" | head -1 | tr -d '\042\047[:space:]')"
         [ -n "$resolver_set_val" ] || resolver_set_val="global"
     fi
     mkdir -p "$(dirname "$cfg")"
@@ -288,7 +288,7 @@ write_wordlists_config() {
     resolvers_file=""
     if [ -f "$cfg" ]; then
         resolvers_file="$(sed -n 's/^[[:space:]]*resolvers_file[[:space:]]*=[[:space:]]*//p' \
-                             "$cfg" | head -1 | tr -d '"\''[:space:]')"
+                             "$cfg" | head -1 | tr -d '\042\047[:space:]')"
     fi
     resolvers_file_val="$(resolve_resolvers_file || true)"
     if [ -z "$resolvers_file_val" ]; then

@@ -97,7 +97,7 @@ CONF_FILE="$CONF_DIR/pdtm.conf"
 conf_get() {
     [ -f "$CONF_FILE" ] || return 0
     sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF_FILE" 2>/dev/null \
-        | head -1 | tr -d '"'\''[:space:]'
+        | head -1 | tr -d '\042\047[:space:]'
 }
 
 resolver_set="$(conf_get resolver_set)"

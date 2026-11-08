@@ -95,7 +95,7 @@ _i18n_conf_lang() {
     [ -n "$cfg_dir" ] || return 0
     [ -f "$cfg_dir/lang.conf" ] || return 0
     lang="$(sed -n 's/^[[:space:]]*lang[[:space:]]*=[[:space:]]*//p' \
-            "$cfg_dir/lang.conf" 2>/dev/null | head -1 | tr -d '"'\''[:space:]')"
+            "$cfg_dir/lang.conf" 2>/dev/null | head -1 | tr -d '\042\047[:space:]')"
     [ -n "$lang" ] && printf '%s' "$lang"
 }
 

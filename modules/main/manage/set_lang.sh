@@ -101,7 +101,7 @@ current_lang() {
     if [ -f "$CONF_FILE" ]; then
         local from_file
         from_file="$(sed -n 's/^[[:space:]]*lang[[:space:]]*=[[:space:]]*//p' \
-                       "$CONF_FILE" 2>/dev/null | head -1 | tr -d '"'\''[:space:]')"
+                       "$CONF_FILE" 2>/dev/null | head -1 | tr -d '\042\047[:space:]')"
         from_file="$(normalize_lang "$from_file")"
         [ -n "$from_file" ] && { printf '%s' "$from_file"; return 0; }
     fi
