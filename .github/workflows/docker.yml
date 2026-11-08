@@ -1,14 +1,15 @@
 name: docker
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'           # semver tags only
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  # The image is built by hand only. The build of every push and of every
+  # pull request costs a lot of CI time (two architectures, a multi stage
+  # build that compiles the whole tool chain), and the image only matters
+  # at a release.
+  #
+  # A manual run on a tag publishes the semver tag, a manual run on a
+  # branch publishes the dev-<date>-<sha> tag and the latest one. The
+  # login and the push are guarded by `github.event_name !=
+  # 'pull_request'`, so a manual run still pushes.
   workflow_dispatch:        # manual trigger
 
 env:
