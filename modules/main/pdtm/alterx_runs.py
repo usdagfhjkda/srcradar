@@ -1,14 +1,14 @@
-"""alterx 节奏控制:决定本轮是否跑 alterx 派生。
+"""alterx cadence control: decides whether this round runs the alterx derivation.
 
-子命令:
-  should-run  - 查 alterx_runs.last_ran_at,与 cadence 天数比较。
-               首跑(无行)=> 视为过期,退 0;节奏内(新鲜)=> 退 1。
-  mark        - 把当前时间写入 alterx_runs.last_ran_at (UPSERT)。
-               接受 --conn 标志以便并入外层事务(与 permutation_state.record 共享 commit)。
+Subcommands:
+  should-run  - read alterx_runs.last_ran_at and compare it with the cadence in days.
+               first run (no row) => treated as expired, exit 0; within the cadence (fresh) => exit 1.
+  mark        - write the current time into alterx_runs.last_ran_at (UPSERT).
+               accepts the --conn flag so it can join the outer transaction (shared commit with permutation_state.record).
 
-环境变量 / 标志:
-  ALTERX_CADENCE_DAYS / --cadence-days   节奏天数,默认 30,设 0 即"永远过期"(每跑都跑)
-  FORCE_ALTERX / --force                 1 表示忽略节奏强制跑一次,should-run 与 mark 都生效
+Environment variables / flags:
+  ALTERX_CADENCE_DAYS / --cadence-days   cadence in days, default 30, setting 0 means "always expired" (run every time)
+  FORCE_ALTERX / --force                 1 means ignore the cadence and force one run, takes effect for both should-run and mark
 """
 from __future__ import annotations
 
@@ -17,6 +17,15 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 DEFAULT_CADENCE_DAYS = 30
 
@@ -47,17 +56,17 @@ def should_run(db_path: str, business_id: int, cadence_days: int) -> tuple[bool,
         conn.close()
 
     if row is None:
-        return True, "无历史记录(首跑)"
+        return True, t("main.alterx_runs.no_history")
 
     last_ts = parse_iso(row[0])
     if last_ts == 0.0:
-        return True, "历史时间戳无法解析,视为过期"
+        return True, t("main.alterx_runs.timestamp_unparsable")
 
     age = datetime.now(timezone.utc).timestamp() - last_ts
     age_days = age / 86400.0
     if age_days >= cadence_days:
-        return True, f"已过 {age_days:.1f} 天 ≥ 节奏 {cadence_days} 天"
-    return False, f"上次跑在 {age_days:.1f} 天前 < 节奏 {cadence_days} 天"
+        return True, t("main.alterx_runs.overdue", {"age_days": f"{age_days:.1f}", "cadence_days": cadence_days})
+    return False, t("main.alterx_runs.not_due", {"age_days": f"{age_days:.1f}", "cadence_days": cadence_days})
 
 
 def mark_ran(db_path: str, business_id: int, wordlist_hash: str,
@@ -97,18 +106,18 @@ def _upsert_on_conn(conn: sqlite3.Connection, business_id: int,
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="alterx 节奏控制")
+    p = argparse.ArgumentParser(description=t("main.alterx_runs.cadence_control"))
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    ps = sub.add_parser("should-run", help="判断本轮是否跑 alterx")
+    ps = sub.add_parser("should-run", help=t("main.alterx_runs.should_run_help"))
     ps.add_argument("--db", required=True)
     ps.add_argument("--business-id", type=int, required=True)
     ps.add_argument("--cadence-days", type=int,
                     default=int(os.environ.get("ALTERX_CADENCE_DAYS", DEFAULT_CADENCE_DAYS)))
     ps.add_argument("--force", action="store_true",
-                    help="强制返回 run,忽略节奏(env FORCE_ALTERX=1 也开)")
+                    help=t("main.alterx_runs.force_help"))
 
-    pm = sub.add_parser("mark", help="写回 last_ran_at")
+    pm = sub.add_parser("mark", help=t("main.alterx_runs.mark_help"))
     pm.add_argument("--db", required=True)
     pm.add_argument("--business-id", type=int, required=True)
     pm.add_argument("--wordlist-hash", required=True)
@@ -120,7 +129,7 @@ def main() -> int:
     if args.cmd == "should-run":
         forced = args.force or os.environ.get("FORCE_ALTERX") == "1"
         if forced:
-            print("[alterx_runs] FORCE_ALTERX 强制本轮跑", file=sys.stderr)
+            print(t("main.alterx_runs.forced"), file=sys.stderr)
             return 0
         run, reason = should_run(args.db, args.business_id, args.cadence_days)
         print(f"[alterx_runs] {reason}", file=sys.stderr)

@@ -2,7 +2,7 @@
 # Dashboard watchdog — runs every 5 min via cron. If dashboard is not
 # running, restart it. Cron runs as a separate daemon, so the harness
 # can't kill this watchdog the way it kills direct Claude-spawned children.
-# 脚本位于 <repo>/daily/bin/, 向上两级为 repo 根, 再追加 daily。
+# The script lives in <repo>/daily/bin/, two levels up is the repo root, then /daily is appended.
 DAILY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/daily"
 if ! pgrep -f 'python3 lib/dashboard.py' > /dev/null; then
     cd "$DAILY" || exit 1

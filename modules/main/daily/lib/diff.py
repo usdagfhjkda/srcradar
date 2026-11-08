@@ -46,6 +46,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import log
 
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
+
 TIMESTAMP_NOISE = {
     "fetched_at", "updated_at", "last_seen", "first_seen", "created_at",
     "raw_json", "id", "hash_id", "company_id", "business_id", "change_type",
@@ -179,12 +188,13 @@ def _tcp_display(r: dict, biz: dict) -> dict:
     }
 
 
-# 用户 2026-08-26 拍板:web_hash_urls 接 diff。
-# - key=(business_id, subdomain, url, source)  与 UNIQUE 约束一致
-# - content 字段与 AU 触发器 WHEN 子句对齐:status_code / content_length /
-#   word_count / title / redirect / link_source / risk_flag / is_dangerous /
-#   content_type (path/url 是 identity,不变;is_static 不参与 diff,纯粹是 gate)
-# - has_active=True → deactivate 路径
+# The user decided on 2026-08-26: web_hash_urls joins the diff.
+# - key=(business_id, subdomain, url, source), the same as the UNIQUE constraint
+# - the content fields are aligned with the WHEN clause of the AU trigger:
+#   status_code / content_length /
+#   content_type (path/url are identity and do not change; is_static takes no part
+#   in the diff, it is purely a gate)
+# - has_active=True -> the deactivate path
 def _whu_key(r: dict) -> tuple:
     return (r["business_id"], r["subdomain"], r["url"], r["source"])
 
@@ -252,7 +262,7 @@ TABLE_SPECS: dict[str, dict] = {
         "has_active": True,
         "columns": ["business", "host", "port", "hosts", "is_active", "first_seen"],
     },
-    # 用户 2026-08-26:web_hash_urls 接 diff(Phase 2 — daily-url + toggle)
+    # The user decided on 2026-08-26: web_hash_urls joins the diff (Phase 2 — daily-url + toggle)
     "web_hash_urls": {
         "key": _whu_key, "content": _whu_content, "display": _whu_display,
         "has_active": True,
@@ -308,7 +318,7 @@ READ_SQL: dict[str, str] = {
           FROM tcp_assets
          WHERE change_type > 0
     """,
-    # 用户 2026-08-26:web_hash_urls 接 diff;变化触发由 AI/AU trigger 写 change_type
+    # The user decided on 2026-08-26: web_hash_urls joins the diff; the change trigger is written by the AI/AU trigger as change_type
     "web_hash_urls": """
         SELECT id, hash_id, business_id, subdomain, source,
                scheme, host, port, path, url,
@@ -321,8 +331,10 @@ READ_SQL: dict[str, str] = {
 }
 
 # Deactivation read: only meaningful for has_active tables.
-# By spec (用户 2026-10-04), 失活 充要条件 = is_active=0, 跟 last_seen 无关。
-# 这里只多取一个 change_type=8 作事件类型标记, last_seen 不参与过滤。
+# By spec (the user, 2026-10-04), the necessary and sufficient condition for the
+# deactivation is is_active=0, it has nothing to do with last_seen.
+# Here it only takes one extra change_type=8 as the event type marker, last_seen
+# takes no part in the filter.
 DEACTIVATE_SQL: dict[str, str] = {
     "web_subdomains": """
         SELECT ws.id, ws.hash_id, ws.subdomain, ws.port, ws.url,
@@ -344,10 +356,13 @@ DEACTIVATE_SQL: dict[str, str] = {
            AND change_type = 8
            AND business_id IN (SELECT id FROM businesses WHERE scan_count > 3)
     """,
-    # 用户 2026-08-26:web_hash_urls 接 deactivate。
-    #   之前的扫描里 is_active=1,本轮没扫到 → is_active 不会被 persist 翻回 1
-    #   (scan_urls 现有逻辑只写 is_active=1),所以 deactivate 实际不会自然发生
-    #   (除非后续加 "全清场" 逻辑)。但 diff 框架保留这个查询以备未来。
+    # The user decided on 2026-08-26: web_hash_urls joins the deactivate.
+    #   in an earlier scan is_active=1 and this round it was not found -> is_active
+    #   is not flipped back to 1 by persist
+    #   (the current scan_urls logic only writes is_active=1), so the deactivate
+    #   does not actually happen by itself
+    #   (unless a "clear the whole stage" logic is added later). The diff
+    #   framework keeps this query in case it is needed later.
     "web_hash_urls": """
         SELECT id, hash_id, business_id, subdomain, source,
                scheme, host, port, path, url,
@@ -444,29 +459,33 @@ def _deactivate_rows(
 
 def _recompute_change_type(conn: sqlite3.Connection,
                               from_ts: str, to_ts: str) -> None:
-    """After reset, recompute change_type from first_seen / last_seen / is_active.
+    """After the reset, recompute change_type from first_seen / last_seen /
+    is_active.
 
-    Bitmask (mirrors migrate_change_type.sql triggers):
+    The bitmask (it mirrors the triggers of migrate_change_type.sql):
       1 = added       — first_seen / fetched_at / updated_at in [from_ts, to_ts)
       2 = changed     — last_seen in [from_ts, to_ts), first_seen < from_ts
       4 = reactivated — is_active=1 AND last_seen in [from_ts, to_ts), first_seen < from_ts
-      8 = deactivated — is_active=0 AND last_seen >= from_ts (was alive in/after prev run)
+      8 = deactivated — is_active=0 AND last_seen >= from_ts (it was alive in/after the prev run)
 
-    Note: businesses has no timestamp column, left at 0.
+    Note: businesses has no timestamp column, it stays at 0.
 
-    Cold-start guard (2026-10-01): businesses with scan_count <= 3
-    are in their initial 4-run noise period. Skip writing ct=1/2/4/8
-    for those businesses — pipeline persist() 全清场 + 重新激活的
-    误报会在前几次扫描里制造假变更,等业务稳定后再正常报告。
-    阈值: <= 3 reset (即 scan_count > 3 才稳态报告)。
+    The cold start guard (2026-10-01): the businesses with scan_count <= 3
+    are in their initial 4-run noise period. Writing ct=1/2/4/8 is
+    skipped for those businesses — the false changes that the clear of the whole
+    stage in pipeline persist() + the reactivation produces in the first scans
+    would otherwise be reported; once the business is stable it is reported
+    normally.
+    The threshold: <= 3 is reset (that is, the steady state reporting starts at
+    scan_count > 3).
     """
-    # 子查询预算:稳态业务(businesses.scan_count > 3)才能拿到 ct
+    # the subquery budget: only a business in the steady state (businesses.scan_count > 3) gets the ct
     _cold_safe_biz = (
         "SELECT id FROM businesses WHERE scan_count > 3"
     )
-    # 注: scopes/companies/mapp_records 没有 business_id 列, 且 INSERT 时通过
-    # 2026-10-07 refactor: trg_co_ai / trg_mp_ai 已 DROP, INSERT 时本函数也不再写 ct=1。
-    #     change_type=1 的写入入口移到 import_scan_results.py (commit 2)。
+    # Note: scopes/companies/mapp_records have no business_id column, and on INSERT they go through
+    # 2026-10-07 refactor: trg_co_ai / trg_mp_ai were DROPPED, and this function does not write ct=1 on INSERT any more.
+    # the entry point for writing change_type=1 moved to import_scan_results.py (commit 2).
     _ADDED_COLS = (
         ("web_hashes",    "fetched_at"),
     )
@@ -481,8 +500,9 @@ def _recompute_change_type(conn: sqlite3.Connection,
     # skipped/rollback'd). The fix is to drop the ct=1 overwrites here
     # and let the INSERT/UPDATE triggers + algo_diff.run be the only
     # writers. The "added" bitmask (1) is still captured by step 1's
-    # 2026-10-07: trg_ws_ai 已 DROP. 新行 change_type=1 由 import_scan_results.py 写
-    #     (commit 2)。本函数不再扫新行写 ct=1,见 disabled block 上方的 if False 注释。
+    # 2026-10-07: trg_ws_ai was DROPPED. The change_type=1 of a new row is written by
+    # import_scan_results.py
+    # (commit 2). This function does not scan the new rows for ct=1 any more, see the if False comment above the disabled block.
     # ORIGINAL-COMMENT-DEPRECATED: trg_ws_ai AFTER INSERT trigger setting change_type=1 on each new
     # row, so the bitmask semantics are preserved.
     if False:  # disabled 2026-10-07 — see comment above
@@ -517,12 +537,14 @@ def _enabled_biz_subquery(conn: sqlite3.Connection) -> str:
 
 
 def _apply_enabled_filter(conn: sqlite3.Connection, table: str, sql: str) -> str:
-    """Restrict `sql` to rows of enabled businesses.
+    """Restrict `sql` to the rows of the enabled businesses.
 
-    2026-10-25: 被关闭的业务 (recon_business_config.enabled = 0) 不再参与
-    扫描与变更判定, 其历史行不应出现在报告 / 通知邮件 / 面板里。
+    2026-10-25: a business that was turned off (recon_business_config.enabled = 0)
+    takes no part in
+    the scan and in the change judgement any more, and its historical rows should
+    not show up in the report / the notification mail / the panel.
 
-    Each table reaches its business differently:
+    Every table reaches its business differently:
       - scopes / companies / web_hashes / tcp_assets / web_hash_urls carry
         business_id directly.
       - web_subdomains reaches it through web_hashes, and READ_SQL already
@@ -530,7 +552,7 @@ def _apply_enabled_filter(conn: sqlite3.Connection, table: str, sql: str) -> str
       - mapp_records only has company_id, so it needs an extra JOIN on
         companies (aliased `co`).
 
-    Returns the original SQL when the config table is absent (older DBs).
+    It returns the original SQL when the config table is absent (the older DBs).
     """
     enabled = _enabled_biz_subquery(conn)
     if not enabled:
@@ -538,11 +560,11 @@ def _apply_enabled_filter(conn: sqlite3.Connection, table: str, sql: str) -> str
     if table == "web_subdomains":
         return sql + f" AND wh.business_id IN ({enabled})"
     if table == "mapp_records":
-        # READ_SQL 里 mapp_records 没有别名, 且 SELECT 用裸列名。
-        # JOIN companies 后 id / business_id 会产生歧义, 所以:
-        #   1) 给 mapp_records 补别名 m
-        #   2) SELECT 列表的裸列名逐个加 m. 前缀
-        #   3) 插 JOIN companies co
+        # mapp_records has no alias in READ_SQL, and the SELECT uses the bare column names.
+        # After the JOIN on companies the id / business_id become ambiguous, so:
+        #   1) give mapp_records the alias m
+        #   2) prefix every bare column name of the SELECT list with m.
+        #   3) insert the JOIN companies co
         def _prefix_m(match: re.Match) -> str:
             return "m." + match.group(0)
 
@@ -560,7 +582,7 @@ def _apply_enabled_filter(conn: sqlite3.Connection, table: str, sql: str) -> str
                "JOIN companies co ON co.id = m.company_id")
         sep = ("FROM mapp_records m "
                "JOIN companies co ON co.id = m.company_id")
-        # SELECT 列表里裸列名 -> m.<col>
+        # the bare column names of the SELECT list -> m.<col>
         head = re.sub(
             r"\b(id|company_id|source_data_id|service_name|service_licence|"
             r"service_type|content_type_name|domain|record_updated_at|"
@@ -568,7 +590,7 @@ def _apply_enabled_filter(conn: sqlite3.Connection, table: str, sql: str) -> str
             _prefix_m,
             head,
         )
-        # companies 与 mapp_records 都有 change_type 列 -> WHERE 里要限定别名
+        # companies and mapp_records both have a change_type column -> the WHERE has to qualify the alias
         tail = tail.replace(
             "WHERE change_type > 0",
             "WHERE m.change_type > 0",
@@ -613,22 +635,26 @@ def write_report(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     summary_lines: list[str] = []
-    summary_lines.append(f"# SRC 资产监控日报 — {run_id}")
+    summary_lines.append(t("daily.summary.title", {"run_id": run_id}))
     summary_lines.append("")
-    summary_lines.append(f"- 对比基线: `run_markers.started_at < {before_ts or 'N/A'}`")
-    summary_lines.append(f"- 本次 diff 时间: `{_now_iso()}`")
+    summary_lines.append(t("daily.summary.baseline",
+                           {"before_ts": before_ts or "N/A"}))
+    summary_lines.append(t("daily.summary.diff_time", {"diff_time": _now_iso()}))
     summary_lines.append("")
 
     grand_total = 0
     snapshot_dump: dict[str, list[dict]] = {}
 
     for table, spec in TABLE_SPECS.items():
-        # 用户 2026-09-28:邮件不包含范围变更。scopes 跳过 read / 写 CSV /
-        # 加 grand_total。daemon db.read_diff 仍可单独查 scope 路径(如需)。
-        # 用户 2026-10-04:web_hashes 是内部 bookkeeping 表, 不出现在邮件汇总里。
+        # The user decided on 2026-09-28: the mail does not contain the scope changes.
+        # scopes are skipped: no read / no CSV / no
+        # grand_total. The daemon db.read_diff can still query the scope path on
+        # its own (if it is needed).
+        # The user decided on 2026-10-04: web_hashes is an internal bookkeeping
+        # table, it does not show up in the mail summary.
         if table in ("scopes", "web_hashes"):
             continue
-        # 2026-10-25: 只保留 enabled=1 的业务 (被关闭业务不再进报告/邮件)。
+        # 2026-10-25: only the businesses with enabled=1 are kept (a business that was turned off no longer enters the report/mail).
         sql = _apply_enabled_filter(conn, table, READ_SQL[table])
         rows = [dict(r) for r in conn.execute(sql).fetchall()]
         snapshot_dump[table] = rows
@@ -658,10 +684,13 @@ def write_report(
         n_total = n_a + n_re + n_de + n_chg
         grand_total += n_total
         summary_lines.append(
-            f"## {table}  (+{n_a} / ↻{n_re} / ↘{n_de} / ✎{n_chg})"
+            t("daily.summary.table_header", {
+                "table": table, "added": n_a, "reactivated": n_re,
+                "deactivated": n_de, "changed": n_chg,
+            })
         )
         if n_total == 0:
-            summary_lines.append("  - 无变化")
+            summary_lines.append(t("daily.summary.no_change"))
             summary_lines.append("")
             continue
 
@@ -674,35 +703,37 @@ def write_report(
                 desc = ", ".join(f"{k}={r[k]}" for k in keys if r.get(k))
                 out.append(f"    - {desc}")
             if len(items) > n:
-                out.append(f"    - … 还有 {len(items) - n} 条")
+                out.append(t("daily.summary.more", {"count": len(items) - n}))
             return out
 
         if n_a:
-            summary_lines.append(f"  - 新增 ({n_a}):")
+            summary_lines.append(t("daily.summary.added", {"count": n_a}))
             summary_lines += _fmt(cls["added"], 20)
         if n_re:
-            summary_lines.append(f"  - 复活 ({n_re}):")
+            summary_lines.append(t("daily.summary.reactivated", {"count": n_re}))
             summary_lines += _fmt(cls["reactivated"], 20)
         if n_de:
-            summary_lines.append(f"  - 失活 ({n_de}):")
+            summary_lines.append(t("daily.summary.deactivated", {"count": n_de}))
             summary_lines += _fmt(deactivated, 20)
         if n_chg:
-            summary_lines.append(f"  - 内容变更 ({n_chg}):")
+            summary_lines.append(t("daily.summary.changed", {"count": n_chg}))
             summary_lines += _fmt(cls["changed"], 20)
         summary_lines.append("")
 
-    summary_lines.insert(3, f"- 本次变更总数: **{grand_total}**")
+    summary_lines.insert(3, t("daily.summary.total", {"total": grand_total}))
     summary_lines.insert(4, "")
 
     if per_business_warnings:
-        summary_lines.append("## 业务运行告警")
+        summary_lines.append(t("daily.summary.biz_warnings"))
         summary_lines.append("")
         any_warn = False
         for biz, warns in per_business_warnings.items():
             if not warns:
                 continue
             any_warn = True
-            summary_lines.append(f"- **{biz}**: {', '.join(warns)}")
+            summary_lines.append(t("daily.summary.biz_warning_item", {
+                "biz": biz, "warnings": ", ".join(warns),
+            }))
         if not any_warn:
             summary_lines.pop()
             summary_lines.pop()

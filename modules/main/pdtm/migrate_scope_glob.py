@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""migrate_scope_glob.py — 把现有 scope 行 (无 *) 前面加 *. 前缀。
+"""migrate_scope_glob.py — prefix every existing scope row (without *) with a *. prefix.
 
-背景: pdtm scope 格式从纯域名 (example.com) 升级为 glob (.*.example.com)。
-对存量数据,所有无 * 的行统一在前面加 *. 即可向后兼容(因为 *.example.com
-的语义包含 example.com 本身 + 所有子域,是「最宽松」的兼容映射)。
+Background: the pdtm scope format was upgraded from a plain domain (example.com) to a glob (.*.example.com).
+For the existing data, prefixing every row that has no * with *. is enough to stay backward compatible
+(because the semantics of *.example.com cover example.com itself plus all subdomains, which is the "most permissive" compatible mapping).
 
-用法:
-    python3 migrate_scope_glob.py --db recon.sqlite3            # dry-run (默认)
-    python3 migrate_scope_glob.py --db recon.sqlite3 --apply    # 真正写库
+Usage:
+    python3 migrate_scope_glob.py --db recon.sqlite3            # dry-run (default)
+    python3 migrate_scope_glob.py --db recon.sqlite3 --apply    # really write to the DB
 """
 from __future__ import annotations
 
@@ -15,6 +15,15 @@ import argparse
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 
 def now() -> str:
@@ -23,11 +32,11 @@ def now() -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("--db", required=True, help="SQLite 数据库路径")
+    ap.add_argument("--db", required=True, help=t("main.migrate_scope_glob.arg_db"))
     ap.add_argument(
         "--apply",
         action="store_true",
-        help="真正写库 (默认 dry-run, 只打印会改的内容)",
+        help=t("main.migrate_scope_glob.arg_apply"),
     )
     args = ap.parse_args()
 
@@ -49,7 +58,7 @@ def main() -> int:
         for row in conn.execute("SELECT id, business_name FROM businesses").fetchall()
     }
 
-    print(f"[migrate] 待迁移: {len(plan)} 行 (out of {len(rows)} total)")
+    print(t("main.migrate_scope_glob.to_migrate", {"plan": len(plan), "total": len(rows)}))
     if plan:
         print(f"{'id':>4}  {'biz_id':>6}  {'biz_name':<20}  {'scope_name':<10}  {'old':<35}  -> new")
         print("-" * 110)
@@ -67,7 +76,7 @@ def main() -> int:
         conn.commit()
         print(f"\n[migrate] applied ({len(plan)} rows updated at {ts})")
     else:
-        print("\n[migrate] dry-run, 加 --apply 真正执行")
+        print(t("main.migrate_scope_glob.dry_run"))
 
     conn.close()
     return 0

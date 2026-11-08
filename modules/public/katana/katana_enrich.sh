@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# katana_enrich.sh — CLI 入口(给 daily-url stage + dashboard 手动调用)
+# katana_enrich.sh — CLI entry point (called manually by the daily-url stage + the dashboard)
 #
-# 用法:
+# Usage:
 #   katana_enrich.sh --db <path> --business <name> --hosts-file <file>
 #   katana_enrich.sh --help
 #
-# 退出码:
+# Exit codes:
 #   0  = ok
-#   3  = 缺 katana 二进制
-#   4  = db / hosts-file 不存在
-#   5  = hosts 文件为空
-#   6  = business 不在 businesses 表
-#   非0 = katana_runner.py 自身异常
+#   3  = katana binary missing
+#   4  = db / hosts-file does not exist
+#   5  = hosts file is empty
+#   6  = business not in the businesses table
+#   non-zero = katana_runner.py raised on its own
 #
-# 环境变量:
-#   KATANA_BIN            二进制路径(env > PATH > 报错)
-#   KATANA_TIMEOUT        单 host 超时(默认 600s,跟 scan_urls 同款)
-#   KATANA_EXTRA_RISKS    追加风险词(逗号分隔,默认 5 词)
-#   KATANA_OMIT_BODY=1    关闭 body 落库(response_hash 退化为 status|length)
-#   KATANA_EXTRA_FLAGS    追加 katana flags(空格分隔)
+# Environment variables:
+#   KATANA_BIN            binary path (env > PATH > error)
+#   KATANA_TIMEOUT        per-host timeout (default 600s, same as scan_urls)
+#   KATANA_EXTRA_RISKS    extra risk words (comma separated, 5 words by default)
+#   KATANA_OMIT_BODY=1    turn off storing the body (response_hash degrades to status|length)
+#   KATANA_EXTRA_FLAGS    extra katana flags (space separated)
 
 set -euo pipefail
 
@@ -57,8 +57,8 @@ if [ ! -f "$RUNNER" ]; then
     exit 3
 fi
 
-# exec 是有意的:让 python 进程直接接管,信号(Ctrl+C)更干净地传到 runner;
-# 后续无任何逻辑,SC2093 误报。
+# exec is intentional: it lets the python process take over directly, so signals (Ctrl+C) reach the runner more cleanly;
+# there is no logic after it, SC2093 is a false positive.
 # shellcheck disable=SC2093
 exec python3 "$RUNNER" enrich \
     --db "$DB" \

@@ -2,21 +2,26 @@
 # set_config.sh — view or update recon_business_config for one business.
 #
 # Usage:
-#   ./manage/set_config.sh -n <业务名>                              # 仅查看当前 config
-#   ./manage/set_config.sh -n <业务名> --disable                    # enabled=0
-#   ./manage/set_config.sh -n <业务名> --enable                     # enabled=1
-#   ./manage/set_config.sh -n <业务名> --web 0 --icp 1              # 多个字段
+#   ./manage/set_config.sh -n <business name>                       # show the current config only
+#   ./manage/set_config.sh -n <business name> --disable             # enabled=0
+#   ./manage/set_config.sh -n <business name> --enable              # enabled=1
+#   ./manage/set_config.sh -n <business name> --web 0 --icp 1       # several fields
 #
-# 规则:
-#   - -n 必填; 至少一个变更 flag; 不给任何 flag = 只读
-#   - --enable / --disable 二选一, 互斥
-#   - --web/--tcp/--icp 值必须 0 或 1
-#   - 业务行必须在; 不存在时直接报错 (add_business.sh 才会创建)
-#   - 仅修改你给的字段, 其它字段不动
+# Rules:
+#   - -n is required; at least one change flag; no flag at all = read-only
+#   - --enable / --disable: pick one, they are mutually exclusive
+#   - --web/--tcp/--icp values must be 0 or 1
+#   - the business row must exist; error out when it does not (only add_business.sh creates it)
+#   - only the fields you pass are modified, the other fields stay untouched
 
 set -euo pipefail
 
 RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 DB="${RECON_DB:-$RECON_ROOT/main/db/recon.sqlite3}"
 
 NAME=""
@@ -51,11 +56,22 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$NAME" ] || { echo "[-n <业务名>] is required" >&2; usage 1; }
+[ -n "$NAME" ] || { echo "$(t main.set_config.arg_name_required)" >&2; usage 1; }
 [ -f "$DB" ]  || { echo "[-d] db not found: $DB" >&2; exit 1; }
 
 python3 - "$DB" "$NAME" "$ENABLE_FLAG" "$WEB" "$TCP" "$ICP" <<'PY'
 import sqlite3, sys
+from pathlib import Path
+
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at
+# this depth. Walk up to the repo root (the directory that holds
+# "modules") and add the lib directory to the path.
+for _p in Path.cwd().resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
+
 db, biz, enable_flag, web, tcp, icp = sys.argv[1:7]
 
 conn = sqlite3.connect(db)
@@ -63,7 +79,7 @@ row = conn.execute(
     "SELECT id FROM businesses WHERE TRIM(business_name)=?", (biz,)
 ).fetchone()
 if row is None:
-    sys.exit(f"[set_config] business '{biz}' 不存在; 先跑 manage/add_business.sh")
+    sys.exit(_t("main.set_config.business_missing", {"biz": biz}))
 bid = int(row[0])
 
 cur = conn.execute(
@@ -71,7 +87,7 @@ cur = conn.execute(
     (bid,),
 ).fetchone()
 if cur is None:
-    sys.exit(f"[set_config] business_id={bid} 无 config 行; 先跑 manage/add_business.sh")
+    sys.exit(_t("main.set_config.config_row_missing", {"bid": bid}))
 before = dict(enabled=int(cur[0]), web=int(cur[1]), tcp=int(cur[2]), icp=int(cur[3]))
 
 updates = {}

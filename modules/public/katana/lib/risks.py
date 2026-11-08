@@ -1,25 +1,27 @@
-"""risks.py — katana 模块的危险路由黑名单。
+"""risks.py — the dangerous route blacklist of the katana module.
 
-沿用 URLFinder 默认 5 词(URLFinder/config/config.go:19):
+Uses the URLFinder default 5 words (URLFinder/config/config.go:19):
     remove / delete / insert / update / logout
 
-双重保险:
-  1. 源头拦截 — katana_enrich.sh 用 -crawl-out-scope regex 拦住
-  2. 入库前 gate — is_dangerous_url() 标 is_dangerous=1, danger_reason=占位文案
-     (跟 URLFinder 行为完全对齐,srcradar web_hash_urls.is_dangerous 列因此有值)
+Belt and braces:
+  1. blocked at the source — katana_enrich.sh blocks them with the -crawl-out-scope regex
+  2. gate before the insert — is_dangerous_url() sets is_dangerous=1, danger_reason=placeholder text
+     (exactly aligned with URLFinder behaviour, so the srcradar web_hash_urls.is_dangerous column gets a value)
 
-注意:
-  - 子串匹配有固有误伤(URL 含 delete-check 这种只读查询路径会被拦);
-    这是 URLFinder 原生缺陷,本模块继承,不引入更复杂判断(成本/复杂度不划算)
-  - 5 词黑名单通过环境变量 KATANA_EXTRA_RISKS 可追加(逗号分隔),
-    例:KATANA_EXTRA_RISKS="signout,drop,truncate" python3 ...
+Notes:
+  - substring matching has inherent false positives (a URL holding a read-only query path
+    such as delete-check is blocked too);
+    this is a native URLFinder flaw, this module inherits it and does not introduce a more
+    complex check (the cost/complexity is not worth it)
+  - the 5-word blacklist can be extended via the KATANA_EXTRA_RISKS environment variable (comma separated),
+    e.g. KATANA_EXTRA_RISKS="signout,drop,truncate" python3 ...
 """
 from __future__ import annotations
 
 import os
 import re
 
-# URLFinder 同款 5 词(URLFinder/config/config.go:19)
+# the same 5 words as URLFinder (URLFinder/config/config.go:19)
 DEFAULT_RISKS: tuple[str, ...] = (
     "remove",
     "delete",
@@ -30,10 +32,10 @@ DEFAULT_RISKS: tuple[str, ...] = (
 
 
 def get_risks() -> tuple[str, ...]:
-    """返回生效的黑名单 tuple。
+    """Return the effective blacklist tuple.
 
-    优先级:env KATANA_EXTRA_RISKS 追加 > DEFAULT_RISKS。
-    重复词自动去重(保持 tuple 顺序)。
+    Priority: the env KATANA_EXTRA_RISKS additions > DEFAULT_RISKS.
+    Duplicate words are removed automatically (the tuple order is kept).
     """
     extra = os.environ.get("KATANA_EXTRA_RISKS", "").strip()
     if not extra:
@@ -47,10 +49,10 @@ def get_risks() -> tuple[str, ...]:
 
 
 def _build_pattern(risks: tuple[str, ...]) -> re.Pattern[str]:
-    """构造 katana -crawl-out-scope 用的 regex。
+    """Build the regex used by katana -crawl-out-scope.
 
-    例:5 词默认 → r"/(remove|delete|insert|update|logout)/i"
-    注:katana -cos 接受 Go RE2 语法;本构造兼容 RE2(只用 | / i)。
+    Example: the 5-word default → r"/(remove|delete|insert|update|logout)/i"
+    Note: katana -cos accepts Go RE2 syntax; this construction is RE2 compatible (it only uses | / i).
     """
     if not risks:
         return re.compile(r"$^")
@@ -63,10 +65,10 @@ _cached_pattern: re.Pattern[str] | None = None
 
 
 def crawl_out_scope_pattern() -> str:
-    """返回 katana -crawl-out-scope 用的 regex 字符串。
+    """Return the regex string used by katana -crawl-out-scope.
 
-    调用方:
-        katana ... -crawl-out-scope "<本函数返回值>"
+    Caller:
+        katana ... -crawl-out-scope "<the return value of this function>"
     """
     global _cached_risks, _cached_pattern
     risks = get_risks()
@@ -77,10 +79,10 @@ def crawl_out_scope_pattern() -> str:
 
 
 def is_dangerous_url(url: str) -> bool:
-    """入库前 gate:URL 含任一风险词 → True。
+    """Gate before the insert: the URL contains any risk word → True.
 
-    与 URLFinder crawler/state.go:127 行为完全一致:
-        if strings.Contains(u, v) { ... 标 danger }
+    Exactly the same behaviour as URLFinder crawler/state.go:127:
+        if strings.Contains(u, v) { ... mark danger }
     """
     if not url:
         return False

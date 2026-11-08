@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-r"""target_glob.py — 把 target.txt / exclude.txt 编译为 glob 语义 ERE/正则。
+r"""target_glob.py — compiles target.txt / exclude.txt into glob-semantics ERE/regex.
 
-设计:
-- `*` 语义: glob 通配,匹配任意字符(包括 `.`)。等价 ERE `.*`。
-- 锚定: 匹配主机名边界 `(^|\.)pattern$`,避免 `*.example.com` 误命中 `notexample.com`。
-- Base 提取: 从右往左累积不含 `*` 的连续 label,首个含 `*` 的 label 处停止。
-  例:
+Design:
+- `*` semantics: a glob wildcard, it matches any character (including `.`). The equivalent ERE is `.*`.
+- Anchoring: it matches the hostname boundary `(^|\.)pattern$`, so that `*.example.com` does not hit `notexample.com` by accident.
+- Base extraction: it accumulates the run of labels without a `*` from right to left and stops at the first label that contains a `*`.
+  Examples:
     cc-*.example.com   -> example.com
     *.example.com      -> example.com
     aaa.*.bbb.com      -> bbb.com
     ccc.bbb.com        -> ccc.bbb.com
 
-CLI 用法(scan.sh 调用):
+CLI usage (called by scan.sh):
     python3 target_glob.py targets-ere  --input target.txt
     python3 target_glob.py excludes-ere --input exclude.txt
     python3 target_glob.py all-bases    --input target.txt
@@ -23,10 +23,18 @@ import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 
 def extract_base(pattern: str) -> str:
-    """从 glob pattern 提取 base 域(最右连续不含 * 的 label 段)。"""
+    """Extract the base domain from a glob pattern (the rightmost run of labels without a *)."""
     parts = pattern.strip().lower().rstrip(".").split(".")
     base_parts: list[str] = []
     for label in reversed(parts):
@@ -37,14 +45,16 @@ def extract_base(pattern: str) -> str:
 
 
 def glob_to_anchored_ere(pattern: str) -> str:
-    """glob -> 锚定 ERE。
+    """glob -> anchored ERE.
 
-    re.escape() 转义所有正则元字符(包括 `*` → `\\*`),然后把转义后的 `\\*` 还原为 `.*`。
-    锚定到主机名边界:`(^|\\.)pattern$`。
+    re.escape() escapes every regex metacharacter (including `*` -> `\\*`),
+    then the escaped `\\*` is turned back into `.*`.
+    Anchored to the hostname boundary: `(^|\\.)pattern$`.
 
-    注:不能用 `(?:^|\\.)` 非捕获组,因为 scan.sh:84/145-148 调用的是
-    `grep -E`(POSIX ERE),非捕获组在 ERE 不合法,GNU grep 静默返回 0 命中。
-    用 `(^|\\.)` 捕获组等价语义、合法 ERE。
+    Note: the non-capturing group `(?:^|\\.)` cannot be used, because
+    scan.sh:84/145-148 calls `grep -E` (POSIX ERE), where a non-capturing
+    group is invalid and GNU grep silently reports 0 matches.
+    The capturing group `(^|\\.)` has the same semantics and is valid ERE.
     """
     p = pattern.strip().lower().rstrip(".")
     if not p:
@@ -54,7 +64,7 @@ def glob_to_anchored_ere(pattern: str) -> str:
 
 
 def compile_targets_ere(targets: Iterable[str]) -> str:
-    """返回可喂给 grep -E 的一行一条 ERE,空输入返回永不匹配的正则。"""
+    """Return one ERE per line, ready to feed to grep -E; an empty input returns a regex that never matches."""
     patterns = [glob_to_anchored_ere(t) for t in targets]
     patterns = [p for p in patterns if p]
     if not patterns:
@@ -63,10 +73,12 @@ def compile_targets_ere(targets: Iterable[str]) -> str:
 
 
 def matches_glob(host: str, pattern: str) -> bool:
-    """glob 匹配(用于 Python 端的 host 判定)。
+    """Glob matching (for the host decision on the Python side).
 
-    与 ERE 编译路径 (`glob_to_anchored_ere`) 用同一套锚定语义,避免 Python 端
-    与 grep 端行为分裂:pattern 锚定到主机名边界,允许子域名前缀。
+    Uses the same anchoring semantics as the ERE compilation path
+    (`glob_to_anchored_ere`), so that the Python side and the grep side
+    cannot drift apart: the pattern is anchored to the hostname boundary
+    and a subdomain prefix is allowed.
     """
     h = host.strip().lower().rstrip(".")
     ere = glob_to_anchored_ere(pattern)
@@ -83,7 +95,7 @@ def matches_any_glob(host: str, patterns: Iterable[str]) -> bool:
 
 
 def compile_exclude_patterns(excludes: Iterable[str]) -> list[re.Pattern]:
-    """exclude 全部按 glob 编译为锚定 ERE(无 keyword 分支,B 决定)。"""
+    """Every exclude is compiled as a glob into an anchored ERE (no keyword branch, decision B)."""
     patterns: list[re.Pattern] = []
     for item in excludes:
         value = item.strip().lower().rstrip(".")
@@ -105,7 +117,7 @@ def matches_exclude_glob(host: str, excludes: Iterable[str]) -> bool:
 
 
 def _read_scope_lines(path: str) -> list[str]:
-    """读文件,跳过空行和 # 注释,统一小写去尾点,去重保序。"""
+    """Read a file, skipping blank lines and # comments, lowercasing and dropping the trailing dot, deduplicating while keeping the order."""
     seen: set[str] = set()
     out: list[str] = []
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -123,18 +135,23 @@ def _read_scope_lines(path: str) -> list[str]:
 
 
 def partition_alive_hosts(alive_path: str, bases: list[str], output_dir: str) -> dict:
-    """把 alive.txt 按 base 分桶:每个 host 归到最长匹配的 base,无匹配→unmatched。
+    """Bucket alive.txt by base: every host goes to the longest matching
+    base, and a host with no match goes to unmatched.
 
-    长匹配优先:base label 段越长 = 越具体(子域名 base 比根域名 base 长)。
-    例: bases=[example.com, api.example.com], host=dev.api.example.com
-        → 匹配 api.example.com(更长、更具体)。
-    bases 之间长度相同但不相同的话不会互相误匹配(同长度 base 若有包含关系则
-    base label 数不同 → 长度必不同)。
+    The longer match wins: the more label segments a base has, the more
+    specific it is (a subdomain base is longer than the root domain base).
+    Example: bases=[example.com, api.example.com], host=dev.api.example.com
+        -> matches api.example.com (longer, more specific).
+    Two bases of the same length never match each other by accident (two
+    bases of the same length that contain one another would have a
+    different number of labels, so their lengths differ).
 
-    写文件:
-      <output_dir>/alive.base.<base>   一行一个 host
-      <output_dir>/alive.unmatched     无法归类的 host(理论上不应出现,因 alive.txt
-                                       已在 stage 1.5 过 targets.regex)
+    Files written:
+      <output_dir>/alive.base.<base>   one host per line
+      <output_dir>/alive.unmatched     hosts that could not be classified
+                                       (in theory this cannot happen,
+                                       because alive.txt already went
+                                       through targets.regex in stage 1.5)
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -177,24 +194,24 @@ def partition_alive_hosts(alive_path: str, bases: list[str], output_dir: str) ->
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="target.txt / exclude.txt glob 编译器")
+    ap = argparse.ArgumentParser(description=t("main.target_glob.description"))
     ap.add_argument(
         "mode",
         choices=["targets-ere", "excludes-ere", "base", "all-bases", "all-glob-check", "partition-alive"],
     )
-    ap.add_argument("--input", required=True, help="scope 文件 / alive.txt 路径")
-    ap.add_argument("--bases", default="", help="partition-alive 用,逗号分隔 base 列表")
-    ap.add_argument("--output-dir", default="", help="partition-alive 用,分桶输出目录")
+    ap.add_argument("--input", required=True, help=t("main.target_glob.arg_scope_files"))
+    ap.add_argument("--bases", default="", help=t("main.target_glob.arg_bases"))
+    ap.add_argument("--output-dir", default="", help=t("main.target_glob.arg_out_dir"))
     args = ap.parse_args()
 
     if args.mode == "partition-alive":
         if not args.bases:
-            sys.exit("[partition-alive] --bases 不能为空")
+            sys.exit(t("main.target_glob.bases_empty"))
         if not args.output_dir:
-            sys.exit("[partition-alive] --output-dir 不能为空")
+            sys.exit(t("main.target_glob.output_dir_empty"))
         bases = [b.strip().lower().rstrip(".") for b in args.bases.split(",") if b.strip()]
         if not bases:
-            sys.exit("[partition-alive] --bases 解析后为空")
+            sys.exit(t("main.target_glob.bases_parsed_empty"))
         stats = partition_alive_hosts(args.input, bases, args.output_dir)
         n_assigned = sum(stats["counts"].values())
         print(
@@ -206,7 +223,10 @@ def main() -> int:
             if c > 0:
                 print(f"  {b}: {c}", file=sys.stderr)
         if stats["unmatched"] > 0:
-            print(f"  unmatched: {stats['unmatched']} (详见 {args.output_dir}/alive.unmatched)", file=sys.stderr)
+            print(
+                f"  {t('main.target_glob.unmatched_detail', {'count': stats['unmatched'], 'output_dir': args.output_dir})}",
+                file=sys.stderr,
+            )
         return 0
 
     lines = _read_scope_lines(args.input)
@@ -214,7 +234,7 @@ def main() -> int:
     if args.mode == "targets-ere":
         print(compile_targets_ere(lines))
     elif args.mode == "excludes-ere":
-        # 与 targets 用同一套编译逻辑(无 keyword 分支)
+        # uses the same compilation logic as targets (no keyword branch)
         print(compile_targets_ere(lines))
     elif args.mode == "base":
         for ln in lines:
@@ -224,7 +244,7 @@ def main() -> int:
             if b:
                 print(b)
     elif args.mode == "all-glob-check":
-        # 自检: 列出每个 pattern 的 base(给 debug / 验证用)
+        # self-check: list the base of every pattern (for debug / verification)
         for ln in lines:
             print(f"{ln}\t{extract_base(ln)}")
     return 0

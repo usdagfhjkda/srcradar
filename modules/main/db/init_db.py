@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""init_db.py — 根据 db/schema.sql 生成空 recon.sqlite3。
+"""init_db.py — build an empty recon.sqlite3 from db/schema.sql.
 
-用法:
+Usage:
     python3 init_db.py [DB_PATH] [SCHEMA_SQL]
 
-    DB_PATH      默认 <repo>/db/recon.sqlite3
-    SCHEMA_SQL   默认 <repo>/db/schema.sql
+    DB_PATH      default <repo>/db/recon.sqlite3
+    SCHEMA_SQL   default <repo>/db/schema.sql
 
-行为:
-    - DB_PATH 不存在 → 直接建
-    - DB_PATH 已存在 → 备份到 DB_PATH.bak.YYYYMMDD_HHMMSS 再覆盖
-    - 建完校验 14 张 srcradar 表都存在;缺则报错退出 2
+Behaviour:
+    - DB_PATH does not exist → create it directly
+    - DB_PATH already exists → back it up to DB_PATH.bak.YYYYMMDD_HHMMSS, then overwrite
+    - after building, verify that all 14 srcradar tables exist; if any is missing, error out with exit 2
 
-退出码:
-    0 = 成功
-    2 = 缺表 / schema.sql 缺失 / sqlite 执行失败
+Exit codes:
+    0 = success
+    2 = missing table / schema.sql missing / sqlite execution failed
 """
 from __future__ import annotations
 
@@ -23,6 +23,14 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_DB = REPO / "db" / "recon.sqlite3"
@@ -41,39 +49,39 @@ def main() -> int:
     schema_path = Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_SCHEMA
 
     if not schema_path.exists():
-        print(f"[err] schema.sql 缺失: {schema_path}", file=sys.stderr)
+        print(t("main.init_db.schema_missing", {"schema_path": schema_path}), file=sys.stderr)
         return 2
 
-    # 已存在 → 备份
+    # already exists → back it up
     if db_path.exists():
         ts = time.strftime("%Y%m%d_%H%M%S")
         bak = db_path.with_suffix(db_path.suffix + f".bak.{ts}")
-        print(f"[warn] DB 已存在 → 备份到 {bak}")
+        print(t("main.init_db.backup_written", {"bak": bak}))
         shutil.move(str(db_path), str(bak))
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 喂 schema
+    # feed the schema
     sql = schema_path.read_text(encoding="utf-8")
     try:
         con = sqlite3.connect(str(db_path))
         con.executescript(sql)
         con.commit()
     except sqlite3.Error as e:
-        print(f"[err] sqlite 执行失败: {e}", file=sys.stderr)
+        print(t("main.init_db.sqlite_failed", {"e": e}), file=sys.stderr)
         return 2
     finally:
         con.close()
 
-    # 校验
+    # verify
     con = sqlite3.connect(str(db_path))
     try:
         got = {r[0] for r in con.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         missing = NEED_TABLES - got
         if missing:
-            print(f"[err] DB 建好后缺表: {sorted(missing)}", file=sys.stderr)
-            print("[err]  schema.sql 不完整,看 db/schema.sql", file=sys.stderr)
+            print(t("main.init_db.missing_tables", {"tables": sorted(missing)}), file=sys.stderr)
+            print(t("main.init_db.schema_incomplete"), file=sys.stderr)
             return 2
 
         n_tbl   = len(got)
@@ -84,8 +92,8 @@ def main() -> int:
     finally:
         con.close()
 
-    print(f"[ok] DB 初始化: {db_path}")
-    print(f"     {n_tbl} tables / {n_idx} indexes / {n_trig} triggers")
+    print(t("main.init_db.initialized", {"db_path": db_path}))
+    print(t("main.init_db.counts", {"tables": n_tbl, "indexes": n_idx, "triggers": n_trig}))
     return 0
 
 

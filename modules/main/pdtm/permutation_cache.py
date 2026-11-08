@@ -1,10 +1,10 @@
-"""alterx 排列状态缓存。
+"""alterx permutation state cache.
 
-子命令:
-  filter  - 读 stdin 上的候选排列,过滤掉已解析/缓存未到期/泛解析命中的项,输出剩余
-  record  - 把 dnsx 解析结果写回 permutation_state
+Subcommands:
+  filter  - read the candidate permutations on stdin, filter out the ones already resolved / still cached / matched by wildcard resolution, output the rest
+  record  - write the dnsx resolution results back into permutation_state
 
-nxdomain 缓存窗口 30 天,词表 hash 变更触发全量重试。
+The nxdomain cache window is 30 days; a wordlist hash change triggers a full retry.
 """
 from __future__ import annotations
 
@@ -16,8 +16,17 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from alterx_runs import mark_ran_with_conn
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
-CACHE_DAYS = 30  # nxdomain 重试窗口
+CACHE_DAYS = 30  # nxdomain retry window
 
 
 def now_iso() -> str:
@@ -68,7 +77,7 @@ def filter_permutations(db_path: str, business_id: int, wordlist_hash: str,
             continue
         status, next_at, wlh = row
         if wlh != wordlist_hash:
-            kept.append(perm)  # 词表变更,重新尝试
+            kept.append(perm)  # wordlist changed, retry
             continue
         if status in ("resolved", "wildcard_hit"):
             skipped_resolved += 1
@@ -79,8 +88,10 @@ def filter_permutations(db_path: str, business_id: int, wordlist_hash: str,
         kept.append(perm)
 
     print(
-        f"[permutation_cache] 输入去重 {len(seen)}, 保留 {len(kept)}, "
-        f"跳过已解析 {skipped_resolved}, 跳过缓存未到期 {skipped_cached}",
+        t("main.permutation_cache.counts", {
+            "seen": len(seen), "kept": len(kept),
+            "resolved": skipped_resolved, "cached": skipped_cached,
+        }),
         file=sys.stderr,
     )
     return kept
@@ -123,8 +134,8 @@ def record_permutations(db_path: str, business_id: int, wordlist_hash: str,
                 """,
                 rows,
             )
-        # 与 alterx_runs 在同一 commit,半状态无法回滚。无候选时也写
-        # alterx_runs,这样 FORCE_ALTERX=1 之类也能正确重置节奏时钟。
+        # same commit as alterx_runs, a half state cannot be rolled back. also written
+        # when there are no candidates, so that things like FORCE_ALTERX=1 correctly reset the cadence clock.
         mark_ran_with_conn(
             conn, business_id, wordlist_hash,
             candidates=len(rows), resolved=len(resolved_set),
@@ -133,27 +144,27 @@ def record_permutations(db_path: str, business_id: int, wordlist_hash: str,
     finally:
         conn.close()
     if rows:
-        print(f"[permutation_cache] 写回 {len(rows)} 条 (alterx_runs 同事务标记)", file=sys.stderr)
+        print(t("main.permutation_cache.written", {"count": len(rows)}), file=sys.stderr)
     else:
-        print("[permutation_cache] 无候选,但仍标记 alterx_runs 以重置节奏时钟", file=sys.stderr)
+        print(t("main.permutation_cache.no_candidates"), file=sys.stderr)
     return len(rows)
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="alterx 排列状态缓存")
+    p = argparse.ArgumentParser(description=t("main.permutation_cache.description"))
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pf = sub.add_parser("filter", help="过滤已解析/缓存未到期的 permutation")
+    pf = sub.add_parser("filter", help=t("main.permutation_cache.arg_filter"))
     pf.add_argument("--db", required=True)
     pf.add_argument("--business-id", type=int, required=True)
     pf.add_argument("--wordlist-hash", required=True)
 
-    pr = sub.add_parser("record", help="写回 dnsx 解析结果")
+    pr = sub.add_parser("record", help=t("main.permutation_cache.arg_writeback"))
     pr.add_argument("--db", required=True)
     pr.add_argument("--business-id", type=int, required=True)
     pr.add_argument("--wordlist-hash", required=True)
-    pr.add_argument("--candidates", required=True, help="alterx 输出文件")
-    pr.add_argument("--resolved", required=True, help="dnsx 解析后输出文件")
+    pr.add_argument("--candidates", required=True, help=t("main.permutation_cache.arg_alterx_out"))
+    pr.add_argument("--resolved", required=True, help=t("main.permutation_cache.arg_dnsx_out"))
 
     args = p.parse_args()
 

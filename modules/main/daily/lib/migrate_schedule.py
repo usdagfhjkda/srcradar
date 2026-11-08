@@ -7,21 +7,21 @@ Usage:
 
 Side effects: schema only. No row data is modified.
 
-设计要点
-========
-- 1 subdomain = 1 行 schedule(同一子域不被两个业务复用)
-- 复合 PK: (business_id, subdomain)
-- sources TEXT: 逗号分隔子集,默认 'urlfinder'
-- last_run_at: 上次"成功"扫描完成时间(ISO 8601);失败不写,下次以
-  上次成功为基线判定复活(stayed-alive vs true reactivation)
-- enabled: 0 = cron 跳过;用于 dashboard toggle "加入 / 移除每日扫描"
-  按两次移除 = DELETE 行(语义比 enabled=0 更干净;audit 友好)
-
-触发器 / diff
+Design notes
 ============
-- 不接 change_type 触发器(schedule 本身不是扫描产物,是配置)
-- diff.py 不消费本表(配置变更不入业务日报)
-- 唯一被 cron 读的位置:run_one_business.sh 的 daily-url 阶段
+- 1 subdomain = 1 schedule row (the same subdomain is not shared by two businesses)
+- composite PK: (business_id, subdomain)
+- sources TEXT: comma-separated subset, default 'urlfinder'
+- last_run_at: completion time of the last "successful" scan (ISO 8601); a failed run is not written,
+  the next run takes the last success as its baseline to decide resurrection (stayed-alive vs true reactivation)
+- enabled: 0 = cron skips it; used by the dashboard toggle "add to / remove from daily scan";
+  removing twice in a row = DELETE the row (cleaner semantics than enabled=0; audit friendly)
+
+Triggers / diff
+===============
+- no change_type trigger (the schedule itself is not a scan product, it is config)
+- diff.py does not consume this table (config changes do not go into the business daily report)
+- the only place cron reads it: the daily-url stage of run_one_business.sh
 """
 import sqlite3
 import sys

@@ -1,6 +1,8 @@
-# srcradar — SRC 资产测绘与监控流水线
+# srcradar — the pipeline of the mapping and of the monitoring of the SRC assets
 
-> 企业资产采集 → 主动测绘 → 每日增量监控 → 本地可视化的端到端 SRC 工具链
+> English | [中文](README_zh.md)
+
+> the tool chain of SRC that goes from the collection of the assets of a company to the active mapping, to the daily incremental monitoring and to the local visualisation
 
 <p align="left">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
@@ -13,797 +15,422 @@
 <br>
 
 <p align="center">
-  <img src="./assets/dashboard-overview.png" alt="srcradar Dashboard 总览" width="900">
+  <img src="./assets/dashboard-overview.png" alt="the overview of the srcradar dashboard" width="900">
 </p>
 
 <p align="center">
-  <em>Dashboard 总览（127.0.0.1:8765，7 个核心 tab：任务状态 / 站点详情 / 端口服务 / 风险等级 / 子公司 / 小程序 / 公众号）</em>
+  <em>The overview of the dashboard (127.0.0.1:8765, the 4 core tabs: Task Status / Site Details / Port Services / Risk Level)</em>
 </p>
 
 <br>
 
-**srcradar** 是一站式 SRC 资产测绘与监控流水线：**业务名 → 法律实体图谱 → 主动测绘 → 每日增量 diff → 本地 dashboard**。其核心组成:
+**srcradar** is the pipeline of the mapping and of the monitoring of the SRC assets, all in one place: **a business and the list of its scoped assets → the active mapping → the daily incremental diff → a local dashboard**. Its core parts:
 
-| 角色 | 模块 | 性质 |
+| The role | The module | The nature |
 |---|---|---|
-| **主干** | `pdtm`（主动测绘 4 阶段编排）+ `daily`（cron + 快照 diff + 本地 dashboard）+ `manage`（业务录入） | 默认安装、自动运行 |
-| **可选 plugin** | `db_align`（enscan，企业图谱，标 LOCKED tag）+ `ymicp`（小程序 / 公众号备案反查） | 自部署、自启用 |
-| **共享数据** | 单 SQLite (`db/recon.sqlite3`) 串联所有产出 |
+| **The backbone** | `pdtm` (the orchestration of the 4 stages of the active mapping) + `daily` (the cron + the diff of the snapshots + the local dashboard) + `manage` (the entry of the businesses) | installed by default, it runs on its own |
+| **An optional plugin** | `katana` (the scan of the URL assets) + `health` (the health checks of the operation) + `notify` (the encrypted push of the report) | self deployed, self enabled |
+| **A separate repository** | `srcradar-algo-diff-cpp` (the C++ core of the judgement of a change) + `srcradar-mcp-server` (the MCP adapter for the local agents) | installed beside the tree, the sources are not shared |
+| **The shared data** | a single SQLite (`db/recon.sqlite3`) connects every output |
 
-可选用 plugin 的安装 / 使用 / 运维 详见各自 README：[`db_align/README.md`](./modules/public/db_align/README.md) · [`ymicp/README.md`](./modules/public/ymicp/README.md)。**仅供合法授权场景使用**（详见使用前提与合规）。本工具**只做信息收集**，不涉及漏洞利用。
+The installation / the use / the operation of the optional plugins are in the README of each of them: [`katana/README.md`](./modules/public/katana/README.md) · [`health/README.md`](./modules/public/health/README.md) · [`notify/README.md`](./modules/public/notify/README.md). **It is for the authorized scenarios only** (see the prerequisites and the compliance below). This tool **only collects information**, it does not exploit anything.
 
----
-
-## 使用前提与合规
-
-本工具**仅供持有合法书面授权的用户**使用，合规授权包括但不限于：
-
-- **SRC（安全响应中心）合作协议**
-- **渗透测试授权**（合同 / PDF 留档）
-- **资产白名单**（自有资产 / 已签托管协议 / 测试域名）
-
-srcradar 仅提供**技术实现**，**不参与、不背书、不知情**任何具体使用场景。
-
-**运营者承担全部合规责任**。包括但不限于：目标单位授权、跨境数据传输合规（个保法 PIPL / 数据出境安全评估）、`爱企查/天眼查/七麦` 等数据源 ToS 遵守。
-
-完整法律条款见 [`LICENSE`](./LICENSE)（Apache-2.0）+ [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md)（附加使用限制与免责声明）+ [`NOTICE`](./NOTICE)（上游致谢）+ [`ymicp/README.md`](./modules/public/ymicp/README.md) §声明（ymicp 模块专属告知）。
-
-> **工具定位**：srcradar 是**信息收集**工具（子域枚举 / DNS 解析 / 端口探测 / HTTP 探测 / URL 资产扫描），**不涉及漏洞利用或 PoC 触发**。如需漏洞验证，请使用专门的漏洞扫描工具。
+> **The plugins of the domestic registries**: `db_align` (the graph of the legal entities, it marks the LOCKED tag) and `ymicp` (the reverse lookup of the filing of the mini programs / of the WeChat accounts) read the Chinese corporate and the ICP registries, so they work only for the targets of China. Their documentation is [`db_align/README.md`](./modules/public/db_align/README.md) · [`ymicp/README.md`](./modules/public/ymicp/README.md). The backbone does not need them: the scopes come from an input directory or from a seed TSV.
 
 ---
 
-## 是什么
+## The prerequisites and the compliance
 
-为 SRC(安全响应中心)运营场景,把「业务名 → 法律实体图谱 → 主动测绘资产 → 每日增量监控」做成一条流水线:
+This tool is **for the users that hold a legal written authorization** only, and a compliant authorization includes, without being limited to:
 
-- **数据契约**:所有产出沉淀在一个共享的 SQLite(`db/recon.sqlite3`),按业务名隔离
-- **运维契约**:每天 03:00 北京时间自动跑一轮,产出增量报告 + 本地可视化 dashboard
-- **协作契约**:不抢上游(`ENScan_GO`)、不抢下游(其它资产测绘工具),只做连接与编排
+- **An agreement of a SRC (a security response center)**
+- **An authorization of a penetration test** (the contract / the PDF is kept)
+- **A whitelist of the assets** (the assets of the company itself / a托管 agreement that was signed / the domains of a test)
+
+srcradar only provides the **technical implementation**, it **does not take part in, does not endorse and does not know** any concrete use case.
+
+**The operator carries the whole responsibility of the compliance.** It includes, without being limited to: the authorization of the target, the compliance of the cross border transfer of the data (the PIPL / the security assessment of the data that leaves the country), and the respect of the ToS of the data sources such as `爱企查/天眼查/七麦`.
+
+The whole legal terms are in [`LICENSE`](./LICENSE) (Apache-2.0) + [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md) (the additional restrictions of the use and the disclaimer) + [`NOTICE`](./NOTICE) (the thanks to the upstream, and the notices of the optional plugins).
+
+> **The position of the tool**: srcradar is a tool of **information collection** (the enumeration of the subdomains / the resolution of the DNS / the probe of the ports / the probe of the HTTP / the scan of the URL assets), and it **does not exploit anything and does not trigger any PoC**. Use a dedicated vulnerability scanner when a vulnerability has to be verified.
 
 ---
 
-## 快速开始
+## What it is
+
+For the operation of a SRC (a security response center), it turns "a business and the list of its scoped assets → the active mapping of the assets → the daily incremental monitoring" into a single pipeline:
+
+- **The contract of the data**: every output settles in one shared SQLite (`db/recon.sqlite3`), isolated by the name of the business
+- **The contract of the operation**: one round runs on its own every day at 03:00 Beijing time, it produces the incremental report + the local dashboard of the visualisation
+- **The contract of the collaboration**: it does not take the place of the downstream (the other asset mapping tools), it only connects and orchestrates
+
+---
+
+## The quick start
 
 ```bash
-# 0. 装系统依赖(Ubuntu/Debian):sqlite3 给 daily DB / cron 给定时跑;
-#    go/python3/git 等由 ./check.sh 引导
+# 0. install the system dependencies (Ubuntu/Debian): sqlite3 for the daily DB / cron for the scheduled runs;
+#    go/python3/git and the like are guided by ./check.sh
 sudo apt update
 sudo apt install sqlite3 cron -y
 
-# 1. 拉代码(public 镜像)
+# 1. pull the code (the public mirror)
 git clone https://github.com/usdagfhjkda/srcradar.git
 cd srcradar
 
-# 2. 检查环境(只查不装):需要 go>=1.25, python3>=3.12, git>=2.0
+# 2. check the environment (it only checks, it does not install): it needs go>=1.25, python3>=3.12, git>=2.0
 ./check.sh
 
-# 3. 装所有上游依赖(pdtm 装 dnsx/httpx/subfinder/alterx/naabu/cdncheck
-#    -> cdnmatch -> 自动 init-db;
-#    默认勾选 main/{db,lib,manage,pdtm},daily 默认不勾(避免自动注册 cron);
-#    db_align (enscan) 与 ymicp 由 install.sh 单独引导,详见各自 README):
-./install.sh                       # 交互式 checklist(回车切换 / 0 确认 / q 退出)
-./install.sh --skip-check          # 已知环境达标,跳过 check.sh 直接进 checklist
+# 3. install all the upstream dependencies (pdtm installs dnsx/httpx/subfinder/alterx/naabu/cdncheck
+#    -> the init-db on its own;
+#    main/{db,lib,manage,pdtm} are ticked by default, daily is not (it avoids the automatic registration of the cron)):
+./install.sh                       # the interactive checklist (enter switches / 0 confirms / q quits)
+./install.sh --skip-check          # the environment is known to be good, it skips check.sh and goes straight to the checklist
 
-#    DB 路径优先级(由 ./srcradar 顶部统一处理):
+#    The priority of the path of the DB (it is handled at the top of ./srcradar):
 #      1) CLI --db / $RECON_DB env
-#      2) config/db.conf 的 recon_db_path(./install.sh 末尾自动生成)
-#      3) /opt/srcradar/db/recon.sqlite3(docker image 内固定)
-#      4) /data/recon.sqlite3(兼容老 mount)
-#      5) 模块默认(<repo>/modules/main/db/recon.sqlite3)
+#      2) the recon_db_path of config/db.conf (it is generated at the end of ./install.sh)
+#      3) /opt/srcradar/db/recon.sqlite3 (it is fixed inside the docker image)
+#      4) /data/recon.sqlite3 (it is compatible with the old mount)
+#      5) the default of the modules (<repo>/modules/main/db/recon.sqlite3)
 
-# 4. (可选) 如需 enscan 插件,详见 [db_align/README.md](./modules/public/db_align/README.md) §安装
-#    (标 LOCKED tag,需人工授权;运行时半自动介入 — cookie 失效自愈 / 缓存清理,
-#     见 [db_align/README.md](./modules/public/db_align/README.md) §运维)
-
-# 5. (可选) 如需小程序备案反查 plugin,详见 [ymicp/README.md](./modules/public/ymicp/README.md) §部署
-
-# 装完先看一眼 dispatcher 能干啥(列出全部 module/script 对,常用 cheat sheet)
+# once it is installed, look at what the dispatcher can do (it lists every pair of module/script, it is the cheat sheet of the usual ones)
 ./srcradar --list
 
-# 6. 喂入一个精确单子域 + 注册业务
-#    add_business -i <dir> 要求目录下有 target.txt;
-#    成功后会自动清理 target.txt(详见 已知问题 §14)
+# 6. feed an exact single subdomain + register the business
+#    add_business -i <dir> needs a target.txt in the directory;
+#    it cleans the target.txt on its own after the success
 mkdir -p ~/scope
-echo www.scanme.sh > ~/scope/target.txt
+echo www.example.com > ~/scope/target.txt
 ./srcradar manage add_business -n test -i ~/scope
 
-# 7. 跑该业务的 pdtm 流水线(dnsx + scanner.sh + import)
-#    stages 由 recon_business_config 表按位 gating(详见 日常运维):
-#    -n test 业务用默认值 web=1 / tcp=0 / icp=1,实际跑 pdtm + icp
+# 7. run the pipeline of pdtm of that business (dnsx + scanner.sh + import)
+#    the stages are gated by the bits of the table recon_business_config (see the daily operation):
+#    the business of the test uses the default values web=1 / tcp=0 / icp=1, it really runs pdtm + icp
 ./srcradar daily run_one_business test
 
-# 8. 起 dashboard(默认 127.0.0.1:8765,仅本机可访问;docker / 远程访问见 §Docker 启动)
+# 8. start the dashboard (127.0.0.1:8765 by default, only this machine can reach it; see §The startup with Docker for the docker / the remote access)
 ./srcradar daily dashboard
 ```
 
-> **入口约定**:`check.sh` 与 `install.sh` 是 2026-09 重构后的入口;老 `init.sh` 仅保留 `--init-db` / `--check-schema` 两个独立工具入口(详见 [日常运维](#日常运维))。
+> **The convention of the entry points**: `check.sh` and `install.sh` are the entry points of the refactoring of 2026-09; the old `init.sh` only keeps the two standalone tool entries `--init-db` / `--check-schema` (see [the daily operation](#the-daily-operation)).
 
-> **新 shell 必跑**:`pdtm` 与 PD 工具装到 `~/go/bin/` 与 `~/.pdtm/go/bin/`,**不会**自动进当前 shell 的 PATH;新开的 shell 需要手动 `source ~/.bashrc` 或 `source ~/.zshrc`(按你的 shell 选),或者在脚本里 `export PATH="$PATH:$HOME/go/bin:$HOME/.pdtm/go/bin"` 才能直接 `pdtm` / `dnsx` 不报 not found。
+> **A new shell has to load the PATH**: `pdtm` and the tools of PD are installed into `~/go/bin/` and `~/.pdtm/go/bin/`, and they **do not** enter the PATH of the current shell on their own; a new shell has to `source ~/.bashrc` or `source ~/.zshrc` by hand (pick the one of your shell), or the script has to `export PATH="$PATH:$HOME/go/bin:$HOME/.pdtm/go/bin"` before `pdtm` / `dnsx` stop reporting that they are not found.
 
-> **装到哪**:pdtm 装到 `~/go/bin/`;PD 工具链(dnsx/httpx/subfinder/alterx/naabu/cdncheck)由 pdtm 管理在 `~/.pdtm/go/bin/`;cdnmatch 在 `pdtm/bin/`;空 DB `db/recon.sqlite3` 由 install.sh 末尾自动建。详见 [`install.sh`](install.sh) 头部注释。
+> **Where it is installed**: pdtm is installed into `~/go/bin/`; the tool chain of PD (dnsx/httpx/subfinder/alterx/naabu/cdncheck) is managed by pdtm in `~/.pdtm/go/bin/`; the empty database `db/recon.sqlite3` is created at the end of install.sh. See the comment at the top of [`install.sh`](install.sh).
 
-> **运行要求**:srcradar 的主动扫描能力依赖 `install.sh` 自动装的外部工具(`httpx`、`dnsx`、`naabu`、`subfinder`、`alterx`、`cdncheck`)。这些工具不随仓库分发,需要先跑 `./check.sh` + `./install.sh`。详见 上游致谢。
+> **The requirements of the run**: the active scan of srcradar depends on the external tools that install.sh installs (`httpx`, `dnsx`, `naabu`, `subfinder`, `alterx`, `cdncheck`). These tools do not come with the repository, `./check.sh` + `./install.sh` have to run first. See the thanks to the upstream.
 
 ### Quick reference (`./srcradar` dispatcher)
 
-不必 `cd modules/<x>/<y>` —— 根目录的 `./srcradar` 自动发现并执行所有模块脚本:
+There is no need to `cd modules/<x>/<y>` — the `./srcradar` of the root finds and runs the scripts of every module on its own:
 
 ```bash
-./srcradar --list                    # 列出全部 (module, script) 对
-./srcradar manage add_business -n exampleCo    # 业务录入
-./srcradar manage set_config  -n exampleCo    # 配置修改
-./srcradar db init_db                          # 建空 SQLite
-./srcradar db check_schema                    # 校对 schema 漂移
-./srcradar pdtm scan -b exampleCo             # 单业务主动扫描
-./srcradar daily daily_monitor                 # 手动跑日级流水线
-./srcradar ymicp icp_mapp_query -b exampleCo  # 备案反查
+./srcradar --list                    # it lists every pair of (module, script)
+./srcradar manage add_business -n exampleCo    # the entry of a business
+./srcradar manage set_config  -n exampleCo    # the change of the configuration
+./srcradar db init_db                          # it creates an empty SQLite
+./srcradar db check_schema                    # it checks the drift of the schema
+./srcradar pdtm scan -b exampleCo             # the active scan of a single business
+./srcradar daily daily_monitor                 # it runs the daily pipeline by hand
 ```
 
-模块解析顺序 `modules/private` → `modules/main` → `modules/public`(内部模块覆盖公开模块);脚本类型 `.sh` 优先于 `.py`,并要求 `.sh` 文件带可执行位。完整脚本列表跑 `./srcradar --list`。
+The order of the resolution of the modules is `modules/private` → `modules/main` → `modules/public` (an internal module overrides a public one); the type of the script `.sh` comes before `.py`, and a `.sh` file has to carry the executable bit. `./srcradar --list` prints the whole list of the scripts.
 
 ---
 
-## Docker 启动
+## The startup with Docker
 
-> 单容器把 srcradar 全栈跑起来:DB 持久化到 named volume,业务 scope 从 bind-mount 目录喂入,dashboard 默认仅 loopback 暴露(下文给一条 `--host 0.0.0.0` 的命令用于同主机访问)。
+> A single container runs the whole stack of srcradar: the database is persisted in a named volume, the scopes of the businesses are fed from a bind mount directory, and the dashboard is exposed on the loopback only by default (a command with `--host 0.0.0.0` is given below for an access from the same host).
 
 ```bash
-# 1. 加载本地镜像(从 srcradar-0.1.0.tar)
-sudo docker load -i ~/srcradar-0.1.0.tar
+# 1. load the local image (from srcradar-1.0.0.tar)
+sudo docker load -i ~/srcradar-1.0.0.tar
 
-# 2. 启动容器
-#    -v ~/scope:/scope             target.txt / exclude.txt 输入目录
-#    -v srcradar-db:/opt/srcradar/db   DB 持久化(named volume,容器删了 DB 还在)
-#    -p 127.0.0.1:8765:8765        dashboard 仅本机可访问(防公网暴露)
+# 2. start the container
+#    -v ~/scope:/scope             the input directory of target.txt / exclude.txt
+#    -v srcradar-db:/opt/srcradar/db   the persistence of the DB (a named volume, the DB stays when the container is removed)
+#    -p 127.0.0.1:8765:8765        the dashboard is only reachable from this machine (it avoids an exposure to the public network)
 sudo docker run -d --name srcradar \
   -v ~/scope:/scope \
   -v srcradar-db:/opt/srcradar/db \
   -p 127.0.0.1:8765:8765 \
-  srcradar:0.1.0
+  srcradar:1.0.0
 
-# 3. 进容器交互 shell
+# 3. enter the interactive shell of the container
 sudo docker exec -it srcradar /bin/bash
 
-# 4. 列脚本(验证 dispatcher)
+# 4. list the scripts (it verifies the dispatcher)
 srcradar --list
 
-# 5. 喂入一个精确单子域 + 注册业务
-echo www.scanme.sh > /scope/target.txt
+# 5. feed an exact single subdomain + register the business
+echo www.example.com > /scope/target.txt
 srcradar manage add_business -n test -i /scope
 
-# 6. 跑该业务的 pdtm 流水线(dnsx + scanner.sh + import)
+# 6. run the pipeline of pdtm of that business (dnsx + scanner.sh + import)
 srcradar daily run_one_business test
 
-# 7. 起 dashboard(同主机访问用 --host 0.0.0.0;仅自己访问可省)
+# 7. start the dashboard (use --host 0.0.0.0 for an access from the same host, you can leave it out if only you reach it)
 srcradar daily dashboard --host 0.0.0.0
 ```
 
-> **端口暴露面**:`-p 127.0.0.1:8765:8765` 仅绑定 loopback,公网与内网其他机器都访问不到;要看 dashboard,从同主机 `curl http://127.0.0.1:8765/` 即可,或从远端走 SSH 隧道 (`ssh -L 8765:127.0.0.1:8765 user@<srcradar-host>`)。
+> **The surface of the exposed ports**: `-p 127.0.0.1:8765:8765` binds the loopback only, neither the public network nor the other machines of the intranet can reach it; to see the dashboard, `curl http://127.0.0.1:8765/` from the same host is enough, or go through a tunnel of the SSH from a remote host (`ssh -L 8765:127.0.0.1:8765 user@<srcradar-host>`).
 >
-> **DB 持久化**:`srcradar-db` 是 docker named volume,容器被 `docker rm` 后下次 `docker run -v srcradar-db:/opt/srcradar/db` 还能挂回同名 volume,业务数据不丢。需要看 DB 内容:`sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`。
+> **The persistence of the database**: `srcradar-db` is a docker named volume, and after the container was removed with `docker rm` the next `docker run -v srcradar-db:/opt/srcradar/db` mounts the volume of the same name again, so the data of the businesses is not lost. To see the content of the database: `sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`.
 >
-> **target.txt 一次性消费**:`add_business` 成功后会自动清理 `/scope/target.txt`(README 已知问题 §14);下次再喂 scope 直接重写 `/scope/target.txt` 重跑 `add_business` 即可。
+> **The one time consumption of target.txt**: after the success of `add_business`, `/scope/target.txt` is cleaned up on its own; to feed the scopes again, write `/scope/target.txt` again and run `add_business` again.
 
 ---
 
-## 架构
+## The architecture
 
 ```
-   ┌─────────────────┐
-   │   business name │       e.g. "ExampleCo"
-   └────────┬────────┘
-            ▼
-   ┌──────────────────────┐         ┌──────────────────────────┐
-   │   db_align (Go)      │────────►│  ENScan_GO (上游子进程)   │
-   │ resolver→crawler     │         │  爱企查/天眼查/七麦        │
-   │       →store         │         └──────────────────────────┘
+   ┌──────────────────────┐
+   │   the business       │        e.g. "ExampleCo"
    └──────────┬───────────┘
               ▼
-   ┌──────────────────────────────────────┐
-   │  db/recon.sqlite3  (WAL, 共享)        │
-   │  businesses · companies · mapp_records│
-   │  scopes · web_subdomains · tcp_assets│
-   └──────────────┬───────────────────────┘
-                  ▼
-   ┌───────────────────────┐    ┌──────────────────────────┐
-   │  pdtm (shell+py)      │    │  ymicp (Python)          │
-   │  主动测绘 4 阶段:       │    │  小程序/公众号备案回查    │
-   │  subfinder→alterx→    │    │  -b 业务模式批量          │
-   │  dnsx→naabu→httpx     │    │                          │
-   │  →import_scan_results │    │  ⭐ 用户自部署,srcradar   │
-   │                       │    │    仅提供客户端            │
-   └──────────┬────────────┘    └──────────┬───────────────┘
-              ▼                            ▼
-   ┌─────────────────────────────────────────────────────────┐
-   │                daily/  (cron + Python)                   │
-   │  snapshot.py → diff.py → reports/<run-id>/ + dashboard  │
-   └─────────────────────────────────────────────────────────┘
+   ┌──────────────────────────┐
+   │ the scopes of a business │
+   │  a target.txt, or        │
+   │  a seed TSV              │
+   └──────────────────────────┘
+              ▼
+   ┌────────────────────────────────────┐
+   │ db/recon.sqlite3  (WAL, shared)    │
+   │ businesses · scopes ·              │
+   │ web_subdomains · web_hashes ·      │
+   │ tcp_assets                         │
+   └────────────────────────────────────┘
+               ▼
+   ┌────────────────────────┐
+   │ pdtm (shell + py)      │
+   │ the 4 stages of the    │
+   │ active mapping:        │
+   │ dnsx→naabu→httpx       │
+   │ →import_scan_results   │
+   └────────────────────────┘
+               ▼
+   ┌──────────────────────────────────────────────────────────┐
+   │ daily/  (cron + Python)                                  │
+   │ snapshot.py → diff.py → reports/<run-id>/ + dashboard    │
+   └──────────────────────────────────────────────────────────┘
 ```
 
 <br>
 
-**关键不变量**
+**The key invariants**
 
-- 各模块按**业务名**解耦,1:N 的 `businesses.id` → `companies.business_id` 是隔离边界
-- `db_align` 不写 `web_subdomains` / `tcp_assets` / `permutation_state`,那是 pdtm 的领地
-- pdtm 不写 `mapp_records`,那是 `db_align` + ymicp 的领地
-- `daily/` 只读 DB + 拍快照,永不动业务表
+- The modules are decoupled **by the name of the business**, the `businesses.id` is the boundary of the isolation
+- The scope of a business is the only input of the mapping, the other modules do not widen it
+- `daily/` only reads the database and takes a snapshot, it never touches a table of a business
+
+> **The stdin of the tools of ProjectDiscovery has to be closed**: any call of `dnsx` / `httpx` / `naabu` / `subfinder` / `cdncheck` has to get `< /dev/null`, when the script that calls it is run from the outside by `bash script.sh`. Those tools close the stdin in a best-effort way, but it was measured that they park for good in a sub shell, and the pipeline hangs until the end of the time. `cdncheck` still needs it as a fallback, even though the CDN judgement of the pdtm module runs offline and does not call the cdncheck binary any more.
 
 ---
 
-## 模块
+## The modules
 
-| 模块 | 角色 | 详情 |
+The tree is made of modules. The ones under `modules/main` are the
+backbone, they are installed by default and they run on their own. The
+ones under `modules/public` are the optional plugins, they are deployed
+and enabled by the operator. The last two live in a repository of their
+own.
+
+| The module | The role | The details |
 |---|---|---|
-| `db_align/` | **enscan plugin（可选用）**：业务名 → 法律图谱 + 资产反查(Go orchestrator) | [README](./modules/public/db_align/README.md) · [CLAUDE.md](./modules/public/db_align/CLAUDE.md) |
-| `internal/resolver` | AQC 多候选打分,严格模式拒绝弱匹配 | `MinAcceptScore=80`,弱匹配需 `-broad` 或 `-pid` 旁路 |
-| `internal/crawler` | 控股树遍历 + 资产 section 反查 | 进程内 `seen[pid]` 环守卫,默认 51% 控股阈值 |
-| `internal/store` | SQLite upsert + schema 增量迁移 | 只增 `service_type_map` / 2 index / `companies.group` |
-| `internal/permute` | 关键词变体生成 + 数字↔汉字转换 | 单测覆盖 |
-| `pdtm/` | 主动测绘 4 阶段编排 | [README](./modules/main/pdtm/README.md) |
-| `pipeline.sh` | 顶层编排 + 自动清理 | `flock` 互斥,失败保留现场可选 |
-| `scan.sh` | 子域派生 + 精确/glob 双路 | 无 `*` 走 fast path 直接 dnsx,有 `*` 走 subfinder → alterx → permutation |
-| `scanner.sh` | DNS 解析 + CDN 研判 + 端口扫描 | `cdnmatch` 离线研判替代老 cdncheck 阻塞调用;`httpx` / `dnsx` 加 `< /dev/null` 防 stdin hang |
-| `cdnmatch/` | Go 包装器(可选):CDN/WAF/Cloud 分类 | 离线网段匹配,需 build,详见 已知问题 §10 |
-| 外部依赖 | `httpx` / `dnsx` / `naabu` / `subfinder` / `alterx` 等 | 由用户安装到 PATH(见 日常运维),srcradar 仅调用 |
-| `bin/` | build 产物目录(cdnmatch 可选) | 不随仓库分发,需要用户自行 build |
-| `target_glob.py` | `target.txt` → ERE + base 提取 | `(^&#124;\.)` POSIX ERE 合规(原 PCRE 静默 0 命中已修) |
-| `import_scan_results.py` | `scan_results/` → 入库 | 按 `response_hash` 去重 |
-| `ymicp/` | **集成层 plugin（可选用）**：小程序/公众号备案批量回查 | [README](./modules/public/ymicp/README.md) |
-| `daily/` | cron + 快照 diff + dashboard | [README](./modules/main/daily/README.md) |
-| `daily_monitor.sh` | cron 入口 + 多阶段编排 + 按 config 过滤 | `flock` 互斥;阶段固定序:`enscan → pdtm → icp`;每业务按 `recon_business_config` 过滤 |
-| `lib/snapshot.py` | 6 表全量拍快照 JSON | 派生 `host_ip_map` 供 dashboard IP 列回填 |
-| `lib/diff.py` | 快照对比 → 增量报告 | added/reactivated/deactivated/changed/deleted |
-| `lib/dashboard.py` | 127.0.0.1 只读 Web,4 tab | 任务状态/站点详情/端口服务/风险等级 |
-| `ENScan_GO/` | 第三方爱企查客户端,作为子进程 | vendored 源码 + `outs/` xlsx 落盘 |
-| `db/recon.sqlite3` | 共享数据,所有模块写入 | WAL + busy_timeout 5s,允许并发读 |
+| `modules/main/pdtm` | **the active mapping**: the orchestration of the 4 stages (the wildcard resolution → the enumeration and the derivation of the subdomains → the judgement of the CDN + the scan of the ports + the probe of the web → the import into the SQLite) | the tool chain of ProjectDiscovery, it is called, not forked; [README](./modules/main/pdtm/README.md) |
+| `modules/main/lib` | **the shared helpers**: the parser of `config/*.conf`, the forwarder of the language lookup, the resolver of the DNS resolver list | every module of the tree reaches it through the same short path |
+| `modules/main/daily` | **the daily operation**: the cron, the snapshot of the tables, the diff of the snapshots and the local dashboard | the dashboard binds 127.0.0.1 only, its 4 tabs are Task Status / Site Details / Port Services / Risk Level; [README](./modules/main/daily/README.md) |
+| `modules/main/manage` | **the entry of the businesses**: the registration of a business, the switches of a business, the seeds, the language and the resolver set | the scripts of the operator; [README](./modules/main/manage/README.md) |
+| `modules/main/db` | **the shared data**: the creation of the SQLite and the incremental migrations of the schema | `db/recon.sqlite3`, the mode WAL + a busy_timeout of 5s |
+| `modules/main/i18n` | **the language of the output**: the message tables of the user-visible output and the gate that keeps them consistent | the zh and the en tables, the check of the placeholders and of the bodies; [README](./modules/main/i18n/README.md) |
+| `modules/public/katana` | **the plugin of the URL assets**: the scan at the granularity of the URL | optional, self deployed; [README](./modules/public/katana/README.md) |
+| `modules/public/health` | **the plugin of the operation**: the health checks of the disk / of the CPU / of the memory / of the cron / of the dashboard | optional, it pushes through the plugin of the notification; [README](./modules/public/health/README.md) |
+| `modules/public/notify` | **the plugin of the push**: the encrypted report of the day, sent to the mailbox of the operator | optional, the body is encrypted with GPG; [README](./modules/public/notify/README.md) |
+| `srcradar-algo-diff-cpp` | **the judgement of a change**: the C++ core that decides, for every asset, whether it changed since the day before | a repository of its own, the tree calls its binary, the sources are not shared |
+| `srcradar-mcp-server` | **the adapter for the agents**: it exposes the commands of the tree over the MCP protocol, so a local agent calls them over HTTP instead of opening a session on the host | a repository of its own, it holds no data of the businesses, it only forwards the calls |
 
 ---
 
-## 共享数据模型
+## The model of the shared data
 
-数据库 `db/recon.sqlite3`,WAL 模式 + busy_timeout 5s。
+The database `db/recon.sqlite3`, the mode WAL + a busy_timeout of 5s.
 
-| 表 | 用途 | 写入方 |
+| The table | What it holds | Who writes it |
 |---|---|---|
-| `businesses` | SRC 业务字典(`id`, `business_name`) | 任意,按 `business_name` 唯一 |
-| `recon_business_config` | 业务级阶段开关(`business_id`, `enabled`, `web`, `tcp`, `icp`) | 手动 SQL;`daily_monitor.sh` 读后按业务过滤 |
-| `companies` | 法律实体(`business_id`, `unit_name`, `nature_name`, `main_licence`, `group`) | `db_align` + `ymicp` |
-| `mapp_records` | ICP/小程序/App/公众号等备案与轻资产(`company_id`, `service_licence`, `service_type`) | `db_align` + `ymicp` |
-| `scopes` | 可测/非可测资产白名单 | **`db_align -scope`** / **`pdtm finalize_scope`** / **`manage/scope_import.sh`**（3 条独立路径，任一即可） |
-| `web_subdomains` / `web_hashes` | Web 资产 + 指纹库 | `pdtm/import_scan_results.py` |
-| `tcp_assets` | TCP 端口资产 | `pdtm/import_scan_results.py` |
-| `permutation_state` | alterx 派生状态缓存(当前 per-entry 30 天冷却;**待改为按周期整表 wipe — 见已知问题 §13**) | `pdtm/permutation_cache.py` |
-| `service_type_map` | `service_type` 整型 → 人类可读名(自动累积) | `db_align` upsert 时 `INSERT OR IGNORE` |
+| `businesses` | the dictionary of the SRC businesses (`id`, `business_name`) | anybody, it is unique by `business_name` |
+| `recon_business_config` | the switches of the stages of a business (`business_id`, `enabled`, `web`, `tcp`, `icp`) | a manual SQL; `daily_monitor.sh` reads it and filters by business |
+| `scopes` | the whitelist of the measurable and of the assets that are not measurable | **`pdtm finalize_scope`** / **`manage/scope_import.sh`** (2 independent paths, any of them is enough) |
+| `web_subdomains` / `web_hashes` | the web assets + the library of the fingerprints | `pdtm/import_scan_results.py` |
+| `tcp_assets` | the assets of the TCP ports | `pdtm/import_scan_results.py` |
+| `permutation_state` | the cache of the state of the derivation of alterx (a cooling of 30 days per entry for the moment; **it has to become a wipe of the whole table per period**) | `pdtm/permutation_cache.py` |
 
-字段协作契约见各模块 README —— `db_align/README.md` §Caveats / `pdtm/README.md` §DB Schema。
+The contract of the collaboration of the fields is in the README of each module — `pdtm/README.md` §DB Schema.
 
 ---
 
-## 日常运维
+## The daily operation
 
-> 这一节是**答"装完该怎么用"**。脚本入口级 runbook 见各模块 README,这里只给最常用的几条。
+> This section answers the question "what do I do once it is installed". The runbook of the entry point of the scripts is in the README of each module, here are only the most used ones.
 
-详细文档落在脚本同目录:
+The detailed documentation sits next to the scripts:
 
-- **加业务 / 改业务级开关 / seed TSV** → [`manage/README.md`](./modules/main/manage/README.md)
-- **装 cron / 卸 cron / 单业务手动跑 / 拍快照 / dashboard** → [`daily/README.md`](./modules/main/daily/README.md)
-- **入 scope / 跑全流程 pipeline** → [`pdtm/README.md`](./modules/main/pdtm/README.md)
-- **法律实体反查(db_align) flags** → [`db_align/README.md`](./modules/public/db_align/README.md)
+- **add a business / change the switch of a business / the seed TSV** → [`manage/README.md`](./modules/main/manage/README.md)
+- **install the cron / remove the cron / run a single business by hand / take a snapshot / the dashboard** → [`daily/README.md`](./modules/main/daily/README.md)
+- **enter the scopes / run the whole pipeline** → [`pdtm/README.md`](./modules/main/pdtm/README.md)
 
-### 常见任务命令
+### The language of the output
 
-> 所有命令从仓库根执行;`./srcradar --list` 看完整脚本列表。
-> stages(`pdtm` / `icp` / `enscan` / `daily-url`)在 `recon_business_config` 表里按业务配 0/1
-> (web/tcp 控 pdtm, icp 控 ymicp, enscan ungated)。见 [`daily/run_one_business.sh`](./modules/main/daily/run_one_business.sh) 头部。
+The user-visible output (the `--help` of the tools, the runtime messages,
+the pages of the dashboard, the daily report and the body of the mail)
+follows one setting. The resolution order is:
 
-| 任务 | 命令 |
-|---|---|
-| 新建业务 + 灌入 scope | `./srcradar manage add_business -n <业务名> -i <input_dir>` |
-| 仅入库 scope 不扫描(回填老 scope 用) | `./srcradar pdtm scope_import -b <业务> -i <input_dir>` |
-| 看 / 改业务级开关 | `./srcradar manage set_config -n <业务名> [--enable/--disable/--web 0\|1 --tcp 0\|1 --icp 0\|1]` |
-| 跑单业务全流程(已入 scope 后,按配置表 gating) | `./srcradar daily run_one_business <业务名>` |
-| 手动拉控股树 / ICP / 小程序(enscan plugin) | 详见 [`modules/public/db_align/README.md`](./modules/public/db_align/README.md) |
-| 跑小程序备案反查(ymicp plugin) | 详见 [`modules/public/ymicp/README.md`](./modules/public/ymicp/README.md) |
-| 装 cron(每天 03:00 北京时间,cron 行固定 `-type pdtm,icp`) | `./srcradar daily install_cron` |
-| 卸 cron | `./srcradar daily install_cron uninstall` |
-| 看 cron 是否装上 | `crontab -l \| grep daily_monitor` |
-| 起 dashboard(默认 127.0.0.1:8765) | `./srcradar daily dashboard` |
+1. the `SRCDAR_LANG` environment variable (for the CI and the temporary
+   overrides)
+2. the `lang` field of `config/lang.conf` (the persistent choice of the
+   operator)
+3. `en` as the default
 
-### 三个常用 stage 串顺序(pipeline / run_one_business 内部固定)
-
-```
-enscan(db_align)  →  pdtm  →  icp(ymicp)  →  daily-url
-   ↓                  ↓         ↓                ↓
-写 companies /    写 web_sub /  写 mapp_records /   写 web_hash_urls
-scopes            tcp_assets
-```
-
-任何阶段失败不会阻塞后续阶段——`run_one_business.sh` 返回**位掩码 exit code**:
-
-| bit | 含义 |
-|---|---|
-| 1 (1) | pdtm 失败 |
-| 2 (2) | enscan 失败 |
-| 4 (4) | icp 失败 |
-| 8 (8) | daily-url 失败 |
-| 0 | 全部 OK 或 skipped |
-
-### 业务可跳过 cron(operator 后台控制)
-
-每个业务有 `recon_business_config.enabled` 开关。`--disable` 后该业务**所有阶段**都被 cron + `run_one_business.sh` 跳过,但**仍会拍快照**(用于 diff 监控"未跑期间"的新增)。
+The installer of the i18n module writes `config/lang.conf` on the first
+install, and it never overwrites an existing one: the choice of the
+operator wins there. The deliberate switch is the script of the manage
+module:
 
 ```bash
-./srcradar manage set_config -n <业务名> --disable   # 暂停
-./srcradar manage set_config -n <业务名> --enable    # 恢复
-./srcradar manage set_config -n <业务名>             # 查看当前配置
+./srcradar manage set_lang            # shows the language in effect
+./srcradar manage set_lang --lang zh  # Chinese
+./srcradar manage set_lang --lang en  # English
 ```
 
-详细语义见 `daily/README.md` §"跳过不想跑的业务"和 §"安装 / 卸载 cron"。
+The dashboard also takes the language per request: `?lang=zh` or
+`?lang=en` overrides the setting for that one page.
+
+### The DNS resolver set
+
+The lists live in `modules/main/pdtm/resolvers/`, one file per set:
+`cn` (the resolvers of the domestic operators) and `global` (the public
+resolvers of the world). The domestic resolvers answer the foreign names
+differently from the public ones, and the difference shows in the assets
+that are collected.
+
+```bash
+./srcradar manage set_resolvers                # shows the set in effect
+./srcradar manage set_resolvers --set cn       # the domestic set
+./srcradar manage set_resolvers --set global   # the public resolvers of the world
+./srcradar manage set_resolvers --set auto     # the language decides
+```
+
+The `auto` mode follows the language: the Chinese language means the
+domestic set, every other language means the global set. The language is
+the field that `set_lang.sh` writes, so the two settings stay in step.
+
+The choice is the `resolver_set` field of `config/pdtm.conf`. The
+installer writes the default only when the field is missing, so an
+install does not reset the choice of the operator.
+
+### The commands of the common tasks
+
+> Every command runs from the root of the repository; `./srcradar --list` prints the whole list of the scripts.
+> The stages (`pdtm` / `daily-url`) are configured with a 0/1 per business in the table `recon_business_config`
+> (web/tcp drive pdtm). See the top of [`daily/run_one_business.sh`](./modules/main/daily/run_one_business.sh).
+
+| The task | The command |
+|---|---|
+| create a business + fill the scopes | `./srcradar manage add_business -n <business name> -i <input_dir>` |
+| only store the scopes without scanning (to fill the old scopes back) | `./srcradar pdtm scope_import -b <business> -i <input_dir>` |
+| look at / change the switch of a business | `./srcradar manage set_config -n <business name> [--enable/--disable/--web 0\|1 --tcp 0\|1 --icp 0\|1]` |
+| look at / change the language of the output | `./srcradar manage set_lang [--lang zh\|en]` |
+| look at / change the DNS resolver set | `./srcradar manage set_resolvers [--set cn\|global\|auto]` |
+| run the whole flow of a single business (once the scopes are in, it is gated by the table of the configuration) | `./srcradar daily run_one_business <business name>` |
+| install the cron (every day at 03:00 Beijing time) | `./srcradar daily install_cron` |
+| remove the cron | `./srcradar daily install_cron uninstall` |
+| see whether the cron is installed | `crontab -l \| grep daily_monitor` |
+| start the dashboard (127.0.0.1:8765 by default) | `./srcradar daily dashboard` |
+
+### The order of the stages (it is fixed inside the pipeline / inside run_one_business)
+
+```
+pdtm  →  daily-url
+  ↓              ↓
+writes web_sub /  writes web_hash_urls
+tcp_assets
+```
+
+A failure of a stage does not block the stages that come after — `run_one_business.sh` returns an **exit code of a bit mask**:
+
+| The bit | What it means |
+|---|---|
+| 1 (1) | pdtm failed |
+| 2 (2) | the stage of the legal entities failed (it belongs to an optional plugin) |
+| 4 (4) | the stage of the filings failed (it belongs to an optional plugin) |
+| 8 (8) | daily-url failed |
+| 0 | everything is OK or it was skipped |
+
+### A business can skip the cron (the operator controls it in the background)
+
+Every business has the switch `recon_business_config.enabled`. After a `--disable`, **every stage** of that business is skipped by the cron and by `run_one_business.sh`, but **the snapshot is still taken** (it watches the additions of the period when it did not run).
+
+```bash
+./srcradar manage set_config -n <business name> --disable   # pause it
+./srcradar manage set_config -n <business name> --enable    # restore it
+./srcradar manage set_config -n <business name>             # show the current configuration
+```
+
+The detailed semantics are in `daily/README.md`, in the sections "Skipping a business that should not run" and "Installing / removing the cron".
 
 ---
 
-## 上游致谢
+## The thanks to the upstream
 
-本项目的可执行能力由下列上游项目支撑,详见顶部 `LICENSE`(Apache-2.0)与 [`NOTICE`](./NOTICE) 文件。
+The executable capacity of this project rests on the following upstream projects, see the `LICENSE` (Apache-2.0) at the top and the file [`NOTICE`](./NOTICE).
 
-### 代码上游（srcradar 直接调用或源码依赖）
+### The upstream of the code (srcradar calls it directly or depends on its source)
 
-| 上游项目 | 角色 | License | 维护关系 |
+| The upstream project | The role | The license | The maintenance relation |
 |---|---|---|---|
-| **[mssky9527/ENScan_GO](https://github.com/mssky9527/ENScan_GO)**（原仓库 [wgpsec/ENScan_GO](https://github.com/wgpsec/ENScan_GO) 已迁移）| 企业信息采集（爱企查/天眼查/七麦/风鸟） | **Apache-2.0** | © 2023-2026 keac @ wgpsec |
-| **[projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)** | Web 主动探测 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[projectdiscovery/dnsx](https://github.com/projectdiscovery/dnsx)** | DNS 批量解析 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **projectdiscovery/cdncheck**（被 [`modules/main/pdtm/cdnmatch`](./modules/main/pdtm/cdnmatch/) import，未修改源码）| CDN/WAF 离线分类 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **modernc.org/sqlite**（`db_align` 依赖）| 纯 Go SQLite 驱动 | **BSD-3-Clause** | © modernc.org/sqlite authors |
+| **[projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)** | the active probe of the web | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[projectdiscovery/dnsx](https://github.com/projectdiscovery/dnsx)** | the batch resolution of the DNS | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **projectdiscovery/cdncheck** (it is imported by the CDN judgement of the pdtm module, the source is not modified) | the offline classification of the CDN / of the WAF | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
 
-### 包管理与外部依赖（pdtm 装的工具集 + 推荐装工具）
+### The management of the packages and the external dependencies (the set of the tools that pdtm installs + the tools that are recommended)
 
-| 工具 | 上游 | License | 维护关系 |
+| The tool | The upstream | The license | The maintenance relation |
 |---|---|---|---|
-| **[pdtm](https://github.com/projectdiscovery/pdtm)** | 包管理器（装 PD 工具链） | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[subfinder](https://github.com/projectdiscovery/subfinder)** | 子域枚举 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[alterx](https://github.com/projectdiscovery/alterx)** | 关键词派生 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[naabu](https://github.com/projectdiscovery/naabu)** | TCP 端口扫描 | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **[ffuf](https://github.com/ffuf/ffuf)** | URL 字典爆破（`pdtm/scan_urls.py`）| **MIT** | © 2021 Joona Hoikkala |
-| **[gau](https://github.com/lc/gau)** | wayback / 历史 URL（`pdtm/scan_urls.py`）| **MIT** | © 2025 Corben Leo |
-| **[URLFinder](https://github.com/pingc0y/URLFinder)**（中文社区版 by pingc0y）| 主动爬虫（`pdtm/scan_urls.py`）| **MIT** | © 2022 pingc0y |
-| **[massdns](https://github.com/blechschmidt/massdns)** | 高性能 DNS 批量解析（暴力爆破阶段，shuffledns 的硬依赖）| ⚠️ **GPL-3.0** | © 2017 Marc Blechschmidt |
-| **[shuffledns](https://github.com/projectdiscovery/shuffledns)** | DNS 解析（暴力爆破阶段）| ⚠️ **GPL-3.0** | © 2022 ProjectDiscovery, Inc. |
+| **[pdtm](https://github.com/projectdiscovery/pdtm)** | the package manager (it installs the tool chain of PD) | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[subfinder](https://github.com/projectdiscovery/subfinder)** | the enumeration of the subdomains | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[alterx](https://github.com/projectdiscovery/alterx)** | the derivation of the keywords | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[naabu](https://github.com/projectdiscovery/naabu)** | the scan of the TCP ports | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **[ffuf](https://github.com/ffuf/ffuf)** | the brute force of the URLs with a dictionary (`pdtm/scan_urls.py`) | **MIT** | © 2021 Joona Hoikkala |
+| **[gau](https://github.com/lc/gau)** | the wayback / the historical URLs (`pdtm/scan_urls.py`) | **MIT** | © 2025 Corben Leo |
+| **[URLFinder](https://github.com/pingc0y/URLFinder)** (the Chinese community edition by pingc0y) | the active crawler (`pdtm/scan_urls.py`) | **MIT** | © 2022 pingc0y |
+| **[massdns](https://github.com/blechschmidt/massdns)** | the batch resolution of the DNS at a high performance (the stage of the brute force, a hard dependency of shuffledns) | ⚠️ **GPL-3.0** | © 2017 Marc Blechschmidt |
+| **[shuffledns](https://github.com/projectdiscovery/shuffledns)** | the resolution of the DNS (the stage of the brute force) | ⚠️ **GPL-3.0** | © 2022 ProjectDiscovery, Inc. |
 
-> **集成模式**:本节列出的工具均通过 `pdtm/scan_urls.py` 等脚本以 `subprocess.run()` 调用,**非源码 fork / import**。
-> `massdns` 与 `shuffledns` 是其中仅有的两个 **GPL-3.0** 工具:它们以独立进程调用,不与本仓代码链接;许可证全文随镜像分发于 `/usr/share/doc/srcradar/licenses/`,完整声明见 [`NOTICE`](./NOTICE)。`pdtm` 是包管理器,**不是**这些工具的代码上游。
+> **The mode of the integration**: every tool of this section is called through a `subprocess.run()` by a script such as `pdtm/scan_urls.py`, it is **not a fork of the source / an import**.
+> `massdns` and `shuffledns` are the only two tools of **GPL-3.0** here: they run as separate processes and they are not linked with the code of this repository; the whole text of their licenses comes with the mirror in `/usr/share/doc/srcradar/licenses/`, and the whole statement is in [`NOTICE`](./NOTICE). `pdtm` is the package manager, it is **not** the upstream of the code of these tools.
 >
-> **上游版本锁定**:ENScan_GO_TAG=v1.4.0（见 `install.sh`）。ProjectDiscovery 工具由 `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck` 装到 `~/.pdtm/go/bin/`,无锁定（用户自管升级）。
+> **The versions of the upstream**: the tools of ProjectDiscovery are installed into `~/.pdtm/go/bin/` by `pdtm -duc -i dnsx,httpx,subfinder,alterx,naabu,cdncheck`, there is no lock (the user manages the upgrades). The versions of the optional plugins are in [`NOTICE`](./NOTICE).
 
-### 随仓库分发的数据（词表）
+### The data that comes with the repository (the word lists)
 
-| 数据 | 上游 | License | 维护关系 |
+| The data | The upstream | The license | The maintenance relation |
 |---|---|---|---|
-| **[danielmiessler/SecLists](https://github.com/danielmiessler/SecLists)** `Discovery/DNS/`（`subdomains-top1million-20000.txt` 原件 + `dns-Jhaddix.txt` 清洗产物）| DNS 子域爆破词表（`pdtm/scan.sh` brute 阶段）| **MIT** | © 2018 Daniel Miessler |
+| **[danielmiessler/SecLists](https://github.com/danielmiessler/SecLists)** `Discovery/DNS/` (the original of `subdomains-top1million-20000.txt` + the cleaned product of `dns-Jhaddix.txt`) | the word list of the brute force of the DNS subdomains (the brute stage of `pdtm/scan.sh`) | **MIT** | © 2018 Daniel Miessler |
 
-> `docker/wordlists/` 下的词表**随仓库分发**，与上表"运行时由 pdtm 装"的工具不同。其中 `dns-Jhaddix-clean.txt` 是上游文件的清洗衍生作品（过滤 + 去重 + 排序，具体规则见 [`NOTICE`](./NOTICE)），按 MIT 条款再分发。完整声明见 [`NOTICE`](./NOTICE)。
+The word lists under `docker/wordlists/` **come with the repository**, they are different from the tools of the table above that "pdtm installs at the time of the run". The `dns-Jhaddix-clean.txt` is a cleaned derivative of the file of the upstream (the filtering + the deduplication + the sorting, the exact rules are in [`NOTICE`](./NOTICE)), and it is redistributed under the terms of the MIT. The whole statement is in [`NOTICE`](./NOTICE).
 
-### 第三方服务声明(用户自部署)
+### The statement of the third party services (the user deploys them)
 
-| 服务 | 提供方 | License | 维护关系 |
-|---|---|---|---|
-| **ymicp / ICP_Query** | [HG-ha / 一铭](https://github.com/HG-ha/ICP_Query) | ⚠️ **未声明**(GitHub 默认视为 All rights reserved)| **非 srcradar 维护**,原项目 README 声明仅供学习交流 |
-
-ymicp 是 srcradar `ymicp/` 模块依赖的第三方服务,srcradar **不**重新分发服务端、不主动拉镜像、**不**背书其合规性。详见 [`ymicp/README.md`](./modules/public/ymicp/README.md) §声明。
-
----
-
-## 运维硬性约定
-
-源自 [`modules/public/db_align/CLAUDE.md`](./modules/public/db_align/CLAUDE.md),所有模块共用:
-
-1. **`ENScan_GO/config.yaml` 绝对不要读** —— 上游凭据文件,即使 echo 一行字段名也不行;`.claudeignore` + `settings.json` 兜底拦截。Claude 也不要从文件名/列表里推断内容
-2. **数据源 cookie 失效时**:
-   - 关键字:`未登录` / `登录已过期` / `cookie` / `Cookie expired` / `aqc|tyc|rb|qimai 401/403/empty result`
-   - 单次判定至少看到 2 处一致信号再认定
-   - 追加一行到 `cookie.log`:`<时间戳> [<源>] <原因>; 上次成功 run: <日志文件名>`
-   - 后续 run 自动从 `-type` 排除;**所有源都失效 → FATAL 停止**
-3. **ENScan 失败清缓存**:`rm -f ../ENScan_GO/enscan.gob`,只在"上次成功 → 这次失败"且无 cookie 信号时清
-4. **DB 路径**:所有 `-db` / `--db` 默认指向 `../db/recon.sqlite3`,写之前确认;不要把 `cookie.log` / `logs/*.log` 进版本控制
-5. **ProjectDiscovery 工具 stdin 防御**:任何 `dnsx / httpx / naabu / subfinder / cdncheck` 的 shell 调用,只要上游是 `pipeline.sh` / `scan.sh` / `scanner.sh` 这类被外部 `bash script.sh` 调用的脚本,就要加 `< /dev/null`。**ProjectDiscovery 工具 best-effort 关闭 stdin,但在子 shell 中实测会永久 park**(详见 已知问题 §12.2)。cdncheck 仍要 `< /dev/null` 兜底,虽然 `pdtm/scanner.sh` 已改走 `./bin/cdnmatch` 离线路径,不再直调 cdncheck 二进制。
-
----
-
-## 项目总结
-
-经过 2026-07-24 起的多轮 dry-run 与 smoke test,这条流水线在 **ExampleCo** 业务上达到可用状态。
-
-### 数据现状(2026-08-02)
-
-| 维度 | 数量 | 备注 |
-|---|---|---|
-| `businesses` | 2 | `ExampleCo` / `DemoCorp`(均已写 scope) |
-| `companies` | 31 | ExampleCo 手工分组(2/4/10/5) + DemoCorp新增 10 |
-| `mapp_records` | 95 | `service_type` 仍 2 个(4/7),(后续工作列为优先) |
-| `scopes` | 8 | 可测 6 / 非可测 2,均 `is_wildcard=1`(命中 wildcard 解析) |
-| `web_subdomains` | 74,168 | 持续增长,~215 条单字符噪声(已知问题 §1)待修 |
-| `tcp_assets` | 488 | |
-| `permutation_state` | 40,592 | alterx 派生缓存,2026-07-28 后从 172 暴增(数据正常) |
-| `recon.sqlite3` 大小 | 87 MB | WAL 模式 |
-
-### 设计亮点
-
-1. **resolver 拒绝静默错误** —— `MinAcceptScore=80`,弱匹配(50/60 分)直接报错要求 `-broad` 或 `-pid` 旁路,避免 SRC 绑到集团母公司
-2. **schema 协作的克制** —— 只增 `service_type_map` / 2 index / `companies.group`;其余表视为只读,合并入更大平台时不会撞冲突
-3. **mapp_records 合成 licence 补丁** —— APP/微信/微博 section 无 ICP 备案号,用 `synth:<company_id>:<service_type>:<service_name>` 占位;确定性 → 重跑 upsert 不重复;逻辑身份仍按 `(company_id, service_name, service_type)`
-4. **alterx 派生缓存的"事实子域不进 permutation_state"修复** —— `comm -23` 去重后,subfinder 发现的事实子域每次跑重新喂入,缓存只存真正的派生候选(已用 5 个已知子域 + 149→287 增量验证)
-5. **fail-soft 的多阶段编排** —— `run_one_business.sh` 用 3 位 bit-mask 报结果;`flock` 互斥;snapshot before/after 任一失败 → `previous.json` 不轮换,下次还能有 baseline
-6. **dashboard 的"本地启发式 + 零外调"** —— 端口风险字典 + 指纹浓度桶 ≥51 标红 + 中文优先重排;严格只绑 127.0.0.1,改 0.0.0.0 启动时 WARN
-7. **snapshot/diff 字段口径清晰** —— 时间戳(`fetched_at` / `last_seen` / `updated_at` 等)不算 changed;`web_subdomains` 逻辑键用 `(business_id, subdomain, port)` 而非漂移的 `hash_id`
-8. **运维契约下沉到 `CLAUDE.md`** —— 不依赖 README 记忆 cookie/proxy/缓存失效规则,所有"必须做"集中硬性声明;`README.md` 与 `CLAUDE.md` 冲突时以 CLAUDE.md 为准
-
-### 已知能力边界(故意不做)
-
-- **AQC 无向上穿透** —— `branch` 是唯一可靠的向下信号;`invest` / `holds` 多为 null;`partner` 是自然人。跑 `db_align -n DemoCorp` 不会自动走到 DemoCorp 集团下的兄弟子公司。这是 AQC 限制,不是工具 bug(详见 `db_align/README.md` §Design notes)
-- **mapp_records.service_licence UNIQUE + 非空约束** —— 由 ymicp schema 定义,db_align 用合成 licence 兼容,本质是上游契约不可改
-- **树爬的 `seen` 是进程内** —— 重启 runner 会重新从 seed 走,对长跑批任务成本高;按 README 提示未来应把 seen 持久化到 DB
-
----
-
-## 已知问题
-
-按"已定位/已缓解/未根治"三档排列:
-
-### 1. 单字符 subdomain / Wildcard DNS 噪声 ✅ 已根治 (2026-08-25)
-
-**历史现象**:`daily/lib/dashboard.py`「站点详情」tab 出现 N 行形如 `http://a/` / `http://j/` / `http://0/` 的条目,URL 无法访问。早期根因(httpx 文本输出 + awk 切列 + 无入库前校验)三层叠加:
-
-1. 单字符 permutation 候选没在 HTTP 探测前被剔除
-2. httpx 探测时 DNS 被 wildcard 收口到 CDN IP,HTTP 请求落到真实域名的服务器
-3. import 时只保留输入前缀 `a` 作为 `subdomain`,没把真实命中域名写到 canonical 字段
-
-**早期实测**:215 条 → 72 个 hash → 6 个 IP(全是 wildcard CDN 收口)。
-
-**根治(2026-08-25)**:
-
-- `pdtm/scanner.sh` 阶段 3.5 / 阶段 8 httpx 调用改 `-json` 输出 JSONL(scanner.sh:328 / 583;`FIX-2026-08-25` 注释)
-- `pdtm/import_scan_results.py::parse_json_web` 用 `urlparse(...).hostname` 从 JSON `url` 字段拿真实 host,不再走文本 awk 切列
-- `import_scan_results.py::HOSTNAME_RE = re.compile(r"^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$")`(行 29)在入库前校验,**单字符 host 直接被 `not HOSTNAME_RE.match(h)` 拒绝**(行 806)
-
-三层叠加的根因中,根因 2(httpx 输出 JSON)是关键修复——JSON 路径不再生成"输入前缀 `a`"这种伪 subdomain,单字符条目天然消失。根因 1(permutation 阶段丢单字符)和根因 3(wildcard redirect 改 canonical)仍存在但**已被根因 2 兜底,无实际影响**,保留作为可选优化项,见 `pdtm/README.md` 附录。
-
-**仍保留**:`daily/lib/dashboard.py::_build_sites` 显示层 `if "." in subdomain`(行 831)作为防御性兜底;新增数据经过 HOSTNAME_RE 校验后该过滤实际不再触发。
-
-**2026-09 生产实测**:生产库 `web_subdomains` 中无残留单字符条目(0 行 `subdomain` 不含 `.`),`HOSTNAME_RE` 入库前过滤生效。
-
-### 2. ENScan_GO 目录整洁度 ✅ 公仓已清理 (2026-09-06);生产部署需手动验证
-
-2026-09-06 layout 迁移(commit `2c13c60`)后,**公仓** `modules/public/db_align/` 下已不再有 `code.bak.*` 与 `outs/` 目录,只剩 `cmd/ internal/ install.sh/ CLAUDE.md/ README.md/ go.mod/ go.sum`。**公仓风险面已消除**;若未来重新生成 enscan 输出需自建 `.gitignore`(参见 `.gitignore` 已有的 `outs/*.xlsx` 与 `*.bak.*` 规则)。
-
-**生产部署提示**:在 layout 迁移之前部署的 srcradar 实例,其 `db_align/` 下**可能仍残留**旧 `outs/` 输出(xlsx,文件名含公司名,凭据泄露风险)与 `*.bak.*` 备份目录。升级到 v0.1.0 后建议手动执行:
-
-```bash
-rm -rf db_align/outs db_align/*.bak.*
-```
-
-**风险姿态**:本项在公仓已根治;生产侧需逐场升级时手动验证。
-
-### 3. service_type_map 残缺 🔴 跨业务对比受限
-
-`service_type_map` 只有 2 行(`type_4`, `type_7`),`mapp_records` 跨业务对比时无人类可读名。README 自承"占位符待 AQC 真实 `icpinfoAjax` 映射确认",生产用之前需要补完整映射(典型值:4=ICP、7=小程序、5=App、8=公众号 等)。
-
-### 4. 单业务单点验证 ⚠️ 规模未验证
-
-`businesses` 表只有单业务行,所有设计只在数十家公司 / 数百份备案上验证过:
-
-- 并发跑多个业务时的 `flock` 互斥、ENScan 子进程并发、AQC 配额争抢都没经过压力测试
-- snapshot 拍全库 6 表数十万行的耗时与内存峰值未测
-- **建议**:加第 2 个业务(最简单的 `scanme` 类)做并行验证
-
-### 5. pdtm 已有修复未合入 🟡 部分根治 (2026-09)
-
-`pdtm/README.md` 附录 A/B/C 给出了三档"每次跑都大概率找到新资产"的方案 + stage 5/6 fusion 链路 bug 修复,实施进度:
-
-- **附录 A**:alterx 缓存 bug — **过滤已加**(2026-09 commit `ba581e6` / `1803252`,`scan.sh:309-326` 用 `comm -23 <(sort -u ALTERX_OUT) <(sort -u ALIVE)` 剔除已 ALIVE 候选)。但 alterx 仍 `cat in_enrich \| alterx >> ALTERX_OUT`(`scan.sh:302-304`),即每次跑仍把已知 ALIVE 候选喂给 alterx 重生成,**未根治**(只过滤输出,未阻止重生成)。
-- **附录 B 方案 A**:时间戳词表 — 未实施
-- **附录 B 方案 B**:概率性复活采样 — 未实施
-- **附录 C**:阶段 6 mapper 走 JSONL — 未实施(`scan.sh` 阶段 6 仍是 mapper 文本解析)
-
-### 6. daily/reports 无自动轮转 🟡 长期累积
-
-`daily/reports/` 默认全保留,README 给了手工清理命令但**没装进 cron**。长期跑会无限累积(生产环境已累计数十份)。
-
-**建议**:在 `daily_monitor.sh` 入口加一行:
-
-```bash
-find "$REPORTS_DIR" -maxdepth 1 -mindepth 1 -mtime +30 -exec rm -rf {} +
-```
-
-### 7. 集成测试覆盖不完整 🟡 已知
-
-- `go test ./...` 覆盖 `db_align/internal/{resolver,permute,scope}`(3 个 `_test.go`,2026-09 layout 迁移后保留)
-- `crawler` 和 `store` 的 upsert 路径只在 smoke test(`-n ExampleCo -all`)里跑过,且依赖 AQC 凭据
-- `pdtm` 没有自动化测试,所有 fix 都在 README 附录里叙述
-- **建议**:基于 sqlite in-memory 给 store / crawler 写集成测试,无需真实 AQC;pdtm 的 fix 合并时同步加回归用例
-
-### 8. 数据库敏感数据未加密 ⚠️ 凭据泄露面
-
-`recon.sqlite3` 体量数十 MB,`mapp_records.raw_json` 与 `web_subdomains.raw_json` 字段在公开版本已被**脱敏或剥离**(2026-09 生产实测:mapp_records.raw_json 字段空);未加密落盘的备案字段 + 公司主体仍属敏感数据。
-
-**建议**:评估 `recon.sqlite3` 静态加密(sqlite SEE / sqlcipher)的必要性,或把 `raw_json` 字段明确剥离 / 仅在归档表保留抽样。
-
-### 9. 文档入口分散 🟢 可读性问题
-
-- `db_align/README.md` 与 `db_align/CLAUDE.md` 内容部分重叠(cookie 失效、proxy)
-- `daily/README.md` 500+ 行,`pdtm/README.md` 300+ 行,新读者第一眼看到附录 A/B/C 容易懵
-- **建议**:`daily/README.md` 拆 user-guide / design-notes 两份;`pdtm` 附录提一个 `KNOWN_ISSUES.md` 集中管理,本文件作为索引
-
-### 10. cdncheck 阻塞读 stdin 导致流水线永久挂起 ✅ 已根治 (2026-08-01)
-
-**现象**:2026-07-31 的 cron run(`20260731-030002`)从 03:00 一直挂到 14:34 人工介入,共 **11.5 小时**。`ExampleCo` 03:00→06:32 正常完成并入库;`DemoCorp` 06:32 起卡在 `pdtm/scanner.sh:209` 的 cdncheck 域名探测,**7h45m 零进展**。进程 6 个线程全部 park 在 `futex_wait_queue_me` / `ep_poll`,累计 CPU 仅 22 秒。
-
-**根因(两个独立问题叠加)**:
-
-1. **cdncheck 阻塞读 stdin**(主因)。即使已用 `-i <file>` 指定输入,stdin 不是 TTY 时它仍会读 stdin 等 EOF,等不到就永久 park。**结果其实已经算完并写出,进程就是不退出**。
-2. **域名模式慢且不可调**(次因)。实测 ~0.9 秒/域名,而 `cdncheck -help` 的 CONFIG 段只有 `-resolver` / `-retry` / `-exclude`,**没有 `-timeout` / `-concurrency` / `-rate-limit`** —— 快不了也兜不住。IP 模式是离线网段匹配,很快,不受影响。
-
-**实测**(v1.2.44):
-
-| 输入规模 | 加 `< /dev/null` | 结果 |
-|---|---|---|
-| 1 / 5 / 20 / 400 域名 | ❌ | 全部挂死,60s+ 超时,0 输出 |
-| 4 域名 | ✅ | **exit=0,2 秒**,3 命中(与挂死前算出的结果一字不差) |
-| 50 域名 | ✅ + `-r` 逗号形式 | exit=0,**44 秒**,0 解析错误 |
-
-梯度测试是决定性的:**1 个域名和 27958 个域名挂死表现完全一样**,所以与规模 / 并发 / 限流无关。而 4 域名那次结果在 5 秒内就全部写出,之后干等 85 秒被 timeout 杀掉 —— 证明是"算完但不退出"。
-
-**修复(2026-08-01 合入)**:
-
-新增 `pdtm/cdnmatch/` —— Go 包装器,`import "github.com/projectdiscovery/cdncheck"` 直接调内部的 `Check()`(IP 段 bart trie)和 `CheckSuffix()`(publicsuffix 后缀查),**纯离线,不动 `retryabledns`**。`scanner.sh` 阶段 1+2 重写:
-
-- `dnsx -cname -a -resp -j` 出 JSONL,本来就在跑,加 `-cname` 是顺手(成本几乎 0,因为 dnsx 反正要解析全量域名)。
-- `cdnmatch -in DNSX_RAW_FILE -domains pure_domains.txt` 一次性产出 `tmp_domain_{ip,ipv6,cname,ns}_pairs.txt` + `all_unique_ips.txt` + `{cdn,waf,cloud}_{ips,domains}.txt` + `non_cdn_{list,ips}.txt` + `cdnmatch_stats.json`,文件命名和行格式与原 awk pipeline **逐字一致**,所以阶段 3-9 不动。
-- 0 次 DNS 查询(原 cdncheck 域名侧 27958 次 query 全部消失),cron 跑 27958 域名的阶段 1+2 从 7h+ 缩到 ~5 秒。
-
-**对照验证**(`pdtm/cdnmatch` smoke test):老 `cdncheck -i ... -cdn -waf` vs 新 `cdnmatch`,同输入 12 IP 输出 4 个 WAF IP `{104.16.132.229, 104.16.133.229, 104.17.207.5, 104.17.208.5}` 完全相同;4 个 CNAME 老/新都命中 2 个 Cloudflare 后缀(`*.cdn.cloudflare.net`)。
-
-**从 v0.0.x 升级到 v0.1.0 的用户**:如果你之前因 cdncheck 挂起事故暂停过 cron,现在可以按"运维硬性约定 §5"重新 `./install_cron.sh`(无参,跑 pdtm+icp,业务级开关见 `recon_business_config` 表)。首次观察次日 03:00 报告:阶段 1+2 应在 ~10 秒内完成(`dnsx JSONL: <N> 行` 后紧跟 `[cdnmatch] records=...` 一行),不再看到 `[+] cdncheck` 字样。**新装 v0.1.0 的用户无需此步骤**——直接 `./install_cron.sh` 即可。
-
-**配套变更**:
-
-- `RESOLVERS` 集中在 `scanner.sh` 顶部声明,各调 `-r "$RESOLVERS"`。详见 已知问题 §11。
-- `scanner.sh` 移除 `tmp_cdn_ips_detected.txt` 引用(cdnmatch 不再产它)。
-
-**关联风险**:cron 用 `flock -n`,如果新版本再次触发挂起,会是同口径。
-**回滚**(如果出问题):
-1. `cd pdtm/cdnmatch && rm -rf ../bin/cdnmatch`
-2. `git checkout scanner.sh` (回到带 awk + cdncheck 二进制的老版本)
-3. 把 已知问题 §10 老"修复方案"段重新兜回硬化层(`< /dev/null` + `-r` CSV + `timeout 600`)
-
-### 11. `-r` 解析器形式跨工具陷阱矩阵 🟡 部分工具静默失效
-
-**陷阱**:不是所有 PD 工具读 `-r file` 或 `-r csv` 都能得到预想行为。**配合 `-silent` 完全看不到报错**,表现为"1 秒跑完但 0 命中"或相似假阳性。
-
-**实测矩阵**(v1.2.44):
-
-| 工具 | `-r ./resolvers`(文件) | `-r 1.2.3.4,5.6.7.8`(CSV) | 调用点 | 选哪种 |
-|---|---|---|---|---|
-| cdncheck | ❌ 把文件名当主机名解析 → 0 输出 exit=0 | ✅ 正常 | 现在改成 `cdnmatch` 不用二进制了 | CSV |
-| dnsx | ✅ 正常 | ✅ 正常 | `scanner.sh`、`scan.sh`、`check_wildcard.sh` | 哪个都行,scanner.sh 取 CSV |
-| httpx | ✅ 正常 | ✅ 正常 | `scanner.sh` 阶段 3.5 / 8 | 哪个都行 |
-| naabu | ✅ 正常 | ✅ 正常 | `scanner.sh` 阶段 4.5 | 哪个都行 |
-| subfinder | ✅ 正常 | ❌ 静默失 0 命中 | `scan.sh` 派生 | **必须文件** |
-| alterx | n/a(没 `-r` flag) | n/a | `scan.sh` 派生 | 默认解析 |
-| asnmap | ✅ | ✅(无 file 警示语,但实测) | 不在主流水线 | 同 dnsx |
-
-**结论**:
-
-- cdncheck 是唯一在主流水线里被反向坑的工具(已通过 cdnmatch 间接解决)。**新代码不要再直调 `cdncheck` 二进制**;若要 fallback,见 已知问题 §10 的 `cdncheck -cdn -waf` + CSV + `< /dev/null` 三件套。
-- subfinder 是反向坑 —— 它写文档说接受 CSV,但**实测 CSV 路径 0 命中**。所以唯一一次 file 调用在 `scan.sh:182/378`(subfinder);同文件内 dnsx 改用 CSV。
-- scanner.sh / check_wildcard.sh 不调 subfinder,统一用 CSV 形式,均从 `pdtm/resolvers` 文件派生。
-
-**统一约定(2026-08-01 起)**:
-
-- **单一事实源 = `pdtm/resolvers` 文件**。改这个文件,所有脚本的 CSV 与 file 视图自动跟随。
-- **派生方式**(`scanner.sh` / `scan.sh` / `check_wildcard.sh` 各按需):
-  ```bash
-  RESOLVERS_FILE="${RESOLVERS_FILE:-resolvers}"   # subfinder 走这条
-  RESOLVERS="$(tr '\n' ',' < "$RESOLVERS_FILE" | sed 's/,$//')"   # dnsx/httpx/naabu
-  ```
-- **每工具取什么**:
-  - subfinder → `-r "$RESOLVERS_FILE"`(file,必须)
-  - dnsx / httpx / naabu / cdncheck(未来兜底)→ `-r "$RESOLVERS"` 或 `-r "$RESOLVERS_CSV"`(CSV)
-- **环境覆写**:`export RESOLVERS_FILE=/path/to/file ./scanner.sh` 一行切换全部。
-- **DNS 选型规则**:`pdtm/resolvers` 文件排序原则 = **延迟快 → 慢**(用户按实测 / 业务场景自行排序,具体名单见仓库)。
-
-**`pdtm/resolvers` 文件**:仓库内当前名单由 install.sh 自动维护,请直接查看 `pdtm/resolvers` 文件本身。
-
-### 12. 8 月 2 日合入的修复与新行为(cdncheck 之后的二次体检)
-
-#### 12.1 scan.sh 精确子域快路径(2026-08-02)
-
-`scan.sh` 头部(`[ -s "$TARGET" ]` 之后,glob compile 之前)增加早期检测:扫一次 `target.txt`,若**没有任何 `*` 行**:
-
-```
-PRECISE_HOSTS (mktemp) → dnsx → DNSX_OUT → sort -u → exit 0
-```
-
-跳过 subfinder / alterx / permutation_cache 全部流程。`pipeline.sh` 下一步调 `scanner.sh`,scanner.sh 从 `DNSX_OUT` 读已解析 host,跑阶段 1(dnsx JSONL,会再做一次 dnsx)+ 2(cdnmatch)+ 5/8(httpx)。
-
-行为分流:
-
-| target.txt | 行为 | 实测耗时 |
-|---|---|---|
-| `www.scanme.sh`(纯精确) | 仅 dnsx 1 次后 `exit 0` | < 1s |
-| `ww*.scanme.sh`(纯 glob) | 走完整 subfinder → alterx → permutation 流程 | 45s(2 IP / 2 web) |
-| `*.scanme.sh`(纯 glob) | 同上 | 57s(4 IP / 4 web) |
-| `www.scanme.sh\n*.scanme.sh` | 走 glob 流程;精确子域在 PRECISE_HOSTS 双路 | 同 glob |
-
-**业务约定**:精确子域列表 = "不希望扩展范围去查兄弟子域"。如果只关心 `www.scanme.sh` 一台,就别列 `*.scanme.sh`,否则 cron 会去搜 findme/demo/honey/ssl-* 等 5+ 个兄弟域。
-
-#### 12.2 scanner.sh 阶段 5 httpx stdin hang
-
-**根因**:`httpx -l <file>` 已指定输入,但内部仍尝试读 stdin。当 stdin 不是 TTY(在 `pipeline.sh` 调用下)且非 `/dev/null` 时,**GNU httpx 1.10 的某条路径会永久 park**。
-
-**复现**(隔离目录,4 个 scanme.sh IP):
-
-```
-scanner.sh standalone        11 秒完成
-scanner.sh inside pipeline  600 秒 timeout,0 输出
-```
-
-**修复**:`scanner.sh` 三处 `httpx -l ...` 加 `< /dev/null`(阶段 3.5 / 阶段 5 / 阶段 8)。`scan.sh` 内 dnsx 调用也加了 `< /dev/null` 防御。
-
-**理论根因**:ProjectDiscovery 工具(scan 写 stdin 时)是 best-effort 关闭 stdin,某些情况下需要显式 `< /dev/null`。当上游 pipeline 在 `set -euo pipefail` 下用 `bash scanner.sh` 调用时,**子 shell 不会自动关闭 stdin**。
-
-#### 12.3 target_glob.py `(?:...)` PCRE 静默拒绝
-
-`target_glob.py:49` 原输出 `(?:^|\.){escaped}$` —— PCRE 非捕获组语法。但 `grep -E` 是 POSIX ERE,**GNU grep 3.7 静默接受后整体返回 0 命中**(不出错)。
-
-**修复**:`(?:^|\.)` → `(^|\.)`(捕获组,POSIX ERE 合规)。
-
-**影响**:之前生产 cron 跑的所有 glob 路径,阶段 1.5 / 4.5 的 `grep -E -f targets.regex SUBS_TMP` 都是静默失 0 行,然后因为 `set -euo pipefail` 在 `if [...] fi` 体内不触发,空 SUBS_TMP 流到 ALIVE,scan.sh 输出"done -> dnsx_output.txt (0 条)",**实际等于跳过 glob filter**(若上游有 `*.scanme.sh`,alterx 派生候选不会被目标正则过滤直接落盘)。
-
-**这条 bug 的影响范围**:cron 跑了 46k → 74k `web_subdomains`,里面**可能有少量"target 模式外"的子域被错误入库**。参考 `daily/lib/diff.py` 对 `web_subdomains` 做 `subdomain` 字段的 `re.match(targets.regex)` 一次性清理 —— 但已合入新版后,新条目严格过滤,只老条目有该问题。
-
-**复现**:把 `targets.regex` 用 `grep -E -f` 喂给自身 —— 老版本正则 `(?:^|\.)` 全 0 命中;新版本 `(^|\.)` 命中 5/5。
-
-#### 12.4 resolvers 文件排序
-
-`pdtm/resolvers` 文件按延迟高低排序(快 → 慢)。具体名单由 install.sh 自动维护,详细取值见仓库文件本身。
-
-#### 12.5 残留:精确子域在 glob case 下仍触发 wasted subfinder 调用
-
-**未修**。当 `target.txt` 是 `www.scanme.sh\n*.example.com`(精确+glob 混合),`all-bases` 输出 `["www.scanme.sh", "example.com"]`,subfinder 对 `www.scanme.sh` 跑一次空查询。业务上无影响(空 SUBS_TMP 走 grep 后还是空,不影响最终结果),仅浪费 1 次外部 API round-trip。
-
-修复路径:在 `target_glob.py` 加 `all-glob-bases` 模式,只对 glob 行抽 base,scan.sh 切换调用。无破坏性,~15 行 diff,**未实施**(优先级 🟢)。
-
-### 13. permutation_state 应该按周期整表 wipe 而非 per-entry 30 天冷却 ⏳ 未根治
-
-**背景**:`pdtm/permutation_cache.py` 当前对每行 permutation 维护 `next_attempt_at`,nxdomain 状态 30 天冷却后重试,`resolved` / `wildcard_hit` 永不重试。语义上假设"alterx 候选空间稳定,同一 permutation 的 NXDOMAIN 结论在 30 天内有效"。
-
-**冲突**:2026-08-03 在 `scan.sh` 阶段 3 加了 alterx 随机减半(本次合入的 `ALTERX_MAX_EST` 逻辑 —— 候选数预估 >100 万时 `shuf -n` 把输入行数减半,直到估计数 ≤ 阈值)。减半改变了每次跑 alterx 喂入的子域子集,alterx 从中学到的词模式也跟着变。
-
-**问题**:同一字符串 permutation 可能由**不同词汇上下文**生成:
-
-| 跑次 | 输入 | alterx 词汇偏 | 生成候选 | cache 状态 |
-|---|---|---|---|---|
-| N | 50% 子集 | X 方向 | {A, B, C, D},全部 dnsx → nxdomain | {A, B, C, D} 存 30 天 |
-| N+1 | 100% 子集 | 完整 | {A, B, E, F} | A, B 被滤掉,**E, F** 当新条目处理 |
-| N+2 | 30% 子集(随机) | Y 方向 | {E, F, A} | A 仍被 cache 截断;E, F 通过 |
-
-虽然 A 的 nxdomain 结论**事实正确**(我们确认过它不解析),但 cache 在**不同词汇上下文**下硬性截断新候选 —— 等于"用上一轮小样本的结论,阻断本轮全集的发现"。**减半覆盖率无法保证**:alterx 想生成的某些候选因为与陈旧 cache 条目字符串撞名而被跳过,即使这些候选在新的(全)词汇上下文里是**新发现**。
-
-**建议方案**:**按业务 + 时间窗口整表 wipe**,而非 per-entry TTL。
-
-- 实现:`permutation_cache.py filter` 阶段,先查 `SELECT MAX(last_attempt_at) FROM permutation_state WHERE business_id=?`,若 `now - MAX > WIPE_DAYS` 天(默认 7,env `PERM_CACHE_WIPE_DAYS` 可调),`DELETE FROM permutation_state WHERE business_id=?`,然后正常 filter(此时 cache 已空,所有候选当新条目处理)
-- 触发点:每次 filter 调用都查一次,无需外部 cron
-- 与 per-entry TTL 不冲突:wipe 后下一个 7 天内仍走 per-entry TTL,直到下次过期 wipe
-
-**权衡**:
-
-| 维度 | 当前 per-entry TTL | 建议 wipe |
-|---|---|---|
-| dnsx 节流(nxdomain 重测) | ✅ 30 天内不重测 | ❌ 每 7 天 wipe 后整批重测 |
-| alterx 减半后覆盖率 | ❌ 陈旧 cache 截断新候选 | ✅ wipe 后 alterx 全集重生成,无历史偏见 |
-| resolved 子域持久化 | ✅ cache 永不重试 | ⚠️ 失去 cache 持久,但 dnsx_output.txt + web_subdomains 仍存事实子域,无丢失 |
-| 实施复杂度 | 现有逻辑 | `permutation_cache.py` ~30 行 diff(filter 加 wipe 块 + argparse 加 `--wipe-days`);`scan.sh` 调用透传 wipe_days 或读 env |
-
-**dnsx 重测成本**:alterx 派生候选对单 base 通常数千 ~ 数万条;假设 5 个业务 × 每个 3 个 base × 平均 10k 候选,7 天内 wipe 后单次重测 ~150k dnsx 查询,远低于单次 subfinder 全集查询(~145s × 数十万 API)。
-
-**改动估算**:`permutation_cache.py` 30 行;`scan.sh` 1 行 env 透传;`pdtm/README.md` 缓存策略小节更新。**本次仅文档化,未实施** —— 等用户拍板。
-
----
-
-### 14. `-i <dir>` 在 import 成功后默认删除外部目录的 target.txt / exclude.txt ✅ v0.1.0 起
-
-**现象**:`add_business.sh -i <dir>` / `pdtm scope_import.sh -i <dir>` /
-`pdtm pipeline.sh -i <dir>` 在 scope 入库成功后,会删除 `<dir>/target.txt`
-和 `<dir>/exclude.txt`(以及 `<dir>/` 目录若变空)。失败路径下也删除(沿用
-pipeline.sh 既有的无条件 trap 语义)。
-
-**根因**:共享 `<dir>/` 作为多业务 scope 池时(典型 SRC 场景:先收集所有候
-选域名到单一 `target.txt`,再 per-business 切分),保留原文件会导致下一个
-业务读到上一轮的陈旧条目。如果 `target.txt` 是 `>>` 累加,跨业务的 scope 会
-互相污染。
-
-**当前缓解**:传 `--keep-files`(scope_import.sh)或 `--keep-input`
-(add_business.sh)显式保留原文件。
-
-**治本**:目前已经是 v0.1.0 期望行为,无 plan。**风险姿态**:破坏性 — 用户
-应把 `<dir>/` 当成临时输入目录(类似 `mktemp -d`)。如果 `<dir>/` 里除了
-`target.txt` / `exclude.txt` 还有别的文件(笔记 / 配置 / 备份),`rmdir` 失
-败但 `rm -f` 不会动它们,所以**只删 target.txt / exclude.txt 两个文件名**。
-
-**用法建议**:
-
-| 场景 | 命令 |
-|---|---|
-| 一次性 batch(默认) | `mktemp -d && cp seed target.txt $d/ && ./srcradar manage add_business -n biz -i $d/` |
-| 想保留 scope 数据 | `./srcradar manage add_business -n biz -i /scope-pool/ --keep-input` |
-| 多业务共享 scope | 给每个业务 `--keep-input` 保持数据共享 |
-
-**未来 API 演进方向**(待 v0.2.0+):语义明确化命名。`-i` 改名为 `--tmp-dir`
-或加 `--consume-input` / `--no-consume-input` 显式 flag,避免 `cd` 到
-`<dir>/` 再 `./srcradar ... -i ./` 误删当前目录文件。
-
-### 15. `daily/install_cron.sh` 的 `-type` 数据源与头部注释脱节 ⏳ 部分修
-
-**现象**:`modules/main/daily/install_cron.sh` 头部第 9-15 行注释声称 "The installed entry
-always runs `-type pdtm,icp`. ... the config table is the single source of truth for what
-each business runs. This script no longer takes -type",但:
-
-1. 实际 cron 行(`install_cron.sh:42`)通过 `TYPES` 环境变量传入:
-   `exec $SCRIPT -type $(echo $TYPES \| tr ' ' ',')`(已参数化,2026-09 commit 之后);
-   但脚本**默认行为**仍写死 `TYPES="pdtm icp"`,故 "always runs `-type pdtm,icp`"
-   在默认调用下成立,头部措辞存在歧义
-2. `recon_business_config` 表存的是 `enabled/web/tcp/icp` 4 个 0/1 位开关,
-   `daily_monitor.sh:141-180` 拿这些位**过滤**已声明的 stages(pdtm / icp),
-   **不**是源头
-3. 后果:加新 stage(如未来的 `daily-url2`)必须改 install_cron.sh 默认 `TYPES`,
-   配置表加列也带不动;头部注释与"参数化已实现"的事实不符
-
-**缓解(已部分修)**:`install_cron.sh:42` 改为 `TYPES` env 变量传入(2026-09 commit),
-README 日常运维已注明"cron 行固定 `-type pdtm,icp`,stages 在配置表 gating",但
-**头部注释 + 默认 TYPES 仍未与"配置表 single-source-of-truth"对齐**。
-
-**治本**:
-
-- 方案 1:头部注释改为"默认 cron 行固定 `-type pdtm,icp`(可通过 `TYPES` env 覆写),
-  `recon_business_config` 表按位过滤已声明 stages",与代码行为对齐
-- 方案 2:让默认 `TYPES` 从配置表读 stages(配置表新增 `stages TEXT` 列),真正实现
-  single-source-of-truth;改动面更大,涉及 `daily_monitor.sh` 入参解析
-
-**判断有没有意义**:
-
-| 用途 | 价值 |
-|---|---|
-| 当前 2 阶段(pdtm+icp) | 🟡 注释与代码部分脱节,默认调用仍工作 |
-| 加新 stage 接入 cron | 🔴 不修就要改 install_cron.sh 默认 TYPES,与文档承诺不符 |
-| operator 加 stage | 🔴 同上,配置表加列不会自动生效 |
-
----
-
-## 后续工作
-
-| 优先级 | 项 | 备注 |
-|---|---|---|
-| 🔴 高 | 合入 `pdtm` 附录 A/B/C 的修复 | alterx 去重、时间戳词表、单字符 permutation 过滤、stage 5/6 走 JSONL |
-| 🔴 高 | 补全 `service_type_map` | 跨业务对比的前置依赖 |
-| 🟡 中 | 清理 `ENScan_GO/` 目录 | 删 bak、给 outs 加 gitignore、归档 xlsx |
-| 🟡 中 | `daily/reports` 自动轮转 | cron 入口加一行 `find -mtime +30 -delete` |
-| 🟡 中 | crawler / store 的集成测试 | sqlite in-memory,无 AQC 依赖 |
-| 🟡 中 | 加第 3 个业务做并行验证 | 验证 `flock` 互斥与 AQC 配额争抢 |
-| 🟡 中 | 清理 `web_subdomains` 中 已知问题 §12.3 提到的"目标模式外"的旧条目 | 在 `daily/lib/diff.py` 加 `re.match(targets.regex)` 一次性回扫 |
-| 🟡 中 | check_wildcard.sh 阶段 dnsx 加 `< /dev/null` 防 hang | 见 已知问题 §11 分析 A |
-| 🟢 低 | cdnmatch 自测脚本入库 | smoke test 跑一遍 cdnmatch + 比对老 cdncheck,挂进 cron 前先跑一次 |
-| 🟢 低 | `daily/README.md` 拆分 user-guide / design-notes | 降低新读者门槛 |
-| 🟢 低 | 把"已知问题"段落迁进 Linear / GitHub Issues | 集中追踪,本文件作为索引 |
-| 🟢 低 | 评估 `recon.sqlite3` 静态加密的必要性 | sqlcipher / SEE |
-| 🟢 低 | target_glob.py 加 `all-glob-bases` 模式 | 已知问题 §12.5 wasted subfinder 修复 |
-| 🟢 低 | scope_import.sh 与 scan.sh 阶段 6 合并 | 已知问题 §11 跨文件重复 T+U |
+The optional plugins call the third party services that they declare in their own README. srcradar **does not** redistribute those servers, **does not** pull the images on its own and **does not** endorse their compliance. The whole statement is in [`NOTICE`](./NOTICE) and in [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md).
 
 ---
 
 ## License
 
-srcradar 以 Apache License 2.0 分发,完整条款见 [`LICENSE`](./LICENSE)。
-上游项目与各自 License 详见 `## 上游致谢` 与 [`NOTICE`](./NOTICE)。
-工具使用前提与免责声明见 [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md)。
+srcradar is distributed under the Apache License 2.0, the whole terms are in [`LICENSE`](./LICENSE).
+The upstream projects and their own licenses are in `## The thanks to the upstream` and in [`NOTICE`](./NOTICE).
+The prerequisites of the use of the tools and the disclaimer are in [`TERMS_ADDENDUM.md`](./TERMS_ADDENDUM.md).
+
+
 

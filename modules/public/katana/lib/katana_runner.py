@@ -1,10 +1,10 @@
-"""katana_runner.py — katana subprocess 包装 + JSONL 解析 + 入 web_hash_urls。
+"""katana_runner.py — katana subprocess wrapper + JSONL parsing + insert into web_hash_urls.
 
-与 modules/main/pdtm/scan_urls.py 的关系:
-  - 不依赖 scan_urls.py 内部函数(单向 subprocess 边界)
-  - 入库风格对齐:_s() coerce / now() / PRAGMA foreign_keys / with conn 事务 /
-    INSERT OR IGNORE + ON CONFLICT UPDATE(见 modules/main/pdtm/scan_urls.py:566-610)
-  - 失败吞掉 best-effort(跟 import_scan_results → score.py 同款)
+Relation to modules/main/pdtm/scan_urls.py:
+  - does not depend on the internals of scan_urls.py (one-way subprocess boundary)
+  - the insert style is aligned: _s() coerce / now() / PRAGMA foreign_keys / with conn transaction /
+    INSERT OR IGNORE + ON CONFLICT UPDATE (see modules/main/pdtm/scan_urls.py:566-610)
+  - failures are swallowed, best-effort (same as import_scan_results → score.py)
 
 CLI:
   python3 katana_runner.py enrich \
@@ -12,25 +12,25 @@ CLI:
     --business ExampleCo \
     --hosts-file /tmp/hosts.txt
 
-输出(stdout JSON):
+Output (stdout JSON):
   {"ok": true, "business": "ExampleCo", "n_hosts": N, "n_rows_scanned": N,
    "n_new": N, "n_dangerous": N, "n_errors": N, "elapsed_s": N.N}
 
-环境变量:
-  KATANA_BIN              二进制路径(env > shutil.which > 报错)
-  KATANA_TIMEOUT          单 host 超时秒数(默认 600;大字典场景用户拍板)
-  KATANA_EXTRA_FLAGS      追加 flags(空格分隔),例如 --no-sandbox
-  KATANA_OMIT_BODY=1      关闭 body 落库(节省存储,response_hash 退化为 status|length)
+Environment variables:
+  KATANA_BIN              binary path (env > shutil.which > error)
+  KATANA_TIMEOUT          per-host timeout in seconds (default 600; the user's call for big dictionaries)
+  KATANA_EXTRA_FLAGS      extra flags (space separated), e.g. --no-sandbox
+  KATANA_OMIT_BODY=1      turn off storing the body (saves storage, response_hash degrades to status|length)
 
-  # 速率/线程控制(对齐 httpx srcradar 配置 scanner.sh:328: -rate-limit 50)
-  KATANA_RATE_LIMIT       全局 rate-limit req/s(默认 50,与 httpx 同款;0=走 katana 默认 150)
-  KATANA_RATE_LIMIT_MIN   全局 rate-limit req/min(默认 0=不加)
-  KATANA_CONCURRENCY      并发 fetchers 数(默认 10;0=走 katana 默认 10)
-  KATANA_PARALLELISM      并发 input 数(默认 10;0=走 katana 默认 10)
-  KATANA_HOST_RATE_LIMIT  单 host rate-limit req/s(默认 0=不限)
-  KATANA_DELAY            请求间隔秒数(默认 0=不加,配 SRC 站点防 WAF 可设 1)
-  KATANA_REQUEST_TIMEOUT  单请求超时秒数(默认 10;与 httpx -timeout 5 不同,katana
-                          较重,SRC 站点给 10s 更稳)
+  # rate/thread control (aligned with the httpx srcradar config scanner.sh:328: -rate-limit 50)
+  KATANA_RATE_LIMIT       global rate-limit req/s (default 50, same as httpx; 0 = use the katana default 150)
+  KATANA_RATE_LIMIT_MIN   global rate-limit req/min (default 0 = not set)
+  KATANA_CONCURRENCY      number of concurrent fetchers (default 10; 0 = use the katana default 10)
+  KATANA_PARALLELISM      number of concurrent inputs (default 10; 0 = use the katana default 10)
+  KATANA_HOST_RATE_LIMIT  per-host rate-limit req/s (default 0 = unlimited)
+  KATANA_DELAY            delay between requests in seconds (default 0 = not set, set 1 for SRC sites behind a WAF)
+  KATANA_REQUEST_TIMEOUT  per-request timeout in seconds (default 10; different from httpx -timeout 5, katana
+                          is heavier, 10s is steadier for SRC sites)
 """
 from __future__ import annotations
 
@@ -46,17 +46,25 @@ from pathlib import Path
 
 from risks import crawl_out_scope_pattern, is_dangerous_url  # noqa: E402
 from schema_map import map_row  # noqa: E402
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
 SOURCE = "katana"
 
-DEFAULT_TIMEOUT = 600  # 与 scan_urls.py 的 SCAN_URLS_TIMEOUT=600 同款(用户拍板)
+DEFAULT_TIMEOUT = 600  # the same as scan_urls.py SCAN_URLS_TIMEOUT=600 (the user's call)
 
 
 def _resolve_bin(env_var: str, fallback_name: str) -> str:
-    """env > shutil.which > 报错。
+    """env > shutil.which > error.
 
-    跟 modules/main/pdtm/scan_urls.py:_resolve_bin 完全一致的策略,
-    不硬编码 /home/ubuntu/...(踩过的坑)。
+    Exactly the same strategy as modules/main/pdtm/scan_urls.py:_resolve_bin,
+    no hardcoded /home/ubuntu/... (a trap that was hit before).
     """
     p = os.environ.get(env_var)
     if p and os.path.isfile(p) and os.access(p, os.X_OK):
@@ -65,7 +73,9 @@ def _resolve_bin(env_var: str, fallback_name: str) -> str:
     if which:
         return which
     raise FileNotFoundError(
-        f"找不到 {fallback_name};设 {env_var} 环境变量或装到 PATH"
+        t("public.katana.runner.tool_not_found", {
+            "tool": fallback_name, "env_var": env_var,
+        })
     )
 
 
@@ -74,7 +84,7 @@ def _now_iso() -> str:
 
 
 def _coerce(v):
-    """None / '' / 0 都返回 None(避免入库后被触发器误判)。"""
+    """None / '' / 0 all return None (so the trigger does not misjudge them after the insert)."""
     if v is None or v == "":
         return None
     return v
@@ -103,7 +113,7 @@ def _compress_body(raw_body):
 
 
 def _resolve_business_id(conn: sqlite3.Connection, biz_name: str) -> int | None:
-    """跟 scan_urls.py:701 bid_row 同款:TRIM(business_name)=? 取 id。"""
+    """Same as scan_urls.py:701 bid_row: TRIM(business_name)=? to get the id."""
     row = conn.execute(
         "SELECT id FROM businesses WHERE TRIM(business_name)=?",
         (biz_name,),
@@ -112,10 +122,11 @@ def _resolve_business_id(conn: sqlite3.Connection, biz_name: str) -> int | None:
 
 
 def _resolve_hash_id(conn: sqlite3.Connection, business_id: int, host: str) -> int | None:
-    """同 (business, subdomain) → 最近 hash_id(取最大 web_subdomains.id 那一行)。
+    """Same (business, subdomain) → the most recent hash_id (the row with the largest web_subdomains.id).
 
-    跟 scan_urls.py:637 _resolve_hash_id 完全一致逻辑;
-    不可用时 caller 自己 INSERT web_hashes(本期不实现,fallback 给 None 跳过)。
+    Exactly the same logic as scan_urls.py:637 _resolve_hash_id;
+    when it is not available the caller INSERTs web_hashes itself (not implemented
+    in this round, the fallback is None and the row is skipped).
     """
     row = conn.execute(
         """
@@ -131,28 +142,28 @@ def _resolve_hash_id(conn: sqlite3.Connection, business_id: int, host: str) -> i
 
 
 def _katana_cmd(katana_bin: str, seed_url: str) -> list[str]:
-    """构造 katana 命令。
+    """Build the katana command.
 
-    - -jsonl           JSONL 输出(每行一条 Result)
-    - -js-crawl        JS 文件解析(endpoint 提取)
-    - -form-extraction 表单字段提取
-    - -xhr-extraction  XHR 调用 URL 提取
-    - -eof             排除指定字段(精简输出大小)
-    - -crawl-out-scope 危险路由 regex 拦截(risks.py 同款)
-    - depth 3 / timeout 10 / crawl-duration 300 给上限,避免长跑失控
+    - -jsonl           JSONL output (one Result per line)
+    - -js-crawl        JS file parsing (endpoint extraction)
+    - -form-extraction form field extraction
+    - -xhr-extraction  XHR call URL extraction
+    - -eof             exclude the given fields (keeps the output small)
+    - -crawl-out-scope dangerous route regex filter (same as risks.py)
+    - depth 3 / timeout 10 / crawl-duration 300 put a ceiling on it, so a long run cannot run away
     """
-    # ---- 速率 / 线程控制(对齐 httpx srcradar 配置)----
-    # 默认值在 lib/katana_runner.py 顶部 docstring 列出;env 覆盖 → 0/空 = 不加 flag
-    # 用 _int_env 读,失败返回 0(= katana 默认,不加 flag)
+    # ---- rate / thread control (aligned with the httpx srcradar config)----
+    # the defaults are listed in the docstring at the top of lib/katana_runner.py; env overrides → 0/empty = do not add the flag
+    # read with _int_env, on failure it returns 0 (= the katana default, do not add the flag)
     def _int_env(name: str, default: int = 0) -> int:
-        """读 env int。env 未设或非数字 → 返回 default。
+        """Read an int from the env. Env not set or not a number → return default.
 
-        默认值映射(对齐 httpx srcradar scanner.sh:328 温和档):
+        Default mapping (aligned with the httpx srcradar scanner.sh:328 mild setting):
           KATANA_RATE_LIMIT       default 50  (httpx -rate-limit 50)
-          KATANA_CONCURRENCY      default 10  (katana 默认也是 10,显式声明)
+          KATANA_CONCURRENCY      default 10  (the katana default is also 10, stated explicitly)
           KATANA_PARALLELISM      default 10
-          KATANA_REQUEST_TIMEOUT  default 10  (httpx -timeout 5 对 katana 偏紧)
-        其它 KATANA_RATE_LIMIT_MIN / KATANA_HOST_RATE_LIMIT / KATANA_DELAY 默认 0(不启用)
+          KATANA_REQUEST_TIMEOUT  default 10  (httpx -timeout 5 is too tight for katana)
+        the other KATANA_RATE_LIMIT_MIN / KATANA_HOST_RATE_LIMIT / KATANA_DELAY default to 0 (not enabled)
         """
         v = os.environ.get(name, "").strip()
         if not v:
@@ -172,17 +183,17 @@ def _katana_cmd(katana_bin: str, seed_url: str) -> list[str]:
         "-depth", "3",
         "-crawl-duration", "300",
         "-crawl-out-scope", crawl_out_scope_pattern(),
-        # 精简输出:raw / stored_response_path / knowledgebase / forms / xhr_requests
-        # 都是大块数据,web_hash_urls 表用不到,只留 body(已精简到我们需要的)
+        # trim the output: raw / stored_response_path / knowledgebase / forms / xhr_requests
+        # are all big blocks of data that the web_hash_urls table does not need, only the body is kept (already trimmed to what we need)
         "-eof", "raw,stored_response_path,knowledgebase,forms,xhr_requests",
         "-silent",
     ]
 
-    # 请求级超时(单请求,跟 KATANA_TIMEOUT 单 host 超时区分)
+    # per-request timeout (a single request, distinct from the KATANA_TIMEOUT per-host timeout)
     req_timeout = _int_env("KATANA_REQUEST_TIMEOUT", 10)
     cmd += ["-timeout", str(req_timeout)]
 
-    # 速率 / 并发(对齐 httpx rate-limit=50,threads=10)
+    # rate / concurrency (aligned with httpx rate-limit=50, threads=10)
     rl = _int_env("KATANA_RATE_LIMIT", 50)
     if rl:
         cmd += ["-rate-limit", str(rl)]
@@ -211,10 +222,10 @@ def _katana_cmd(katana_bin: str, seed_url: str) -> list[str]:
 def _run_katana(
     katana_bin: str, host: str, *, timeout: int
 ) -> list[dict]:
-    """跑一次 katana,返回 parse 后的 list[dict]。
+    """Run katana once, return the parsed list[dict].
 
-    失败处理:
-      - timeout / non-zero exit / 解析失败 → 返回 [],stderr 一行说明
+    Failure handling:
+      - timeout / non-zero exit / parse failure → return [], one line on stderr
     """
     seed_url = f"https://{host}/"
     cmd = _katana_cmd(katana_bin, seed_url)
@@ -239,7 +250,7 @@ def _run_katana(
         try:
             rows.append(json.loads(line))
         except json.JSONDecodeError:
-            # 跳过单行坏 JSON,不整批 fail(katana 偶尔尾部会有空行/警告)
+            # skip a single broken JSON line, do not fail the whole batch (katana sometimes ends with an empty line/a warning)
             continue
     return rows
 
@@ -251,19 +262,19 @@ def _upsert_rows(
     business_id: int,
     fetched_at: str,
 ) -> tuple[int, int, int]:
-    """入库 web_hash_urls;返回 (n_new, n_dangerous, n_errors)。
+    """Insert into web_hash_urls; return (n_new, n_dangerous, n_errors).
 
-    SQL 完全照搬 scan_urls.py:566-610 的范式:
+    The SQL copies the pattern of scan_urls.py:566-610 exactly:
       INSERT OR IGNORE + ON CONFLICT(hash_id, subdomain, url, source) DO UPDATE
     """
-    # 一次性把 (hash_id, subdomain, source) 已有 URL 集合拉出来,后面判断 new
-    # 同 (business, host) 共享 hash_id,见 _resolve_hash_id
+    # pull the set of existing URLs for (hash_id, subdomain, source) in one go, to decide what is new later
+    # the same (business, host) shares a hash_id, see _resolve_hash_id
     by_subdomain: dict[str, int] = {}  # host → hash_id
     for host in {r["subdomain"] for r in rows if r.get("subdomain")}:
         hid = _resolve_hash_id(conn, business_id, host)
         if hid is not None:
             by_subdomain[host] = hid
-    # 没 hash_id 的 host 跳过 — 本期不做 web_hashes 自创建(后续可补)
+    # hosts without a hash_id are skipped — this round does not create web_hashes rows itself (can be added later)
     skipped_no_hash = 0
     for r in rows:
         if r.get("subdomain") and r["subdomain"] not in by_subdomain:
@@ -273,7 +284,7 @@ def _upsert_rows(
     if not rows:
         return 0, 0, skipped_no_hash
 
-    # 已有 URL 集合(用于算 new_count)
+    # set of existing URLs (used to compute new_count)
     existing_by_sub: dict[str, set[str]] = {}
     for host, hid in by_subdomain.items():
         existing_by_sub[host] = {
@@ -343,9 +354,9 @@ def _upsert_rows(
                 _coerce(r["danger_reason"]),
                 int(r.get("is_static") or 0),
                 fetched_at, fetched_at, fetched_at,
-                # body 字段:默认 KATANA_OMIT_BODY=0 → 落库(zlib level=6);
-                # 设 KATANA_OMIT_BODY=1 时 schema_map 已把 body 字符串回填
-                # "",_compress_body 探测 env 后落 NULL,跟既有 column 的 None 收敛一致.
+                # body field: the default is KATANA_OMIT_BODY=0 → stored (zlib level=6);
+                # with KATANA_OMIT_BODY=1 schema_map has already filled in the body string
+                # "", _compress_body detects the env and stores NULL, consistent with the None of the existing column.
                 _compress_body(r.get("body") or ""),
             ))
             if is_new and cur.rowcount > 0:
@@ -361,7 +372,7 @@ def _upsert_rows(
 
 
 def cmd_enrich(args: argparse.Namespace) -> int:
-    """主入口:对一个业务名下所有 host 跑 katana + 入库。"""
+    """Main entry: run katana over all hosts of one business + insert the results."""
     try:
         katana_bin = _resolve_bin("KATANA_BIN", "katana")
     except FileNotFoundError as e:
@@ -406,7 +417,7 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 
         for host in hosts:
             rows = _run_katana(katana_bin, host, timeout=timeout)
-            # 双重保险:入库前再过 risks.py gate
+            # belt and braces: run the risks.py gate once more before the insert
             mapped: list[dict] = []
             for r in rows:
                 endpoint = (r.get("request") or {}).get("endpoint") or ""
@@ -414,7 +425,7 @@ def cmd_enrich(args: argparse.Namespace) -> int:
                 m = map_row(
                     r,
                     business_id=business_id,
-                    hash_id=0,  # 临时占位,_upsert_rows 内部重算
+                    hash_id=0,  # temporary placeholder, recomputed inside _upsert_rows
                     fetched_at=fetched_at,
                     is_dangerous=dang,
                 )
@@ -426,7 +437,7 @@ def cmd_enrich(args: argparse.Namespace) -> int:
                 continue
 
             try:
-                with conn:  # 事务
+                with conn:  # transaction
                     n_new, n_dang, n_err = _upsert_rows(
                         conn, mapped,
                         business_id=business_id,
@@ -456,15 +467,15 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="katana URL 资产扫描 → web_hash_urls",
+        description=t("public.katana_runner.description"),
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("enrich", help="对一组 host 跑 katana 并入库")
-    p.add_argument("--db", required=True, help="recon.sqlite3 路径")
-    p.add_argument("--business", required=True, help="业务名(businesses.business_name)")
-    p.add_argument("--hosts-file", required=True, help="子域列表文件,一行一个")
-    p.add_argument("--dry-run", action="store_true", help="只跑 katana,不写库")
+    p = sub.add_parser("enrich", help=t("public.katana_runner.help_run"))
+    p.add_argument("--db", required=True, help=t("public.katana_runner.help_db"))
+    p.add_argument("--business", required=True, help=t("public.katana_runner.help_business"))
+    p.add_argument("--hosts-file", required=True, help=t("public.katana_runner.help_hosts"))
+    p.add_argument("--dry-run", action="store_true", help=t("public.katana_runner.help_dryrun"))
 
     return parser.parse_args(argv)
 

@@ -18,8 +18,8 @@
 
 set -eu
 
-# 默认推断 repo 根: backup_file.sh 在 <repo>/daily/bin/, 向上两级即 repo 根。
-# 用户仍可 export DAILY_ROOT=<abs-path> 覆盖。
+# Default repo root inference: backup_file.sh lives in <repo>/daily/bin/, so two
+# levels up is the repo root. The user can still export DAILY_ROOT=<abs-path> to override.
 DAILY_ROOT="${DAILY_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/daily}"
 BACKUP_DIR="$DAILY_ROOT/lib/.backup"
 

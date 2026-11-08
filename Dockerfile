@@ -180,6 +180,7 @@ COPY pyproject.toml    /opt/srcradar/pyproject.toml
 COPY LICENSE           /opt/srcradar/LICENSE
 COPY NOTICE            /opt/srcradar/NOTICE
 COPY TERMS_ADDENDUM.md /opt/srcradar/TERMS_ADDENDUM.md
+COPY TERMS_ADDENDUM_zh.md /opt/srcradar/TERMS_ADDENDUM_zh.md
 COPY VERSION           /opt/srcradar/VERSION
 COPY modules           /opt/srcradar/modules
 

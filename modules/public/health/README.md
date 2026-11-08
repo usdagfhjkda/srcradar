@@ -1,170 +1,172 @@
-# health 运维监控模块 (可选插件)
+# the health module of the operation and of the monitoring (an optional plugin)
 
-> **模块定位**:运维监控 plugin,**完全可选**。每日 cron 跑一次,做
-> 5 项健康检查(**磁盘 / CPU / 内存 / Cron 任务 / Dashboard 进程**),
-> 全 OK 不发邮件;任一异常 → 直接调 `modules/public/notify/notify_send.sh`
-> 复用 GPG+Resend 推送通道(正文脱敏 + 附件含完整数值并加密)。
-> 设计目标:**异常捕获 + 静默成功**,不与 `daily_monitor` 抢资源,不污染 DB。
+> English | [中文](README_zh.md)
 
-## 导航
+> **The position of the module**: the plugin of the operation and of the monitoring, **it is completely optional**. The daily cron runs it once, it does
+> 5 health checks (**the disk / the CPU / the memory / the cron tasks / the dashboard process**),
+> it sends no mail when everything is OK; as soon as one of them is abnormal → it calls `modules/public/notify/notify_send.sh` directly
+> and it reuses the GPG+Resend channel of the push (the body is desensitized + the attachment holds the whole values and it is encrypted).
+> The goal of the design: **the capture of the anomalies + a silent success**, it does not compete with `daily_monitor` for the resources, and it does not pollute the DB.
 
-- **本文档**:§模块边界 / §检查项 / §安装 / §配置 / §邮件格式 / §与 notify 关系 / §安全 / §运维 / §集成点 / §文件说明
-- **依赖上游**:无 — health 模块是 leaf,**不依赖 daily / pdtm / db**,只读 `df` / `uptime` / `top` / `/proc/meminfo` / `crontab -l` / `pgrep` 等 OS 级信息
-- **依赖兄弟**:`modules/public/notify/`(复用其 `notify_send.sh` + `notify.conf` 凭据)
-- **二进制依赖**:`python3` + `bash ≥4` + `pgrep` + `df` + `uptime` + `nproc` + `awk` + `crontab` + (通知侧)`gpg` + `curl`
-- **与 daily_monitor 关系**:**完全独立**的 cron entry,不在 `daily_monitor.sh` 里 hook,也不写 DB
+## The navigation
 
-## 一、模块边界
+- **This document**: §the boundary of the module / §the checks / §the installation / §the configuration / §the format of the mail / §the relation with notify / §the safety / §the operation / §the points of integration / §the description of the files
+- **The upstream it depends on**: none — the health module is a leaf, **it does not depend on daily / pdtm / db**, it only reads the information of the OS such as `df` / `uptime` / `top` / `/proc/meminfo` / `crontab -l` / `pgrep`
+- **The sibling it depends on**: `modules/public/notify/` (it reuses its `notify_send.sh` + the credentials of its `notify.conf`)
+- **The dependencies of the binaries**: `python3` + `bash ≥4` + `pgrep` + `df` + `uptime` + `nproc` + `awk` + `crontab` + (on the side of the notification) `gpg` + `curl`
+- **The relation with daily_monitor**: a **completely independent** cron entry, it is not hooked into `daily_monitor.sh`, and it does not write the DB
 
-| 项 | 范围 | License |
+## I. The boundary of the module
+
+| The item | The scope | The license |
 |---|---|---|
-| `health_check.sh` / `install.sh` / `install_cron.sh` | srcradar 原创集成层 | Apache-2.0 |
-| `lib/health_check.py` / `lib/health_config.py` / `lib/thresholds.py` | srcradar 原创 | Apache-2.0 |
-| `notify_send.sh` / `lib/notify_config.py` (复用) | srcradar 兄弟模块 | Apache-2.0 |
-| `gpg` (GnuPG) | OS 包(apt: gnupg),RFC 4880 OpenPGP | GPL-3.0 |
-| `df` / `uptime` / `nproc` / `pgrep` / `awk` | coreutils / procps | GPL / MIT-style |
-| `crontab` | OS 包(apt: cron) | cron license (BSD-style) |
-| Resend HTTP API | 第三方事务邮件投递 | Resend.com ToS |
+| `health_check.sh` / `install.sh` / `install_cron.sh` | the integration layer that srcradar wrote | Apache-2.0 |
+| `lib/health_check.py` / `lib/health_config.py` / `lib/thresholds.py` | written by srcradar | Apache-2.0 |
+| `notify_send.sh` / `lib/notify_config.py` (reused) | the sibling module of srcradar | Apache-2.0 |
+| `gpg` (GnuPG) | the package of the OS (apt: gnupg), the OpenPGP of the RFC 4880 | GPL-3.0 |
+| `df` / `uptime` / `nproc` / `pgrep` / `awk` | coreutils / procps | GPL / of the MIT style |
+| `crontab` | the package of the OS (apt: cron) | the license of cron (of the BSD style) |
+| the HTTP API of Resend | the delivery of the transactional mail of a third party | the ToS of Resend.com |
 
-**srcradar 不维护**:GnuPG / coreutils / cron daemon / Resend API。
-本模块只做 **5 项 check + 阈值判定 + 报告渲染 + 复用 notify 推送** 四件事。
-**不**做:磁盘清理 / 进程拉起 / 自动修复 — 只检测并报警。
+**What srcradar does not maintain**: GnuPG / coreutils / the daemon of cron / the API of Resend.
+This module does only four things: **the 5 checks + the decision against the thresholds + the rendering of the report + the reuse of the push of notify**.
+**It does not** do: the cleaning of the disk / the starting of a process / an automatic repair — it only detects and it alarms.
 
-## 二、检查项(5 项)
+## II. The checks (5 of them)
 
-### 1. 磁盘 (disk)
-- **输入**:`df -P`(POSIX 格式,避免 GNU 扩展列名在不同 distro 间不一致)
-- **解析**:第 5 列 `Capacity` 字段,正则 `^(\d+)%$`,第 6 列起 `Mounted on`
-- **判定**:对每个挂载点 `used_pct` 与阈值表对比
+### 1. The disk (disk)
+- **The input**: `df -P` (the POSIX format, it avoids the GNU extension of the name of the columns that differs from one distribution to another)
+- **The parsing**: the field `Capacity` of the 5th column, the regex `^(\d+)%$`, and from the 6th column the `Mounted on`
+- **The decision**: the `used_pct` of every mount point is compared with the table of the thresholds
   - `used_pct >= DISK_ALERT_PCT` → alert
   - `DISK_WARN_PCT <= used_pct < DISK_ALERT_PCT` → warn
-  - 否则 ok
-- **示例**(v1 当前输出):
+  - otherwise ok
+- **The example** (the output of v1 at the moment):
   ```
   /dev/vda2   61806672 45674456  13494684     78% /
   tmpfs       374360   16304     358056       5% /run
   ```
-  模块会挑出 `>= 80%` 的挂载点(此处 vda2 在 78% < 80% 阈值 → 不告警)。
-- **跨平台**:`df -P` 在 Linux/macOS/AIX/Solaris 都一致,Windows 不支持(本模块设计目标 = Linux server)
+  The module picks the mount points of `>= 80%` (here the vda2 is at 78% < the threshold of 80% → it does not alarm).
+- **The platforms**: `df -P` is the same on Linux/macOS/AIX/Solaris, and it is not supported on Windows (the goal of the design of this module = a Linux server)
 
-### 2. CPU (cpu)
-- **load average**:`uptime` 解析 `load average: x, y, z`(1m / 5m / 15m)
-  - 阈值:`load5 / nproc >= CPU_LOAD5_PER_NPROC`(默认 2.0)
-  - `nproc` 命令读 `/proc/cpuinfo` 兜底
-  - 判定:超阈值 → warn(不区分 alert;load 高通常意味着有负载但未必故障)
-- **瞬时占用**:`top -bn1 | grep '^%Cpu'`,正则抓 `id`(idle),`used = 100 - idle`
-  - 阈值:`used >= CPU_PCT_ALERT`(默认 95)
-  - 判定:超阈值 → warn
-- **设计权衡**:5min load 比 1min 平滑,可避免 cron 偶发 spike 误报;瞬时占用只
-  反映采样时刻,作为辅助信息
+### 2. The CPU (cpu)
+- **The load average**: `uptime` parses `load average: x, y, z` (1m / 5m / 15m)
+  - the threshold: `load5 / nproc >= CPU_LOAD5_PER_NPROC` (2.0 by default)
+  - the command `nproc` reads `/proc/cpuinfo` as a fallback
+  - the decision: above the threshold → warn (it does not tell an alert from a warn; a high load usually means that there is a load, but not necessarily a failure)
+- **The instantaneous usage**: `top -bn1 | grep '^%Cpu'`, the regex takes the `id` (the idle), `used = 100 - idle`
+  - the threshold: `used >= CPU_PCT_ALERT` (95 by default)
+  - the decision: above the threshold → warn
+- **The trade-off of the design**: the load of 5min is smoother than the one of 1min, and it avoids the false positives of the occasional spike of the cron; the instantaneous usage only
+  reflects the moment of the sample, and it is an auxiliary information
 
-### 3. 内存 (memory)
-- **输入**:`/proc/meminfo`,取 `MemTotal` + `MemAvailable`
-- **公式**:`used_pct = (MemTotal - MemAvailable) / MemTotal * 100`
-- **判定**:`used_pct >= MEM_ALERT_PCT`(默认 90)→ alert
-- **为何用 MemAvailable 而不是 MemFree**:Linux kernel 3.14+ 的 `MemAvailable`
-  是估计的「应用实际可用」内存,扣除 reclaimable cache,比 `MemFree` 更准
+### 3. The memory (memory)
+- **The input**: `/proc/meminfo`, it takes `MemTotal` + `MemAvailable`
+- **The formula**: `used_pct = (MemTotal - MemAvailable) / MemTotal * 100`
+- **The decision**: `used_pct >= MEM_ALERT_PCT` (90 by default) → alert
+- **Why MemAvailable and not MemFree**: the `MemAvailable` of the Linux kernel 3.14+
+  is the estimated memory that the applications can really use, the reclaimable cache is deducted, and it is more accurate than `MemFree`
 
-### 4. Cron 任务 (cron)
-- **解析**:`crontab -l` 输出,简化版解析器:
-  - 跳过空行、`#` 注释、`KEY=VAL` 环境变量行
-  - 识别 5 个时间字段(数字/`*`/`,`/`-`/`/`)
-  - 时间字段后整段当作 command
-- **预置监控日志**:`config/health.conf` 的 `WATCHED_LOGS`,默认:
+### 4. The cron tasks (cron)
+- **The parsing**: the output of `crontab -l`, a simplified parser:
+  - it skips the empty lines, the `#` comments and the `KEY=VAL` lines of the environment variables
+  - it recognizes the 5 fields of the time (a number / `*` / `,` / `-` / `/`)
+  - everything after the fields of the time is the command
+- **The logs that are watched by default**: the `WATCHED_LOGS` of `config/health.conf`, by default:
   ```
   modules/main/daily/logs/dashboard_watchdog.log
   ```
-  (相对路径以 srcradar 项目根为基准;绝对路径也接受)
-- **判定**:对每个 `WATCHED_LOGS` 路径 `stat` 看 mtime,`age_hours > CRON_MAX_AGE_HOURS`(默认 25h)→ warn
-- **设计权衡**:25h 而不是 24h,跨午夜 cron 漂移不会假阳性
+  (a relative path is based on the root of the srcradar project; an absolute path is accepted as well)
+- **The decision**: the `stat` of every path of `WATCHED_LOGS` gives the mtime, and `age_hours > CRON_MAX_AGE_HOURS` (25h by default) → warn
+- **The trade-off of the design**: 25h and not 24h, so that the drift of a cron that crosses the midnight does not give a false positive
 
-### 5. Dashboard 进程 (dashboard)
-- **进程检测**:`pgrep -f 'python3 lib/dashboard.py'`
-  - 命中 ≥1 个 PID → ok
-  - 0 个 PID → alert(进程挂了)
-- **watchdog 日志 mtime**:`modules/main/daily/logs/dashboard_watchdog.log` 的 mtime
-  - 与 `CRON_MAX_AGE_HOURS` 同阈值(25h)对比
-  - 超时 → alert(说明 dashboard_watchdog cron 也挂了,联动告警)
-- **设计权衡**:同时检测进程 + 日志 mtime,避免 watchdog 死了但 dashboard 还在跑的盲区
+### 5. The dashboard process (dashboard)
+- **The detection of the process**: `pgrep -f 'python3 lib/dashboard.py'`
+  - at least 1 PID → ok
+  - 0 PID → alert (the process died)
+- **The mtime of the log of the watchdog**: the mtime of `modules/main/daily/logs/dashboard_watchdog.log`
+  - it is compared with the same threshold as `CRON_MAX_AGE_HOURS` (25h)
+  - out of time → alert (it means that the cron of the dashboard_watchdog died too, and it alarms together with it)
+- **The trade-off of the design**: it detects the process and the mtime of the log at the same time, and it avoids the blind spot of a dead watchdog while the dashboard still runs
 
-### 容错设计
+### The design of the fault tolerance
 
-每个 check 函数独立 try/except(`run_all` 里再包一层),**任何 check 自身抛异常
-也只会产出 1 条 alert Finding,而不会拖垮其他 check**。例如 `top` 命令
-被 seccomp 拦了,只会让 cpu check 报「top 命令不存在」,磁盘/内存检查不受影响。
+Every check function has its own try/except (and `run_all` wraps them once more), so **any exception of a check
+only produces one alert Finding, and it does not bring the other checks down**. For instance, when the command `top` is
+blocked by a seccomp, it only makes the cpu check report "the command top does not exist", and the checks of the disk / of the memory are not affected.
 
-## 三、安装
+## III. The installation
 
 ```bash
-# 1. 装 OS 依赖
+# 1. install the dependencies of the OS
 sudo apt-get install -y python3 coreutils procps cron gnupg curl
-# python3 / df / uptime / nproc / awk / pgrep 大多发行版自带
+# python3 / df / uptime / nproc / awk / pgrep come with most of the distributions
 
-# 2. 写 example + 自检
+# 2. write the example + the self check
 bash modules/public/health/install.sh --check
-# 期望:全部 "OK ...";没有 "缺失"/"FAIL"
+# the expectation: every "OK ..."; there is no "缺失"/"FAIL"
 
-# 3. operator 自填真阈值(可选;example 默认值够用)
+# 3. the operator fills the real thresholds (it is optional; the defaults of the example are enough)
 cp modules/public/health/config/health.conf.example \
    modules/public/health/config/health.conf
 chmod 600 modules/public/health/config/health.conf
 $EDITOR modules/public/health/config/health.conf
 
-# 4. 注册 cron(每日 03:15 Beijing)
+# 4. register the cron (every day at 03:15 Beijing)
 bash modules/public/health/install_cron.sh install
-crontab -l | grep health   # 验证已注册
+crontab -l | grep health   # it verifies that it is registered
 
-# 5. 手动 dryrun 一次(不发邮件)
+# 5. run a dryrun by hand (it sends no mail)
 bash modules/public/health/health_check.sh --dryrun
 cat modules/public/health/logs/health_report.md
 ```
 
-> **关键**:`config/health.conf` 已经在 `.gitignore` 内
-> (`modules/public/health/config/health.conf`),真阈值不会进任何 commit。
+> **The key point**: `config/health.conf` is already inside the `.gitignore`
+> (`modules/public/health/config/health.conf`), and the real thresholds never reach a commit.
 
-## 四、配置(config/health.conf)
+## IV. The configuration (config/health.conf)
 
-字段说明(均可选;留空 → 用 `lib/thresholds.py` 的 `DEFAULT_THRESHOLDS`):
+The description of the fields (they are all optional; when it is empty → the `DEFAULT_THRESHOLDS` of `lib/thresholds.py` is used):
 
-| 字段 | 类型 | 默认 | 含义 |
+| The field | The type | The default | What it means |
 |---|---|---|---|
-| `DISK_WARN_PCT` | int | 80 | 磁盘占用 >= 该值记 warn |
-| `DISK_ALERT_PCT` | int | 90 | 磁盘占用 >= 该值记 alert |
-| `CPU_LOAD5_PER_NPROC` | float | 2.0 | 5min load / nproc 上限 |
-| `CPU_PCT_ALERT` | int | 95 | top -bn1 瞬时占用告警线 |
-| `MEM_ALERT_PCT` | int | 90 | 内存占用告警线 |
-| `CRON_MAX_AGE_HOURS` | float | 25 | cron 日志 mtime 超时阈值 |
-| `WATCHED_LOGS` | 空格分隔 list | dashboard_watchdog.log | 监控的日志路径列表 |
+| `DISK_WARN_PCT` | int | 80 | the usage of the disk >= this value is a warn |
+| `DISK_ALERT_PCT` | int | 90 | the usage of the disk >= this value is an alert |
+| `CPU_LOAD5_PER_NPROC` | float | 2.0 | the limit of the load of 5min / nproc |
+| `CPU_PCT_ALERT` | int | 95 | the alarm line of the instantaneous usage of top -bn1 |
+| `MEM_ALERT_PCT` | int | 90 | the alarm line of the usage of the memory |
+| `CRON_MAX_AGE_HOURS` | float | 25 | the threshold of the timeout of the mtime of the cron log |
+| `WATCHED_LOGS` | a list separated by spaces | dashboard_watchdog.log | the list of the paths of the logs that are watched |
 
-**凭据不在本文件**:`RESEND_API_KEY` / `FROM_ADDR` / `TO_ADDR` / `SUBJECT` /
-`GPG_RECIPIENT` **不**在本文件,统一在 `../notify/config/notify.conf`,
-health 模块直接复用,**不让 operator 填第二遍**。
+**The credentials are not in this file**: `RESEND_API_KEY` / `FROM_ADDR` / `TO_ADDR` / `SUBJECT` /
+`GPG_RECIPIENT` are **not** in this file, they are all in `../notify/config/notify.conf`,
+and the health module reuses them directly, **it does not make the operator fill them a second time**.
 
-## 五、邮件格式
+## V. The format of the mail
 
-**触发条件**:5 项 check 中任一产出 warn / alert Finding。
-**不触发**:全 OK(只写 INFO 到 `logs/health.log`,不发邮件)。
+**The condition of the trigger**: one of the 5 checks produces a warn / an alert Finding.
+**No trigger**: everything is OK (it only writes an INFO to `logs/health.log`, and it sends no mail).
 
-### 正文(text 字段,脱敏版)
+### The body (the text field, the desensitized version)
 
 ```
 [srcradar] health 2026-05-15
 
 overall: WARN (alert=0 warn=2 ok=10)
 
-- [WARN][disk] 挂载点 /data 占用 85% (>80%)
-- [WARN][cron] 日志 dashboard_watchdog.log 已 26.5h 未更新 (>25h)
+- [WARN][disk] mount point /data uses 85% (>80%)
+- [WARN][cron] the log dashboard_watchdog.log did not update for 26.5h (>25h)
 
 Encrypted attachment: health_report.md.gpg (OpenPGP, requires OpenKeychain to decrypt)
 ```
 
-**正文不含**:
-- 详细数值(`85%` 之上不暴露 `used=450GB` / `avail=80GB`)
-- 绝对路径(`/data` 之上不暴露 `/dev/sda1` / UUID)
-- 进程 PID
-- mountpoint 上的 device 原始行(`df` 完整行)
+**The body does not hold**:
+- the detailed values (above `85%` it does not expose `used=450GB` / `avail=80GB`)
+- the absolute paths (above `/data` it does not expose `/dev/sda1` / the UUID)
+- the PID of the process
+- the raw line of the device of a mountpoint (the whole line of `df`)
 
-### 附件(明文 health_report.md,经 GPG 加密)
+### The attachment (the health_report.md in plain text, encrypted with GPG)
 
 ```markdown
 # health report — run_id=20260515-031500
@@ -175,116 +177,116 @@ Encrypted attachment: health_report.md.gpg (OpenPGP, requires OpenKeychain to de
 
 ## Summary
 
-- [WARN][disk] 挂载点 /data 占用 85% (>80%)
-- [WARN][cron] 日志 dashboard_watchdog.log 已 26.5h 未更新 (>25h)
+- [WARN][disk] mount point /data uses 85% (>80%)
+- [WARN][cron] the log dashboard_watchdog.log did not update for 26.5h (>25h)
 
 ## Detailed findings
 
 | Severity | Check | Message | Detail |
 |----------|-------|---------|--------|
-| OK | disk | 所有挂载点 < 80% | 共 6 个挂载点,最大占用 85% |
-| WARN | disk | 挂载点 /data 占用 85% (>80%) | <details>...</details> |
-| WARN | cron | 日志 dashboard_watchdog.log 已 26.5h 未更新 | <details>...</details> |
-| OK | dashboard | dashboard 运行中 (pid=12345) | <details>...</details> |
+| OK | disk | every mount point < 80% | there are 6 mount points, the highest usage is 85% |
+| WARN | disk | mount point /data uses 85% (>80%) | <details>...</details> |
+| WARN | cron | the log dashboard_watchdog.log did not update for 26.5h | <details>...</details> |
+| OK | dashboard | the dashboard is running (pid=12345) | <details>...</details> |
 ...
 ```
 
-附件在推送前由 `notify_send.sh` 用 `gpg -r <recipient> -e health_report.md`
-加密为 `health_report.md.gpg`,收件端用 OpenKeychain / gpg 解密。
+Before the push, `notify_send.sh` encrypts the attachment with `gpg -r <recipient> -e health_report.md`
+into `health_report.md.gpg`, and the receiver decrypts it with OpenKeychain / gpg.
 
-## 六、与 notify 模块的关系
+## VI. The relation with the notify module
 
 ```
 modules/public/health/health_check.sh
     │
-    ├─ 调 lib/health_check.py
-    │   ├─ 5 项 check → list[Finding]
-    │   ├─ render_report(findings)  → logs/health_report.md   (附件明文)
-    │   └─ render_body(findings)    → logs/health_report.body.md  (正文脱敏版)
+    ├─ it calls lib/health_check.py
+    │   ├─ the 5 checks → list[Finding]
+    │   ├─ render_report(findings)  → logs/health_report.md   (the attachment in plain text)
+    │   └─ render_body(findings)    → logs/health_report.body.md  (the desensitized body)
     │
-    └─ 若有异常 → 调 ../notify/notify_send.sh:
+    └─ when there is an anomaly → it calls ../notify/notify_send.sh:
            bash notify_send.sh health_report.md health <run_id> <date_ph>
                                        │
-                                       ├─ 读 ../notify/config/notify.conf
-                                       │   (operator 已在 notify 模块填过,
-                                       │    health 模块不再让 operator 填)
+                                       ├─ it reads ../notify/config/notify.conf
+                                       │   (the operator already filled it in the notify module,
+                                       │    the health module does not make the operator fill it again)
                                        ├─ gpg -r <GPG_RECIPIENT> -e health_report.md
                                        │   → health_report.md.gpg
-                                       ├─ 写 ~/.cache/notify/payload.json
+                                       ├─ it writes ~/.cache/notify/payload.json
                                        └─ curl POST https://api.resend.com/emails
 ```
 
-**复用边界**:
-- health 模块**不**读 `notify.conf` 内容(真凭据绝不进 health 模块的内存)
-- health 模块**不**写 `notify.conf`(让 notify 模块自己管自己)
-- health 模块只**调用** `notify_send.sh` 命令(参数:`report.md`, `business_name='health'`, `run_id`, `date_ph`),与 `daily_monitor` 调用方式完全一致
+**The boundary of the reuse**:
+- the health module **does not** read the content of `notify.conf` (the real credentials never reach the memory of the health module)
+- the health module **does not** write `notify.conf` (the notify module takes care of itself)
+- the health module only **calls** the command `notify_send.sh` (the arguments: `report.md`, `business_name='health'`, `run_id`, `date_ph`), and it is exactly the way `daily_monitor` calls it
 
-**失败兜底**:`health_check.sh` 用 `|| true` 包住 notify 调用,
-推送失败不影响健康结论本身(日志里 WARN,退出码仍 0)。
+**The fallback of a failure**: `health_check.sh` wraps the call of notify with `|| true`,
+and a failed push does not affect the conclusion of the health itself (the log holds a WARN, and the exit code is still 0).
 
-## 七、安全
+## VII. The safety
 
-- **凭据隔离**:`config/health.conf` 走 `chmod 600`,在 `.gitignore`(`config/*` 通配 + 显式 `modules/public/health/config/health.conf`)内
-- **复用 notify.conf**:真凭据只在 `modules/public/notify/config/notify.conf` 出现一次,health 模块直接调用,避免双份真值维护
-- **正文脱敏**:邮件 `text` 字段只含 `[WARN][disk] 挂载点 /data 占用 85%` 这种摘要,不含 `used=450GB` / `avail=80GB` / PID / device 路径
-- **附件加密**:完整 `health_report.md` → `gpg --batch --yes --trust-model always -r <recipient> -e` → `health_report.md.gpg`,收件端用 OpenKeychain / gpg 解密
-- **私钥不出收件端**:推送端只 import 公钥,从不 import 私钥(同 notify 模块)
-- **失败兜底**:notify 推送失败 → health_check.sh 仍退出 0(避免 cron 因为 push 失败误判健康)
-- **不持久化 cookie / token**:不写 `~/.bashrc` / `~/.netrc` / `~/.config/httpie*`
-- **commit message 卫生**:任何后续 commit 不暴露内部路径 / token / 真实业务名;本 README 已用占位符 `your-domain.example` 代替真域
+- **The isolation of the credentials**: `config/health.conf` goes through `chmod 600`, and it is inside the `.gitignore` (the wildcard `config/*` + the explicit `modules/public/health/config/health.conf`)
+- **The reuse of notify.conf**: the real credentials show up exactly once, in `modules/public/notify/config/notify.conf`, and the health module calls it directly, so that there is no double maintenance of the real values
+- **The desensitization of the body**: the field `text` of the mail only holds a summary such as `[WARN][disk] mount point /data uses 85%`, and it holds neither `used=450GB` / `avail=80GB` / the PID / the path of the device
+- **The encryption of the attachment**: the whole `health_report.md` → `gpg --batch --yes --trust-model always -r <recipient> -e` → `health_report.md.gpg`, and the receiver decrypts it with OpenKeychain / gpg
+- **The private key never leaves the receiver**: the side of the push only imports the public key, it never imports the private key (the same as the notify module)
+- **The fallback of a failure**: a failed push of notify → health_check.sh still exits with 0 (so that the cron does not judge the health wrongly because of a failed push)
+- **No cookie / token is persisted**: it does not write `~/.bashrc` / `~/.netrc` / `~/.config/httpie*`
+- **The hygiene of the commit message**: no later commit exposes the internal paths / the tokens / the real names of the businesses; this README already uses the placeholder `your-domain.example` instead of a real domain
 
-## 八、运维
+## VIII. The operation
 
-| 现象 | 可能原因 | 处理 |
+| The symptom | The possible cause | What to do |
 |---|---|---|
-| `bash install.sh --check` 报"缺 pgrep" | 没装 procps | `sudo apt install -y procps` |
-| `bash install.sh --check` 报"依赖缺失: ../notify/notify_send.sh" | notify 模块没装 | 先 `bash modules/public/notify/install.sh --check` |
-| `config/health.conf 不存在,用 example 作占位` | operator 没复制 example | 一般 OK(默认值够用);要改阈值再复制 |
-| `health_check.py 失败,详见 health.log` | Python 异常 | 看 `modules/public/health/logs/health.log` 栈跟踪 |
-| 收不到邮件,`logs/health.log` 有 `notify 失败 rc=4` | Resend HTTP ≥400 | 看 `~/.cache/notify/payload.json` 和 Resend 后台;常见:`attachments[].content` 不是 base64(本模块走 `base64 -w 0`,无换行) |
-| 收不到邮件但 report 生成 OK | `notify.conf` 字段是 `REPLACE_WITH_*` | 在 `modules/public/notify/config/notify.conf` 填真值 |
-| 误报:dashboard_alert 但 dashboard 实际在跑 | `pgrep -f` 没匹配上 | 看 `ps aux | grep dashboard` 实际命令行;阈值 `pattern='python3 lib/dashboard.py'` 与 `bin/dashboard_watchdog.sh` 启动命令必须一致 |
-| 误报:cron_alert 但 dashboard_watchdog 在跑 | watchdog 没写新行(没 restart) | 看 `modules/main/daily/logs/dashboard_watchdog.log` 最近一行;如果 5min 一次且 mtime 新 → 调阈值或路径写错 |
-| 跨午夜误报(00:30 cron_alert) | `CRON_MAX_AGE_HOURS=24` 太紧 | 用默认 25h,或调更大 |
-| 磁盘 df 输出挂载点含空格解析错 | 罕见(Windows mount) | 本模块目标平台 = Linux,Windows 不支持 |
+| `bash install.sh --check` reports "缺 pgrep" | procps is not installed | `sudo apt install -y procps` |
+| `bash install.sh --check` reports "依赖缺失: ../notify/notify_send.sh" | the notify module is not installed | run `bash modules/public/notify/install.sh --check` first |
+| `config/health.conf 不存在,用 example 作占位` | the operator did not copy the example | it is generally OK (the defaults are enough); copy it to change the thresholds |
+| `health_check.py 失败,详见 health.log` | an exception of the Python | look at the stack trace of `modules/public/health/logs/health.log` |
+| no mail arrives, and `logs/health.log` holds `notify 失败 rc=4` | the HTTP of Resend answers ≥400 | look at `~/.cache/notify/payload.json` and at the back office of Resend; the usual cause: the `attachments[].content` is not base64 (this module goes through `base64 -w 0`, without a line break) |
+| no mail arrives but the report is generated OK | the fields of `notify.conf` are `REPLACE_WITH_*` | fill the real values in `modules/public/notify/config/notify.conf` |
+| a false positive: dashboard_alert but the dashboard really runs | the `pgrep -f` did not match | look at the real command line of `ps aux | grep dashboard`; the threshold `pattern='python3 lib/dashboard.py'` and the command that starts `bin/dashboard_watchdog.sh` have to be the same |
+| a false positive: cron_alert but the dashboard_watchdog runs | the watchdog did not write a new line (it was not restarted) | look at the last line of `modules/main/daily/logs/dashboard_watchdog.log`; if it runs every 5min and the mtime is new → the threshold or the path is wrong |
+| a false positive across the midnight (00:30 cron_alert) | `CRON_MAX_AGE_HOURS=24` is too tight | use the default of 25h, or make it bigger |
+| the parsing of the mount points of the df output fails when it holds a space | it is rare (a mount of Windows) | the target platform of this module = Linux, Windows is not supported |
 
-## 九、集成点
+## IX. The points of integration
 
-`health` 模块的设计是**独立的 cron entry**,**不嵌入** `daily_monitor.sh`。
-理由:
+The design of the `health` module is an **independent cron entry**, it is **not** embedded in `daily_monitor.sh`.
+The reason:
 
-1. **解耦**:健康检查属于运维层,与 daily diff 是不同的失败域(daily 失败
-   不影响 health,反之亦然)。任一挂掉,另一个仍能报警
-2. **错峰**:daily_monitor 在 03:00 跑(可能持续 30min+),health 在 03:15
-   跑,错开 15min,避免同一时刻争 disk IO
-3. **独立收件人策略**:将来可让 health 走单独的主题前缀(`[srcradar] health`),
-   与 daily diff(`[srcradar] daily diff`)区分
+1. **The decoupling**: the health check belongs to the layer of the operation, and it is a different domain of failure from the daily diff (the failure of the daily
+   does not affect the health, and the other way round). When one of them dies, the other one still alarms
+2. **The staggering of the schedule**: daily_monitor runs at 03:00 (it can last 30min+), the health runs at 03:15
+   and they are 15min apart, so that they do not compete for the disk IO at the same moment
+3. **The independent strategy of the receivers**: the health can later take a prefix of its own for the subject (`[srcradar] health`),
+   apart from the daily diff (`[srcradar] daily diff`)
 
-如确需在 daily_monitor 内嵌入 health(不推荐):
+If the health really has to be embedded in the daily_monitor (it is not recommended):
 
 ```bash
-# modules/main/daily/daily_monitor.sh (示例,不入仓)
+# modules/main/daily/daily_monitor.sh (an example, it does not go into the repository)
 HEALTH="${RECON_ROOT}/public/health/health_check.sh"
 if [ -x "$HEALTH" ]; then
     bash "$HEALTH" --dryrun 2>>"$LOG_FILE" || true
 fi
 ```
 
-## 十、文件说明
+## X. The description of the files
 
-| 文件 | 说明 |
+| The file | The description |
 |---|---|
-| `health_check.sh` | 主入口(调 lib/health_check.py → 调 notify_send.sh) |
-| `install.sh` | 写 example + 自检依赖(python3 / pgrep / df / uptime / nproc / awk / crontab / gpg / curl) |
-| `install_cron.sh` | 注册每日 03:15 cron(独立于 daily_monitor) |
-| `lib/health_check.py` | 5 项 check 函数 + Finding dataclass + 报告渲染 |
-| `lib/health_config.py` | config/health.conf 读取器(同 notify_config.py 模式) |
-| `lib/thresholds.py` | `DEFAULT_THRESHOLDS` 常量 + 类型安全的 merge |
-| `config/health.conf.example` | 占位模板,所有阈值字段给合理默认(入仓) |
-| `config/health.conf` | operator 自填真阈值,`chmod 600`,`.gitignore` 屏蔽(不入仓) |
-| `logs/health.log` | 每次运行的 stdout / stderr 追加(本地缓存,不入 git) |
-| `logs/health_report.md` | 每次运行的完整报告(下次运行会被覆盖,不入 git) |
-| `logs/health_report.body.md` | 每次运行的脱敏正文(下次运行会被覆盖,不入 git) |
-| `logs/health_cron.log` | cron 触发的 stdout / stderr(本地缓存,不入 git) |
-| `logs/.gitkeep` | 占位,确保 logs/ 目录在仓内存在 |
-| `README.md` | 本文档 |
+| `health_check.sh` | the main entry (it calls lib/health_check.py → it calls notify_send.sh) |
+| `install.sh` | it writes the example + it checks the dependencies (python3 / pgrep / df / uptime / nproc / awk / crontab / gpg / curl) |
+| `install_cron.sh` | it registers the daily cron of 03:15 (it is independent of daily_monitor) |
+| `lib/health_check.py` | the 5 check functions + the dataclass Finding + the rendering of the report |
+| `lib/health_config.py` | the reader of config/health.conf (the same model as notify_config.py) |
+| `lib/thresholds.py` | the constant `DEFAULT_THRESHOLDS` + a merge that is safe about the types |
+| `config/health.conf.example` | the template of the placeholders, every field of the thresholds gets a reasonable default (it goes into the repository) |
+| `config/health.conf` | the real thresholds that the operator fills, `chmod 600`, the `.gitignore` hides it (it does not go into the repository) |
+| `logs/health.log` | the stdout / the stderr of every run are appended (a local cache, it does not go into git) |
+| `logs/health_report.md` | the whole report of every run (the next run overwrites it, it does not go into git) |
+| `logs/health_report.body.md` | the desensitized body of every run (the next run overwrites it, it does not go into git) |
+| `logs/health_cron.log` | the stdout / the stderr of the cron (a local cache, it does not go into git) |
+| `logs/.gitkeep` | a placeholder, it makes sure that the directory logs/ exists in the repository |
+| `README.md` | this document |

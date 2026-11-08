@@ -1,21 +1,21 @@
-"""schema_map.py — katana JSONL 行 → web_hash_urls INSERT 参数。
+"""schema_map.py — katana JSONL row → web_hash_urls INSERT parameters.
 
-字段对齐 httpx(参考 modules/main/pdtm/import_scan_results.py:155-170):
-  - host / port / scheme / path: 从 katana request.endpoint urlparse
-  - status_code / content_length / body / headers: 直接取
-  - content_type: headers 兜底
-  - title: <title>(.*?)</title> 正则(URLFinder 同款,已知缺陷)
-  - technologies: katana 是 technologies,入 web_hash_urls 改 tech(对齐 httpx key)
-  - location: headers 兜底
-  - response_hash: 必算 mmh3(body) — algo_diff 依赖(import_scan_results.py:159)
-  - time: 顶层 timestamp ISO 字符串
-  - input: katana request.endpoint 当 input
+Field alignment with httpx (see modules/main/pdtm/import_scan_results.py:155-170):
+  - host / port / scheme / path: parsed from the katana request.endpoint urlparse
+  - status_code / content_length / body / headers: taken as-is
+  - content_type: headers fallback
+  - title: <title>(.*?)</title> regex (same as URLFinder, known flaws)
+  - technologies: katana calls it technologies, web_hash_urls stores it as tech (aligned with the httpx key)
+  - location: headers fallback
+  - response_hash: must compute mmh3(body) — algo_diff depends on it (import_scan_results.py:159)
+  - time: the top-level timestamp ISO string
+  - input: the katana request.endpoint is used as input
 
-注:
-  - 不在 web_hash_urls 表里的字段(technologies / form / xhr)不入库,只在
-    日志里说一声(防 dashboard 看不到技术栈,但 schema 不支持)。
-  - 写表侧用 INSERT OR IGNORE + UNIQUE(hash_id, subdomain, url, source) 防重,
-    跟现有 scan_urls.py 一致。
+Notes:
+  - Fields that are not in the web_hash_urls table (technologies / form / xhr) are not stored, they are
+    only mentioned in the log (so the dashboard does not show the tech stack, but the schema does not support it).
+  - The write side uses INSERT OR IGNORE + UNIQUE(hash_id, subdomain, url, source) to dedupe,
+    consistent with the existing scan_urls.py.
 """
 from __future__ import annotations
 
@@ -30,16 +30,16 @@ try:
 except ImportError:
     _HAS_MMH3 = False
 
-# URLFinder 同款 title 正则(URLFinder crawler/state.go:194)
+# the same title regex as URLFinder (URLFinder crawler/state.go:194)
 _TITLE_RE = re.compile(r"<[tT]itle>(.*?)</[tT]itle>")
-# katana JSONL 顶层 timestamp 是 time.Time,标准库 json 会反序列化成 datetime;此处不强转,交给 caller
+# the top-level timestamp in the katana JSONL is a time.Time, stdlib json deserializes it into a datetime; do not force-cast it here, leave it to the caller
 
-# web_hash_urls 列名(节选自 modules/main/db/schema.sql:233-262);下面 INSERT 用
+# web_hash_urls column names (excerpt from modules/main/db/schema.sql:233-262); used by the INSERT below
 WEB_HASH_URLS_COLUMNS = (
-    "hash_id",          # 由 caller 算(同 hash_id 跨 URL 共用)
-    "business_id",      # 由 caller 算
+    "hash_id",          # computed by the caller (shared across the URLs of the same hash_id)
+    "business_id",      # computed by the caller
     "subdomain",
-    "source",           # 固定 "katana"
+    "source",           # always "katana"
     "scheme",
     "url",
     "host",
@@ -67,9 +67,9 @@ WEB_HASH_URLS_COLUMNS = (
 
 
 def _parse_endpoint(endpoint: str) -> dict[str, Any]:
-    """从 katana request.endpoint URL 解析 host/port/scheme/path。
+    """Parse host/port/scheme/path from the katana request.endpoint URL.
 
-    跟 import_scan_results.py:97 host_from_value 同款思路。
+    Same idea as import_scan_results.py:97 host_from_value.
     """
     out: dict[str, Any] = {
         "host": "",
@@ -85,7 +85,7 @@ def _parse_endpoint(endpoint: str) -> dict[str, Any]:
         return out
     out["scheme"] = (u.scheme or "").lower()
     out["host"] = (u.hostname or "").lower()
-    # urlparse().port 是 int 或 None;若 endpoint 不带 port → 走 scheme 默认
+    # urlparse().port is an int or None; if the endpoint has no port → use the scheme default
     if u.port:
         out["port"] = u.port
     elif out["scheme"] == "https":
@@ -97,12 +97,13 @@ def _parse_endpoint(endpoint: str) -> dict[str, Any]:
 
 
 def _extract_title(body: str) -> str:
-    """URLFinder 同款 title 正则(<title>(.*?)</title>)。
+    """The same title regex as URLFinder (<title>(.*?)</title>).
 
-    已知缺陷:
-      - SPA / 无 title 标签 → 空字符串
-      - 大小写敏感默认(<title> 不匹配 <TITLE>)— 但 URLFinder 正则用 [tT] 兼容,
-        本函数沿用一致行为(见 _TITLE_RE)
+    Known flaws:
+      - SPA / no title tag → empty string
+      - case sensitive by default (<title> does not match <TITLE>) — but the URLFinder
+        regex uses [tT] for compatibility, this function keeps the same behaviour
+        (see _TITLE_RE)
     """
     if not body:
         return ""
@@ -111,25 +112,28 @@ def _extract_title(body: str) -> str:
 
 
 def _mmh3_hash(body: str) -> str | None:
-    """response_hash = mmh3.hash128(body) 的 hex 字符串。
+    """response_hash = the hex string of mmh3.hash128(body).
 
-    跟 import_scan_results.py:159-165 完全一致(取 body_mmh3 → hex)。
-    mmh3 不可用时返回 None(避免硬依赖 — algo_diff 会降级,但 web_hash_urls
-    写入不会因此失败,只是 is_static 之类下游逻辑会变)。
+    Exactly the same as import_scan_results.py:159-165 (take body_mmh3 → hex).
+    Returns None when mmh3 is unavailable (avoids a hard dependency — algo_diff
+    degrades, but the web_hash_urls write does not fail because of it, only the
+    downstream logic such as is_static changes).
     """
     if not _HAS_MMH3 or not body:
         return None
     try:
         return format(mmh3.hash128(body), "x")  # type: ignore[name-defined]
-    except Exception:  # noqa: BLE001 — body 类型异常时静默降级
+    except Exception:  # noqa: BLE001 — degrade silently when the body has an unexpected type
         return None
 
 
 def _flatten_headers(headers: Any) -> str:
-    """katana response.headers 是 dict,落库时按 httpx 风格压成 'k1: v1\nk2: v2' 串。
+    """katana response.headers is a dict; when storing it, it is flattened into a
+    'k1: v1\nk2: v2' string in the httpx style.
 
-    web_hash_urls 表没 header 列(对照 schema.sql:233-262 确认),所以这份
-    字符串不入库,仅用于本地日志/Debug。这里保留接口对称。
+    The web_hash_urls table has no header column (confirmed against
+    schema.sql:233-262), so this string is not stored, it is only used for the
+    local log/debug. The interface is kept symmetric here.
     """
     if not headers or not isinstance(headers, dict):
         return ""
@@ -144,25 +148,26 @@ def map_row(
     fetched_at: str,
     is_dangerous: bool,
 ) -> dict[str, Any] | None:
-    """把 katana JSONL 一行(顶层 Result dict)映射成 web_hash_urls INSERT 参数字典。
+    """Map one katana JSONL line (the top-level Result dict) into a web_hash_urls
+    INSERT parameter dict.
 
-    入参:
-      row: katana -jsonl 一行,反序列化后的 dict
+    Arguments:
+      row: one deserialized line of katana -jsonl
         {
           "timestamp": "2026-09-22T...",
           "request":  {"method": "GET", "endpoint": "https://...", "headers": {...}, ...},
           "response": {"status_code": 200, "headers": {...}, "body": "...", "content_length": 1234,
                        "technologies": ["Nginx", "jQuery"]},
-          "error": ""  # 可空
+          "error": ""  # may be empty
         }
       business_id: businesses.id
-      hash_id:     web_hashes.id(同 host:port 同一天共用一个 hash)
-      fetched_at:  ISO timestamp 字符串
-      is_dangerous: 已被 risks.py 拦下 → True(走 danger_reason 文案)
+      hash_id:     web_hashes.id (the same host:port on the same day shares one hash)
+      fetched_at:  ISO timestamp string
+      is_dangerous: already blocked by risks.py → True (uses the danger_reason text)
 
-    返回:
-      None — 该行无法入库(无 endpoint / 无 response)
-      dict — 列名 → 值的 INSERT 参数字典
+    Returns:
+      None — the row cannot be stored (no endpoint / no response)
+      dict — the INSERT parameter dict of column name → value
     """
     request = row.get("request") or {}
     response = row.get("response") or {}
@@ -173,13 +178,14 @@ def map_row(
     if not parsed["host"]:
         return None
 
-    # body — 默认 KATANA_OMIT_BODY=0 (落库,供 url_diff 跑 8 步算法).
-    # 操作员可设 KATANA_OMIT_BODY=1 完全跳过(节省存储 + 防 PII 入库),
-    # 此分支由 katana_runner.py:_compress_body 落地前的 env 探测实现,
-    # schema_map.py 仅负责把原始 body 透传给 caller.
+    # body — the default is KATANA_OMIT_BODY=0 (stored, so url_diff can run the 8-step algorithm).
+    # The operator can set KATANA_OMIT_BODY=1 to skip it entirely (saves storage + keeps PII
+    # out of the db), this branch is implemented by the env probe that runs before
+    # katana_runner.py:_compress_body lands,
+    # schema_map.py only passes the raw body through to the caller.
     body = response.get("body") or ""
     if not body:
-        # katana -ob 关 body 或 status_code 非 2xx/3xx — body 空,response_hash=None
+        # katana -ob turns the body off or status_code is not 2xx/3xx — the body is empty, response_hash=None
         body_for_hash = ""
     else:
         body_for_hash = body
@@ -188,18 +194,18 @@ def map_row(
     if not isinstance(headers, dict):
         headers = {}
 
-    # content_type / location — 从 headers 兜底
+    # content_type / location — fallback to the headers
     content_type = headers.get("content-type") or headers.get("Content-Type") or ""
     location = headers.get("location") or headers.get("Location") or ""
 
-    # title — body 里正则抓
+    # title — grabbed from the body with a regex
     title = _extract_title(body)
 
-    # word_count — body 非空时粗算(len.split())
+    # word_count — a rough count when the body is not empty (len.split())
     word_count = len(body_for_hash.split()) if body_for_hash else 0
 
-    # response_hash — mmh3(body);不可用时降级 status_code|content_length
-    #   (跟 import_scan_results.py:356 fallback 同款)
+    # response_hash — mmh3(body); degrades to status_code|content_length when unavailable
+    #   (the same fallback as import_scan_results.py:356)
     body_mmh3 = _mmh3_hash(body_for_hash)
     if body_mmh3 is not None:
         response_hash_value: str | None = body_mmh3
@@ -208,16 +214,16 @@ def map_row(
         cl = response.get("content_length") or 0
         response_hash_value = f"{sc}|{cl}"
 
-    # technologies — katana 是 list[str],web_hash_urls 表 schema 无 tech 列
-    #   (web_subdomains 才有 technologies 列,web_hash_urls 没);不入库
+    # technologies — katana gives a list[str], the web_hash_urls schema has no tech column
+    #   (only web_subdomains has a technologies column, web_hash_urls does not); not stored
     techs = response.get("technologies") or []
     if techs and not isinstance(techs, list):
         techs = [str(techs)]
 
-    # danger_reason 文案(跟 URLFinder state.go:127 完全一致)
+    # the danger_reason text (exactly the same as URLFinder state.go:127)
     danger_reason = "疑似危险路由,已跳过验证" if is_dangerous else None
 
-    # 时间字段 — fetched_at = last_seen = first_seen(本次发现的语义)
+    # time fields — fetched_at = last_seen = first_seen (the semantics of "first seen this time")
     first_seen = fetched_at
     last_seen = fetched_at
 
@@ -238,25 +244,25 @@ def map_row(
         "response_hash": response_hash_value,
         "word_count": word_count,
         "redirect": location or None,
-        "link_source": request.get("source") or None,  # katana 给出 URL 的来源页面
-        "risk_flag": "",  # srcradar 自定义扩展位,本模块不写
+        "link_source": request.get("source") or None,  # the page katana took the URL from
+        "risk_flag": "",  # a srcradar custom extension column, this module does not write it
         "is_dangerous": 1 if is_dangerous else 0,
         "danger_reason": danger_reason,
-        "is_static": 0,  # katana 抓到的都是动态请求;静态资源(css/js/img)靠后置 gate
+        "is_static": 0,  # everything katana fetches is a dynamic request; static assets (css/js/img) are handled by a later gate
         "first_seen": first_seen,
         "last_seen": last_seen,
         "fetched_at": fetched_at,
         "is_active": 1,
-        "change_type": 0,  # INSERT 触发器 trg_whu_ai 会把它升到 1
-        # body 字段:默认 KATANA_OMIT_BODY=0 → 由 katana_runner.py:_compress_body
-        # 压缩入 web_hash_urls.body (供 url_diff 跑 8 步算法).
-        # KATANA_OMIT_BODY=1 时 schema_map.py 仍然回填 body 字符串,
-        # 由 _compress_body 检测 env 后落 NULL — 与既有 OMIT_BODY 行为一致.
+        "change_type": 0,  # the INSERT trigger trg_whu_ai bumps it to 1
+        # body field: the default is KATANA_OMIT_BODY=0 → compressed into web_hash_urls.body
+        # by katana_runner.py:_compress_body (so url_diff can run the 8-step algorithm).
+        # With KATANA_OMIT_BODY=1 schema_map.py still fills in the body string,
+        # _compress_body detects the env and stores NULL — consistent with the existing OMIT_BODY behaviour.
         "body": body,
     }
 
 
-# ---- CLI 自检 ----
+# ---- CLI self-check ----
 if __name__ == "__main__":
     import json
     import sys
@@ -291,7 +297,7 @@ if __name__ == "__main__":
     print("--- safe URL map ---")
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
-    # 危险 URL
+    # dangerous URL
     dangerous = map_row(
         {**sample, "request": {**sample["request"],
                                "endpoint": "https://example.com/user/delete/1"}},
@@ -301,7 +307,7 @@ if __name__ == "__main__":
     print("--- dangerous URL map ---")
     print(json.dumps(dangerous, ensure_ascii=False, indent=2))
 
-    # 缺 endpoint
+    # missing endpoint
     empty = map_row({}, business_id=1, hash_id=102, fetched_at="x", is_dangerous=False)
     print(f"--- empty endpoint → {empty!r}")
 

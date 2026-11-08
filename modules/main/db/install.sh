@@ -1,28 +1,32 @@
 #!/usr/bin/env bash
 #
-# modules/main/db/install.sh — 装 db 模块(数据库 schema + fixture + init)
+# modules/main/db/install.sh — install the db module (the database schema + fixture + init)
 #
-# db 模块组成:
-#   - schema.sql         14 表 + 索引 + 触发器(权威 schema)
-#   - init_db.py         Python 初始化(支持 PATH 已存在 → 自动备份)
-#   - check_schema.py    schema drift 校对
-#   - _test_init.sqlite3 测试 fixture(进仓)
+# The db module holds:
+#   - schema.sql         14 tables + the indexes + the triggers (the authoritative schema)
+#   - init_db.py         the Python initialiser (it backs up automatically when the path already exists)
+#   - check_schema.py    the schema drift check
+#   - _test_init.sqlite3 the test fixture (it is in the repo)
 #
-# 用法:
-#   bash install.sh                              # 默认:init_db 到 ../db/recon.sqlite3
-#   bash install.sh --path /custom/path.db       # 自定义 db 路径
-#   bash install.sh --check-schema               # 只校对 schema drift
-#   bash install.sh --check                      # 只查依赖
+# Usage:
+#   bash install.sh                              # the default: init_db into ../db/recon.sqlite3
+#   bash install.sh --path /custom/path.db       # a custom db path
+#   bash install.sh --check-schema               # only check the schema drift
+#   bash install.sh --check                      # only check the dependencies
 #   bash install.sh --uninstall
 #
-# 退出码:0/1/2/3/4 同 pdtm 模块
+# Exit codes: 0/1/2/3/4, the same as the pdtm module
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 默认 db 路径:同级目录 db/recon.sqlite3
+# the default db path: db/recon.sqlite3 next to this script
 DEFAULT_DB="$(cd .. && pwd)/db/recon.sqlite3"
 
 log()  { printf "[db] %s\n" "$*"; }
@@ -35,10 +39,10 @@ usage() {
 
 check_deps() {
     local rc=0
-    command -v python3 >/dev/null 2>&1 || { err "缺 python3"; rc=2; }
-    command -v sqlite3 >/dev/null 2>&1 || { err "缺 sqlite3"; rc=2; }
-    [ -f "$SCRIPT_DIR/init_db.py" ] || { err "init_db.py 缺失"; rc=3; }
-    [ -f "$SCRIPT_DIR/schema.sql" ] || { err "schema.sql 缺失"; rc=3; }
+    command -v python3 >/dev/null 2>&1 || { err "$(t main.db_install.dep_python3_missing)"; rc=2; }
+    command -v sqlite3 >/dev/null 2>&1 || { err "$(t main.db_install.dep_sqlite3_missing)"; rc=2; }
+    [ -f "$SCRIPT_DIR/init_db.py" ] || { err "$(t main.db_install.init_db_missing)"; rc=3; }
+    [ -f "$SCRIPT_DIR/schema.sql" ] || { err "$(t main.db_install.schema_missing)"; rc=3; }
     return $rc
 }
 
@@ -50,10 +54,10 @@ init_db() {
 
     log "init-db: $db_path (schema=$schema_sql)"
     if python3 "$init_py" "$db_path" "$schema_sql"; then
-        log "init-db OK: $db_path"
+        log "$(t main.db_install.init_ok path="$db_path")"
         return 0
     else
-        err "init_db.py 失败(看上面 [err] 行)"
+        err "$(t main.install.init_failed)"
         return 3
     fi
 }
@@ -61,28 +65,28 @@ init_db() {
 # ---- check-schema ----
 check_schema() {
     local checker="$SCRIPT_DIR/check_schema.py"
-    [ -f "$checker" ] || { err "check_schema.py 缺失"; return 3; }
-    log "check-schema:校对 $SCRIPT_DIR/schema.sql"
+    [ -f "$checker" ] || { err "$(t main.db_install.checker_missing)"; return 3; }
+    log "$(t main.install.check_schema_label SCRIPT_DIR="$SCRIPT_DIR")"
     if python3 "$checker" "$SCRIPT_DIR/schema.sql"; then
         return 0
     else
-        err "schema drift(看上面)"
+        err "$(t main.install.drift_detected)"
         return 1
     fi
 }
 
-# ---- verify:确认 14 张表存在 ----
+# ---- verify: confirm the 14 tables exist ----
 verify_db() {
     local db_path="$1"
-    [ -f "$db_path" ] || { err "db 不存在: $db_path"; return 1; }
-    # init_db.py 完成后等 sqlite 落盘,避免 race
+    [ -f "$db_path" ] || { err "$(t main.db_install.db_missing path="$db_path")"; return 1; }
+    # wait for sqlite to flush after init_db.py, to avoid a race
     sleep 0.2
     local n
     n=$(sqlite3 "$db_path" "SELECT count(*) FROM sqlite_master WHERE type='table'" 2>/dev/null || echo 0)
     if [ "$n" -ge 14 ]; then
-        printf "  OK db 包含 %s 张表 (>= 14)\n" "$n"
+        printf "%s\n" "$(t main.install.table_count_ok n="$n")"
     else
-        err "db 仅含 $n 张表(期望 >= 14)"
+        err "$(t main.install.table_count_low n=$n)"
         return 1
     fi
     return 0
@@ -93,16 +97,16 @@ verify() {
     if [ -f "$db_path" ]; then
         verify_db "$db_path" || return 1
     else
-        warn "db 不存在(将自动 init): $db_path"
+        warn "$(t main.install.db_missing db_path="$db_path")"
     fi
     return 0
 }
 
 uninstall() {
-    log "db 模块反安装:删除 recon.sqlite3(只删自动建的)"
+    log "$(t main.install.uninstall_note)"
     local db_path="${DB_PATH:-$DEFAULT_DB}"
     if [ -f "$db_path" ]; then
-        warn "确认要删 $db_path 吗?手动 rm -f $db_path"
+        warn "$(t main.install.uninstall_confirm db_path="$db_path")"
     fi
     return 0
 }
@@ -112,7 +116,7 @@ main() {
     case "${1:-}" in
         --check)
             check_deps || exit $?
-            log "db 模块依赖 OK"
+            log "$(t main.install.deps_ok)"
             exit 0
             ;;
         --check-schema)
@@ -120,7 +124,7 @@ main() {
             check_schema || exit $?
             ;;
         --path)
-            [ $# -ge 2 ] || { err "--path 需参数"; exit 1; }
+            [ $# -ge 2 ] || { err "$(t main.db_install.path_needs_arg)"; exit 1; }
             DB_PATH="$2"
             shift 2
             check_deps || exit $?

@@ -6,16 +6,16 @@
 #   ./install_cron.sh           # install (idempotent — replaces existing entry)
 #   ./install_cron.sh uninstall  # remove our entry, keep others
 #
-# 与 daily_monitor 完全独立的 cron entry:
-#   - daily_monitor:  03:00 跑 (modules/main/daily/install_cron.sh)
-#   - health:         03:15 跑 (本脚本) — 错开 15 分钟,避免同一时刻和 daily 同时争资源
+# a cron entry fully independent of daily_monitor:
+#   - daily_monitor:  runs at 03:00 (modules/main/daily/install_cron.sh)
+#   - health:         runs at 03:15 (this script) — offset by 15 minutes, so it does not compete with daily for resources at the same time
 #
-# 触发:每日 03:15 (Beijing),调 `bash health_check.sh`(不带 --dryrun)。
-# `flock -n` 防并发(health_check 自身 5 项 check 1-2s 内能完成,
-# 但防止上次未跑完又叠加)。
-# `zsh -c 'source ~/.zshrc; exec ...'` 拿用户 PATH(同 daily_monitor idiom)。
+# Trigger: daily at 03:15 (Beijing), calls `bash health_check.sh` (without --dryrun).
+# `flock -n` prevents concurrency (health_check's own 5 checks finish within 1-2s,
+# but it stops a new run from stacking on an unfinished previous one).
+# `zsh -c 'source ~/.zshrc; exec ...'` picks up the user PATH (same idiom as daily_monitor).
 #
-# 重新安装安全:每次执行会先剥离老 managed 行(marker + 紧跟 1 行)再追加新行。
+# Re-install is safe: every run first strips the old managed lines (the marker + the 1 line right after it) and then appends the new line.
 #
 
 set -euo pipefail
@@ -27,7 +27,7 @@ LOG_DIR="$HEALTH/logs"
 
 ACTION="${1:-install}"
 
-# 每日 03:15 (Beijing);错开 daily_monitor 的 03:00 15 分钟
+# daily at 03:15 (Beijing); offset by 15 minutes from daily_monitor's 03:00
 CRON_SCHEDULE_MIN="15"
 CRON_SCHEDULE_HOUR="3"
 

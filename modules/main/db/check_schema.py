@@ -1,30 +1,39 @@
 #!/usr/bin/env python3
-"""check_schema.py — 校对 db/schema.sql vs 各源文件里的 CREATE TABLE。
+"""check_schema.py — cross-check db/schema.sql against the CREATE TABLE statements in the source files.
 
-check-only,不修改任何东西。
+check-only, it does not modify anything.
 
-退出码:
-    0 = 一致(允许报告里只有 "ACCEPTED-DRIFT" 类目)
-    1 = drift(出现 "REAL-DRIFT",需要人工同步 schema.sql / 源文件)
+Exit codes:
+    0 = consistent (the report may contain only "ACCEPTED-DRIFT" categories)
+    1 = drift (a "REAL-DRIFT" appears, schema.sql / the source files must be synced by hand)
 
-分类:
-    - REAL-DRIFT:       表结构真不一致(增/减列) → exit 1
-    - ACCEPTED-DRIFT:   ALTER-列 + 隐式建表 等 A1 协议下预期的差异 → exit 0 但打印提示
-    - MISSING/NEW:      同 REAL-DRIFT,exit 1
+Categories:
+    - REAL-DRIFT:       the table structure really differs (column added/removed) → exit 1
+    - ACCEPTED-DRIFT:   differences expected under the A1 protocol, such as ALTER columns + implicit table creation → exit 0 but prints a notice
+    - MISSING/NEW:      same as REAL-DRIFT, exit 1
 """
 import pathlib
 import re
 import sys
+from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 schema_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 \
     else pathlib.Path(__file__).resolve().parent.parent / "db/schema.sql"
 repo = schema_path.parent.parent.parent
 
-# 这些表是迁移临时表,不该出现在 schema.sql
+# these tables are migration temporaries, they must not appear in schema.sql
 TRANSIENT_TABLES = {"web_subdomains_new"}
 
-# A1 协议下"通过 ALTER TABLE 加列"在源文件里会出现,而 schema.sql 把它们合并进建表 DDL。
-# 这里列出已知的 ALTER 列 — 对比时允许 schema.sql "超前"。
+# under the A1 protocol "adding a column via ALTER TABLE" shows up in the source files, while schema.sql merges them into the CREATE TABLE DDL.
+# the known ALTER columns are listed here — during the comparison schema.sql is allowed to be "ahead".
 ACCEPTED_ALTER_COLS = {
     "businesses":     {"change_type"},
     "companies":      {"change_type"},
@@ -88,56 +97,56 @@ schema_fps = extract_create_tables(schema_text)
 real_drift = []
 accepted_drift = []
 
-# schema.sql vs 源文件
+# schema.sql vs source files
 for t, scols in schema_fps.items():
     candidates = []
     for tag, fp in src_fps.items():
         if t in fp:
             candidates.append((tag, fp[t]))
     if not candidates:
-        # 仅 schema.sql 有(隐式建表合法)
-        accepted_drift.append(f"[ACCEPTED] {t} 只在 schema.sql (隐式建表,源文件仅 INSERT)")
+        # only in schema.sql (implicit table creation is legal)
+        accepted_drift.append(_t("main.check_schema.drift.accepted_implicit", {"table": t}))
         continue
     src_cols = set()
     for _, c in candidates:
         src_cols.update(c)
     schema_cols = set(scols)
     only_schema = schema_cols - src_cols
-    # 分类 REAL vs ACCEPTED
+    # classify REAL vs ACCEPTED
     accepted = ACCEPTED_ALTER_COLS.get(t, set())
     real_new = only_schema - accepted
     accepted_only = only_schema & accepted
     if real_new:
         real_drift.append(
-            f"[REAL-DRIFT] {t}: schema.sql 有但源文件没,且不是已知 ALTER: {sorted(real_new)}")
+            _t("main.check_schema.drift.real_new", {"table": t, "cols": sorted(real_new)}))
     if accepted_only:
         accepted_drift.append(
-            f"[ACCEPTED] {t}: schema.sql 超前 ALTER 列: {sorted(accepted_only)}")
+            _t("main.check_schema.drift.accepted_alter", {"table": t, "cols": sorted(accepted_only)}))
 
-# 源文件 vs schema.sql
+# source files vs schema.sql
 for tag, fp in src_fps.items():
     for t in fp:
         if t in TRANSIENT_TABLES:
             continue
         if t not in schema_fps:
             real_drift.append(
-                f"[REAL-DRIFT] {t} 在 {tag} 里有 CREATE, schema.sql 缺失")
+                _t("main.check_schema.drift.missing_in_schema", {"table": t, "tag": tag}))
 
 if real_drift:
     print("REAL drift detected (must fix):")
     for p in real_drift:
         print(f"  {p}")
     if accepted_drift:
-        print("\nAccepted (A1 协议预期,无需修):")
+        print(_t("main.check_schema.accepted"))
         for p in accepted_drift:
             print(f"  {p}")
     sys.exit(1)
 else:
     n_tbl = len(schema_fps)
     n_src = sum(1 for fp in src_fps.values() if fp)
-    print(f"OK: schema.sql 含 {n_tbl} 张表,与 {n_src} 个源文件 CREATE 一致")
+    print(_t("main.check_schema.consistent", {"n_tbl": n_tbl, "n_src": n_src}))
     if accepted_drift:
-        print("注(ACCEPTED):")
+        print(_t("main.check_schema.accepted_note"))
         for p in accepted_drift:
             print(f"  {p}")
     sys.exit(0)

@@ -1,30 +1,30 @@
 """
-modules/public/health/lib/health_config.py — 解析 config/health.conf
+modules/public/health/lib/health_config.py — parse config/health.conf
 
-格式 (同 modules/public/notify/lib/notify_config.py):
-    key=value        value 末尾空白自动 trim
-    # 整行注释     行内 # 后内容忽略
+Format (same as modules/public/notify/lib/notify_config.py):
+    key=value        trailing whitespace in the value is trimmed
+    # whole-line comment     everything after an inline # is ignored
 
-字段:
-    DISK_WARN_PCT            disk usage >= 该百分比记 warn (默认 80)
-    DISK_ALERT_PCT           disk usage >= 该百分比记 alert (默认 90)
-    CPU_LOAD5_PER_NPROC      5min load average / nproc 上限 (默认 2.0)
-    CPU_PCT_ALERT            top -bn1 瞬时 CPU 占用告警线 (默认 95)
-    MEM_ALERT_PCT            memory usage >= 该百分比记 alert (默认 90)
-    CRON_MAX_AGE_HOURS       cron 任务日志 mtime 超过该小时数告警 (默认 25)
-    WATCHED_LOGS             空格分隔的日志路径列表 (预置 dashboard_watchdog.log)
+Fields:
+    DISK_WARN_PCT            disk usage >= this percentage is recorded as warn (default 80)
+    DISK_ALERT_PCT           disk usage >= this percentage is recorded as alert (default 90)
+    CPU_LOAD5_PER_NPROC      5min load average / nproc ceiling (default 2.0)
+    CPU_PCT_ALERT            top -bn1 instantaneous CPU usage alert line (default 95)
+    MEM_ALERT_PCT            memory usage >= this percentage is recorded as alert (default 90)
+    CRON_MAX_AGE_HOURS       alert when the cron job log mtime is older than this many hours (default 25)
+    WATCHED_LOGS             space-separated list of log paths (preloaded with dashboard_watchdog.log)
 
-用法:
-    python3 health_config.py <config_path>           输出 shell-eval 行
-    python3 health_config.py <config_path> <key>     输出单 key 值
-    python3 health_config.py --help                  本帮助
+Usage:
+    python3 health_config.py <config_path>           output the shell-eval lines
+    python3 health_config.py <config_path> <key>     output the value of a single key
+    python3 health_config.py --help                  this help
 
-设计:
-    - 与 notify_config.py 同款 parse_config 模式,纯 stdlib
-    - WATCHED_LOGS 这种空格分隔多值,parse 后保持为原始 string,
-      由调用方 split() 处理
-    - 真配置(operator 自填)走 config/health.conf (.gitignore 屏蔽),
-      本文件只读,不入仓
+Design:
+    - the same parse_config pattern as notify_config.py, pure stdlib
+    - a space-separated multi-value like WATCHED_LOGS stays a raw string after parsing,
+      the caller split()s it
+    - the real config (filled in by the operator) lives in config/health.conf (.gitignore keeps it out),
+      this file only reads it, it is not committed
 """
 from __future__ import annotations
 
@@ -35,21 +35,21 @@ from pathlib import Path
 KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 DOC = """\
-health_config.py — 解析 config/health.conf (key=value)
+health_config.py — parse config/health.conf (key=value)
 
-用法:
-    python3 health_config.py <config_path>           输出 shell-eval 形式
-    python3 health_config.py <config_path> <key>     输出单 key 值
-    python3 health_config.py --help                  本帮助
+Usage:
+    python3 health_config.py <config_path>           output in shell-eval form
+    python3 health_config.py <config_path> <key>     output the value of a single key
+    python3 health_config.py --help                  this help
 
-退出码: 0=ok 1=参数 2=文件不存在 3=语法
+Exit codes: 0=ok 1=arguments 2=file not found 3=syntax
 """
 
 
 def parse_config(path: Path) -> dict[str, str] | None:
-    """读取 key=value 配置文件;空行 / 整行 # / 行内 # 后内容忽略。
+    """Read a key=value config file; blank lines / whole-line # / everything after an inline # is ignored.
 
-    Returns None 表示文件不存在或解析失败;返回空 dict 表示文件全空。
+    Returns None means the file does not exist or the parse failed; returns an empty dict means the file is entirely empty.
     """
     out: dict[str, str] = {}
     try:

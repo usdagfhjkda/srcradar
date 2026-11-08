@@ -1,38 +1,40 @@
 ## Proposed changes
 
-<!-- 一句话概括改了什么 + 关联 issue (Closes #123) -->
+> English | [中文](PULL_REQUEST_TEMPLATE_zh.md)
+
+<!-- one sentence about what changed + the related issue (Closes #123) -->
 
 ## Proof
 
-<!-- 怎么测的 / 跑过哪些命令 / 截图 -->
+<!-- how it was tested / which commands were run / screenshots -->
 
 ## Checklist
 
-### 改动定位
+### Where the change lives
 
-- [ ] 新增模块放在 `modules/public/<name>/`(默认,可选装)
-- [ ] 若必须放 `modules/main/`,下面"行为变化"说明原因
+- [ ] A new module goes to `modules/public/<name>/` (the default, it is optional)
+- [ ] If it has to go to `modules/main/`, the reason is given under "Behaviour changes"
 
-### 配置驱动(若有新增工具调用 / 路径)
+### Driven by the configuration (if there is a new tool call or path)
 
-- [ ] 走 `config/*.conf` + `load_config_set`(L1 env > L2 conf > L3 默认)
-- [ ] 不硬编码绝对路径(如 `$HOME/...`)
+- [ ] It goes through `config/*.conf` + `load_config_set` (L1 env > L2 conf > L3 default)
+- [ ] No absolute path is hardcoded (such as `$HOME/...`)
 
-### 敏感信息自查
+### The sensitive information
 
-- [ ] 无真实业务域名(用 example.com / foo.test 占位)
-- [ ] 无真实厂商名 / 真实子公司名
-- [ ] 无真实凭据(token / password / cookie / 私钥)
-- [ ] 无真实邮箱 / 真实 IP / 真实 hostname
-- [ ] 无 recon.sqlite3 切片 / scan_results 真实输出
-- [ ] Go 模块改动(`cdnmatch` / `db_align`)是上游已有 commit
+- [ ] No real business domain (example.com / foo.test stand in)
+- [ ] No real vendor name / no real subsidiary name
+- [ ] No real credential (token / password / cookie / private key)
+- [ ] No real email address / no real IP / no real hostname
+- [ ] No slice of recon.sqlite3 / no real output of scan_results
+- [ ] A change of a Go module (`cdnmatch` / `db_align`) is a commit that the upstream already has
 
-### 测试 / 文档
+### Tests / documentation
 
-- [ ] 跑过模块自测(bash -n / shellcheck / python -m py_compile / go vet)
-- [ ] 改了 `install.sh` 默认行为 → 在"行为变化"段说明
-- [ ] 加了 README / CHANGELOG / 注释(若功能对用户可见)
+- [ ] The self test of the module was run (bash -n / shellcheck / python -m py_compile / go vet)
+- [ ] The default behaviour of `install.sh` changed -> it is written down under "Behaviour changes"
+- [ ] A README / CHANGELOG / a comment was added (when the feature is visible to the user)
 
-## 行为变化(若有)
+## Behaviour changes (if there are any)
 
-<!-- 改动前 vs 改动后;若是 break change,详细写 -->
+<!-- before the change against after the change; when it is a break change, write it down in detail -->

@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
 #
-# modules/public/notify/install.sh — 装 notify 模块(可选推送插件)
+# modules/public/notify/install.sh — install the notify module (optional push plugin)
 #
-# notify 模块组成:
-#   - notify_send.sh            主推送脚本(gpg 加密 + curl POST 到 Resend HTTP API)
-#   - lib/notify_config.py      config/notify.conf 读取器
-#   - config/notify.conf.example 配置占位模板(operator 自填真值后另存为
-#                              config/notify.conf,.gitignore 屏蔽)
+# notify module parts:
+#   - notify_send.sh            main push script (gpg encryption + curl POST to the Resend HTTP API)
+#   - lib/notify_config.py      reader for config/notify.conf
+#   - config/notify.conf.example config placeholder template (the operator fills in the real
+#                              values and saves it as config/notify.conf, .gitignore keeps it out)
 #
-# 用法:
-#   bash install.sh              # 默认:写 config/notify.conf.example(若缺)
-#                                 # + 自检 gpg / curl / notify_config.py
-#   bash install.sh --check      # 只查依赖 + 自检,不动 config
+# Usage:
+#   bash install.sh              # default: write config/notify.conf.example (if missing)
+#                                 # + self-check gpg / curl / notify_config.py
+#   bash install.sh --check      # only check the dependencies + self-check, do not touch config
 #   bash install.sh --uninstall
 #
-# 退出码:
+# Exit codes:
 #   0 = OK
-#   2 = 缺依赖 (gpg / python3 / curl)
-#   3 = notify 模块自检失败
+#   2 = missing dependency (gpg / python3 / curl)
+#   3 = notify module self-check failed
 #
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -39,38 +43,38 @@ usage() {
 
 check_deps() {
     local rc=0
-    command -v python3 >/dev/null 2>&1 || { err "缺 python3"; rc=2; }
-    command -v gpg >/dev/null 2>&1      || { err "缺 gpg (apt: gnupg)"; rc=2; }
-    command -v curl >/dev/null 2>&1     || { err "缺 curl (Resend HTTP API 调用需要)"; rc=2; }
+    command -v python3 >/dev/null 2>&1 || { err "$(t public.notify.install.python3_missing)"; rc=2; }
+    command -v gpg >/dev/null 2>&1      || { err "$(t public.notify.install.gpg_missing)"; rc=2; }
+    command -v curl >/dev/null 2>&1     || { err "$(t public.notify.install.curl_missing)"; rc=2; }
     [ -f "${SCRIPT_DIR}/notify_send.sh" ] \
-        || { err "notify_send.sh 缺失"; rc=3; }
+        || { err "$(t public.notify.install.notify_send_script_missing)"; rc=3; }
     [ -f "${SCRIPT_DIR}/lib/notify_config.py" ] \
-        || { err "lib/notify_config.py 缺失"; rc=3; }
+        || { err "$(t public.notify.install.notify_config_py_missing)"; rc=3; }
     return $rc
 }
 
-# ---- 写 example 占位(若缺) ----
+# ---- write the example placeholder (if missing) ----
 write_example() {
     if [ -f "$EXAMPLE_CONF" ]; then
-        log "example 已存在: $EXAMPLE_CONF"
+        log "$(t public.install.notify_example_exists EXAMPLE_CONF=$EXAMPLE_CONF)"
     else
-        log "写入 example: $EXAMPLE_CONF"
+        log "$(t public.install.notify_example_written EXAMPLE_CONF=$EXAMPLE_CONF)"
         mkdir -p "$(dirname "$EXAMPLE_CONF")"
         cat > "$EXAMPLE_CONF" <<'EOF'
-# notify 模块配置占位模板
+# notify module config placeholder template
 #
-# 真值请复制本文件为 config/notify.conf(同目录)再编辑。
-# config/notify.conf 在 .gitignore 内,不入仓。
+# Copy this file to config/notify.conf (same directory) and edit it to fill in the real values.
+# config/notify.conf is inside .gitignore, it is not committed.
 #
-# 字段:
-#   RESEND_API_KEY  Resend HTTP API key(在 https://resend.com/api-keys
-#                   生成,以 re_ 开头,至少 20 字符;绑一个发件域)
-#   FROM_ADDR       发件人地址(必须在 Resend 后台已验证的发件域下)
-#   TO_ADDR         收件人邮箱(操作员)
-#   SUBJECT         邮件主题前缀(默认 "[srcradar] daily diff")
-#   GPG_RECIPIENT   GPG 收件人邮箱(== TO_ADDR;给 gpg -r 用)
+# Fields:
+#   RESEND_API_KEY  Resend HTTP API key (generated at https://resend.com/api-keys
+#                   starts with re_, at least 20 characters; binds one sending domain)
+#   FROM_ADDR       sender address (must be under a sending domain already verified in the Resend backend)
+#   TO_ADDR         recipient email (the operator)
+#   SUBJECT         email subject prefix (default "[srcradar] daily diff")
+#   GPG_RECIPIENT   GPG recipient email (== TO_ADDR; used for gpg -r)
 #
-# 任何字段留空 / REPLACE_WITH_* 都会让 notify_send.sh 拒绝发并打印配置缺失。
+# Any field left empty / REPLACE_WITH_* makes notify_send.sh refuse to send and print what is missing.
 RESEND_API_KEY=REPLACE_WITH_RESEND_API_KEY
 FROM_ADDR=noreply@your-domain.example
 TO_ADDR=REPLACE_WITH_RECIPIENT_EMAIL
@@ -81,67 +85,67 @@ EOF
     fi
 }
 
-# ---- 自检 ----
+# ---- self-check ----
 verify() {
     local rc=0
     if command -v gpg >/dev/null 2>&1; then
         printf "  OK gpg: %s\n" "$(command -v gpg)"
     else
-        err "gpg 缺失"; rc=1
+        err "$(t public.install.gpg_missing)"; rc=1
     fi
     if command -v curl >/dev/null 2>&1; then
         printf "  OK curl: %s\n" "$(command -v curl)"
     else
-        err "curl 缺失"; rc=1
+        err "$(t public.install.curl_missing)"; rc=1
     fi
     if command -v python3 >/dev/null 2>&1; then
         printf "  OK python3: %s\n" "$(command -v python3)"
     else
-        err "python3 缺失"; rc=1
+        err "$(t public.install.python3_missing)"; rc=1
     fi
-    # 关键:在 TTY 下 example 通常已被 operator 复制成 notify.conf。
-    # 非 TTY(--check)不强制要求真值存在,但要确认 example 在。
+    # key point: under a TTY the example has normally already been copied to notify.conf by the operator.
+    # non-TTY (--check) does not require the real values to exist, but the example must be there.
     if [ -t 0 ]; then
         if [ -f "$TARGET_CONF" ]; then
-            printf "  OK 真值配置存在: %s\n" "$TARGET_CONF"
+            printf "%s\n" "$(t public.install.notify_real_config_ok TARGET_CONF="$TARGET_CONF")"
         else
-            warn "config/notify.conf 不存在(--check / docker 默认忽略,真值由 operator 维护)"
+            warn "$(t public.install.notify_real_config_missing)"
         fi
     fi
     if [ -f "$EXAMPLE_CONF" ]; then
-        printf "  OK example 模板存在\n"
+        printf "$(t public.install.notify_example_template_ok)"
     else
-        err "example 模板缺失"; rc=1
+        err "$(t public.install.notify_example_template_missing)"; rc=1
     fi
     if python3 "${SCRIPT_DIR}/lib/notify_config.py" --help >/dev/null 2>&1; then
-        printf "  OK notify_config.py --help 输出\n"
+        printf "$(t public.install.notify_config_help_ok)"
     else
-        err "notify_config.py --help 失败"; rc=1
+        err "$(t public.install.notify_config_help_failed)"; rc=1
     fi
-    # RESEND_API_KEY 格式提醒(只在 --check 路径打印,不强制)
+    # RESEND_API_KEY format reminder (printed only on the --check path, not enforced)
     if [ -f "$TARGET_CONF" ]; then
         if grep -q '^RESEND_API_KEY=' "$TARGET_CONF" 2>/dev/null; then
             local key
             key="$(sed -n 's/^RESEND_API_KEY=//p' "$TARGET_CONF" | head -1)"
             if [[ "$key" == REPLACE_WITH_* ]] || [ -z "$key" ]; then
-                warn "RESEND_API_KEY 仍是占位符,真值未填"
+                warn "$(t public.install.resend_api_key_placeholder)"
             elif [[ "$key" != re_* ]]; then
-                warn "RESEND_API_KEY 不以 re_ 开头(Resend 标准格式)"
+                warn "$(t public.install.resend_api_key_prefix)"
             elif [ "${#key}" -lt 20 ]; then
-                warn "RESEND_API_KEY 长度 < 20 字符(疑似无效)"
+                warn "$(t public.install.resend_api_key_too_short)"
             fi
         fi
     fi
-    # payload 目录可写
+    # payload directory is writable
     mkdir -p "$PAYLOAD_DIR" 2>/dev/null && chmod 0700 "$PAYLOAD_DIR" \
         && printf "  OK payload dir: %s\n" "$PAYLOAD_DIR" \
-        || { warn "payload 目录不可写 ($PAYLOAD_DIR)"; }
+        || { warn "$(t public.notify.install.payload_dir_not_writable PAYLOAD_DIR="$PAYLOAD_DIR")"; }
     return $rc
 }
 
 uninstall() {
-    # 仅移除可能由 install.sh 自动创建的文件;不动 operator 自填的 notify.conf
-    log "保留 example 模板与 operator 自填的真值 config;无可清理项"
+    # only remove the files that install.sh may have created; leave the operator's notify.conf alone
+    log "$(t public.install.notify_uninstall_nothing_to_clean)"
     return 0
 }
 
@@ -151,7 +155,7 @@ main() {
             check_deps || exit $?
             write_example
             verify || exit $?
-            log "notify 模块依赖 OK"
+            log "$(t public.install.notify_module_deps_ok)"
             exit 0
             ;;
         --uninstall) uninstall ;;

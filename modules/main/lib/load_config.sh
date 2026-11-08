@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 #
-# load_config.sh — bash 包装, 调 load_config.py 解析 config/*.conf
+# load_config.sh — bash wrapper, calls load_config.py to parse config/*.conf
 #
-# 接口:
+# Interface:
 #   source lib/load_config.sh
 #   load_config_set <config_path> <lib_dir>
 #
-# 行为:
-#   - 仅当 caller 同名变量未设时, 用 config 里的值(让 export 环境变量优先)
-#   - config 文件不存在 = 静默返回 0, 走 caller 脚本默认
-#   - parse 失败 = 报错到 stderr, 返回 3, caller 决定是否 exit
+# Behaviour:
+#   - use the value from config only when the caller has not set a variable of the same name (exported env vars win)
+#   - config file missing = return 0 silently, the caller script keeps its own defaults
+#   - parse failure = report to stderr, return 3, the caller decides whether to exit
 #
-# 用法 (在 scan.sh / scanner.sh 顶部):
+# Usage (at the top of scan.sh / scanner.sh):
 #   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 #   source "$SCRIPT_DIR/../lib/load_config.sh"
 #   load_config_set "$SCRIPT_DIR/../../../config/pdtm.conf" "$SCRIPT_DIR/../lib"
 #
-# 实现: 不用 eval(eval 在函数内只设 local scope),
-#       改用 read + assign: ${key}="${value}", 函数内赋值 + caller scope
-#       (bash 动态变量名, 必须用 eval 才能设到 caller scope)
+# Implementation: no eval (eval inside a function only sets local scope),
+#       use read + assign instead: ${key}="${value}", assigned in the function + caller scope
+#       (bash dynamic variable names need eval to reach the caller scope)
 #
 
 load_config_set() {
@@ -32,15 +36,15 @@ load_config_set() {
 
     local parsed
     if ! parsed="$(python3 "$lib_dir/load_config.py" "$cfg" 2>/dev/null)"; then
-        echo "[load_config] parse failed for $cfg (config 跳过)" >&2
+        echo "$(t main.load_config.parse_failed cfg="$cfg")" >&2
         return 3
     fi
     [ -z "$parsed" ] && return 3
 
-    # parsed 形式: dnsx_bin='/path'  (单引号包裹的 key=value)
-    # 用 eval 把每个 key=value 写入 caller scope
-    # - 函数内 eval 默认写 local scope
-    # - 用 declare -g 让变量写到 global scope (bash 4.2+)
+    # parsed form: dnsx_bin='/path'  (key=value wrapped in single quotes)
+    # use eval to write each key=value into the caller scope
+    # - eval inside a function writes to local scope by default
+    # - use declare -g to write the variable to global scope (bash 4.2+)
     local line key val
     while IFS= read -r line; do
         key="${line%%=*}"
@@ -48,7 +52,7 @@ load_config_set() {
         val="${val#\'}"
         val="${val%\'}"
         if [ -z "${!key:-}" ]; then
-            # 用 printf -v 把 value 写到 caller scope 的 key
+            # use printf -v to write the value to the key in the caller scope
             printf -v "$key" '%s' "$val"
         fi
     done <<< "$parsed"

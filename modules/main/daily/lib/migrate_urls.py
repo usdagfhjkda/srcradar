@@ -7,23 +7,27 @@ Usage:
 
 Side effects: schema only. No row data is modified.
 
-变更历史
+Change history
 ========
-  Phase 1   - web_hash_urls 初版
-  Phase 1.5 - URLFinder 完整字段(redirect / link_source / risk_flag /
+  Phase 1   - the first version of web_hash_urls
+  Phase 1.5 - the full URLFinder fields (redirect / link_source / risk_flag /
               is_dangerous / danger_reason)
-  Phase 2   - is_static 列(用户决策 2026-08-26)
-              + 后续 migrate_change_type_urls.py 加 change_type + AI/AU 触发器
+  Phase 2   - the is_static column (user decision 2026-08-26)
+              + change_type and the AI/AU triggers added later by
+              migrate_change_type_urls.py
 
-is_static 语义(用户 2026-08-26 拍板):
-  1 = path 最后一个 '.' 之后 == 'js' 或 'css'
-      (只检查这两个,其它 .png/.jpg 等不算静态)
-  0 = 否则
-  None = 旧行遗留(未参与判定),dashboard 染色忽略 None 行
+is_static semantics (decided by the user on 2026-08-26):
+  1 = everything after the last '.' in the path is 'js' or 'css'
+      (only these two are checked; other suffixes such as .png/.jpg do not
+      count as static)
+  0 = otherwise
+  None = a leftover row from before the column existed (it took part in no
+      decision), and the dashboard colouring ignores None rows
 
-持久化在 pdtm/scan_urls.py persist() 时算;
-触发器 trg_whu_au 仅对 is_static=0 行写 change_type,
-严格满足"只有满足当前子域 && 非 js/css 才可能修改 change_type"。
+The value is computed when pdtm/scan_urls.py persist() runs;
+the trg_whu_au trigger only writes change_type for rows with is_static=0,
+which satisfies "only a subdomain that is in scope and is not js/css can
+have its change_type modified".
 
 Notes:
     - No FK constraints to web_hashes/businesses/web_subdomains (Q7:
@@ -110,12 +114,17 @@ def main():
         else:
             print("[migrate_urls] column web_hashes.url_count already exists, skip")
 
-        # 3) web_hash_urls 列扩展(URLFinder 完整字段 + 危险路由标记)
-        #   - redirect:       URL 重定向目标(URLFinder 的 Redirect 字段)
-        #   - link_source:    URL 来自哪个上游页面(URLFinder 的 Source 字段,链路溯源)
-        #   - risk_flag:      path 里命中的高危关键词,逗号分隔;空 = 无(派生)
-        #   - is_dangerous:   URLFinder 主动标记的危险路由(从 Title 字段抽取)
-        #   - danger_reason:  危险原因原文(通常="疑似危险路由,已跳过验证")
+        # 3) the web_hash_urls column extensions (the full URLFinder fields
+        #    plus the dangerous route markers)
+        #   - redirect:       the URL redirect target (URLFinder's Redirect field)
+        #   - link_source:    the upstream page the URL came from (URLFinder's
+        #                    Source field, for link provenance)
+        #   - risk_flag:      the high-risk keywords hit in the path,
+        #                    comma separated; empty = none (derived)
+        #   - is_dangerous:   a dangerous route flagged by URLFinder itself
+        #                    (extracted from the Title field)
+        #   - danger_reason:  the original reason text (usually "suspected
+        #                    dangerous route, verification skipped")
         for col, decl in (
             ("redirect",      "TEXT"),
             ("link_source",   "TEXT"),
@@ -129,21 +138,28 @@ def main():
             else:
                 print(f"[migrate_urls] column web_hash_urls.{col} already exists, skip")
 
-        # 4) is_static 列(Phase 2 — 用户 2026-08-26 拍板)
-        #   - 语义:path 最后一个 '.' 之后 == 'js' 或 'css' 才算静态(其它后缀不算)
-        #   - 算的位置:scan_urls.py persist() 每次 INSERT/UPDATE 都同步算
-        #   - 触发器 trg_whu_au(migrate_change_type_urls.py)用这个列 gate
-        #   - 默认 NULL 表示"旧行遗留,未参与判定";dashboard 染色忽略 NULL
-        #   - 不带 NOT NULL 是为了兼容已存在的 7k+ 行(不想一次性回填)
+        # 4) the is_static column (Phase 2 — decided by the user on
+        #    2026-08-26)
+        #   - semantics: only 'js' or 'css' after the last '.' in the path
+        #     counts as static (other suffixes do not)
+        #   - computed where: scan_urls.py persist() recomputes it on every
+        #     INSERT/UPDATE
+        #   - the trg_whu_au trigger (migrate_change_type_urls.py) uses this
+        #     column as its gate
+        #   - NULL by default means "a leftover row that took part in no
+        #     decision"; the dashboard colouring ignores NULL
+        #   - it is not NOT NULL so that the existing 7k+ rows stay
+        #     compatible (no one-off backfill)
         if not has_column(conn, "web_hash_urls", "is_static"):
             conn.execute("ALTER TABLE web_hash_urls ADD COLUMN is_static INTEGER")
             print("[migrate_urls] added column web_hash_urls.is_static")
         else:
             print("[migrate_urls] column web_hash_urls.is_static already exists, skip")
 
-        # 5) 索引:
-        #   - risk_flag 索引(便于 dashboard 按风险关键词过滤)
-        #   - is_dangerous 索引(便于 dashboard 列出 URLFinder 主动标记的危险路由)
+        # 5) the indexes:
+        #   - a risk_flag index (so the dashboard can filter by risk keyword)
+        #   - an is_dangerous index (so the dashboard can list the dangerous
+        #     routes URLFinder flagged itself)
         for idx_name, idx_sql in (
             ("idx_web_hash_urls_risk_flag",
              "CREATE INDEX idx_web_hash_urls_risk_flag "

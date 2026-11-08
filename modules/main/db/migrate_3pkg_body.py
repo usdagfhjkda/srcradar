@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-migrate_3pkg_body.py — idempotent schema migration: 给 web_subdomains /
-web_subdomains_pre 加 curr_body_1 / curr_body_2 两列 (zlib BLOB)。
+migrate_3pkg_body.py — idempotent schema migration: add the curr_body_1 /
+curr_body_2 columns (zlib BLOB) to web_subdomains / web_subdomains_pre.
 
-2026-10-25: 3 包噪声提取方案。
-  当前只有 web_subdomains.curr_body (一次扫描的 body) 和
-  web_subdomains_pre.curr_body (上一天的 body), 两点对比无法区分
-  "动态噪声" 和 "同长度的真实变更"。灰区行 (ratio 落在 0.02~0.98)
-  需要额外两次独立采样, 构成 3 包:
-      包1 = curr_body      (原扫描)
-      包2 = curr_body_1    (同一时刻连发第 1 次)
-      包3 = curr_body_2    (同一时刻连发第 2 次)
-  三包共同稳定的区域 = 真实内容; 每包都变的区域 = 动态噪声。
+2026-10-25: 3-package noise extraction scheme.
+  today there are only web_subdomains.curr_body (the body of one scan) and
+  web_subdomains_pre.curr_body (the body of the previous day); comparing two
+  points cannot tell "dynamic noise" from "a real change of the same length".
+  Grey-zone rows (ratio between 0.02 and 0.98) need two extra independent samples, forming 3 packages:
+      pkg1 = curr_body      (the original scan)
+      pkg2 = curr_body_1    (1st of two extra requests fired back to back at the same moment)
+      pkg3 = curr_body_2    (2nd of two extra requests fired back to back at the same moment)
+  The region that is stable across all three packages = real content; a region that changes in every package = dynamic noise.
 
-用法:
+Usage:
   python3 migrate_3pkg_body.py --check
   python3 migrate_3pkg_body.py --apply [--db PATH]
 """
@@ -21,10 +21,18 @@ import argparse
 import sqlite3
 import sys
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 DEFAULT_DB = str(Path(__file__).resolve().parent / "recon.sqlite3")
 
-# 表 -> 新增列
+# table -> columns to add
 TABLES = ("web_subdomains", "web_subdomains_pre")
 COLUMNS = ("curr_body_1", "curr_body_2")
 
@@ -50,7 +58,7 @@ def check_only(db_path: str) -> int:
         ok = True
         for t in TABLES:
             if not table_exists(conn, t):
-                print(f"[check] {t} 不存在 (跳过)")
+                print(_t("main.migrate_3pkg_body.check_missing", {"t": t}))
                 continue
             for c in COLUMNS:
                 exists = has_column(conn, t, c)
@@ -66,14 +74,14 @@ def apply(db_path: str) -> int:
     try:
         for t in TABLES:
             if not table_exists(conn, t):
-                print(f"[apply] {t} 不存在 (跳过)")
+                print(_t("main.migrate_3pkg_body.apply_missing", {"t": t}))
                 continue
             for c in COLUMNS:
                 if has_column(conn, t, c):
-                    print(f"[apply] {t}.{c} 已存在, 跳过")
+                    print(_t("main.migrate_3pkg_body.apply_exists", {"t": t, "c": c}))
                     continue
                 conn.execute(f"ALTER TABLE {t} ADD COLUMN {c} BLOB")
-                print(f"[apply] {t}.{c} 已添加")
+                print(_t("main.migrate_3pkg_body.apply_added", {"t": t, "c": c}))
         conn.commit()
         return 0
     finally:

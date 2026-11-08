@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# srcradar — root-level dispatcher for all module scripts.
+#
+# srcradar - root-level dispatcher for all module scripts.
 #
 # Resolves <module> <script> from modules/{main,public,private}/ and
-# exec's the target. Zero business logic in this file; everything
-# lives in the submodule scripts.
+# exec's the target. Zero business logic in this file; everything lives
+# in the submodule scripts.
 #
 # Usage:
 #   ./srcradar <module> <script> [args...]
@@ -11,37 +12,50 @@
 #   ./srcradar -h|--help
 #
 # Examples:
-#   ./srcradar manage add_business -n ExampleCo
-#   ./srcradar pdtm scan -b ExampleCo
+#   ./srcradar manage add_business -n <business>
+#   ./srcradar pdtm scan -b <business>
 #   ./srcradar db init_db
 #   ./srcradar daily daily_monitor
-#   ./srcradar ymicp icp_mapp_query -b ExampleCo
+#   ./srcradar ymicp icp_mapp_query -b <business>
 #
 # Module resolution order: modules/private > modules/main > modules/public
 # (internal modules override public / default-installed modules)
 # Script resolution order: <script>.sh > <script>.py
 # (executable bit required for .sh, optional for .py)
+#
+# The help text lives in the message table (see modules/main/i18n/), so
+# --help renders in the configured language. This header is the
+# developer-facing description and is not what --help prints.
+#
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ---- i18n: message tables and language resolution ----
+# Locate the repository root by walking up, then reach the i18n module.
+# The same snippet works from any directory depth.
+_i18n_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && while [ ! -d modules/main/i18n ] && [ "$PWD" != "/" ]; do cd ..; done && pwd)/modules/main/i18n/i18n.sh"
+# The path is resolved at runtime, so shellcheck cannot follow it.
+# shellcheck source=modules/main/i18n/i18n.sh
+[ -f "$_i18n_self" ] && source "$_i18n_self"
+
 usage() {
-    sed -n '2,18p' "${BASH_SOURCE[0]}"
+    t help.srcradar.usage
     exit "${1:-0}"
 }
 
 print_help() { usage 0; }
 
-# 别名处理:daily/dashboard → modules/main/daily/lib/dashboard.py
-# 注意:这个 alias 必须在 MODULE/SCRIPT 设置后立即执行,因为后续
-# Resolve module path 段会重新设 MODULE_PATH=""(非 export)
-# 所以 alias 要"重写"MODULE/SCRIPT 让后续 Resolve 自然走到 modules/main/daily
+# alias handling: daily/dashboard → modules/main/daily/lib/dashboard.py
+# note: this alias must run right after MODULE/SCRIPT are set, because the
+# later Resolve module path section resets MODULE_PATH="" (not exported)
+# so the alias has to "rewrite" MODULE/SCRIPT to let the later Resolve land on modules/main/daily naturally
 list_scripts_alias() {
     if [ "${MODULE}/$SCRIPT" = "daily/dashboard" ]; then
-        # 把 MODULE 改成一个特殊的 "daily_dashboard_alias" 让 Resolve 跳过
-        # 不行,Resolve 还是按模块名找目录。最简单:让 alias 设置 ALIAS_TARGET
-        # 然后 Resolve target 段根据 ALIAS_TARGET 直接设 TARGET
+        # change MODULE into a special "daily_dashboard_alias" to make Resolve skip it
+        # that does not work, Resolve still looks up a directory by module name. simplest: let the alias set ALIAS_TARGET
+        # then the Resolve target section sets TARGET directly from ALIAS_TARGET
         ALIAS_TARGET="/opt/srcradar/modules/main/daily/lib/dashboard.py"
         export ALIAS_TARGET
         export ALIAS_DAILY_LIB=1
@@ -52,8 +66,8 @@ list_scripts() {
     local prefix found=0
     for prefix in modules/private modules/main modules/public; do
         [ -d "${ROOT_DIR}/${prefix}" ] || continue
-        # 扫 modules/<m>/<script>.{sh,py} + modules/<m>/lib/<script>.{sh,py}
-        # 过滤 install.sh/init.sh/check.sh(用户不该直接跑)
+        # scan modules/<m>/<script>.{sh,py} + modules/<m>/lib/<script>.{sh,py}
+        # filter out install.sh/init.sh/check.sh (users should not run them directly)
         while IFS= read -r -d '' f; do
             found=1
             rel="${f#${ROOT_DIR}/}"
@@ -85,7 +99,7 @@ esac
 MODULE="${1:?missing <module>}"
 SCRIPT="${2:?missing <script>}"
 shift 2
-# 别名处理 (必须在 MODULE/SCRIPT 定义之后,因 alias 内引用)
+# alias handling (must come after MODULE/SCRIPT are defined, the alias refers to them)
 list_scripts_alias
 
 # Resolve module path: main > public > private
@@ -104,16 +118,16 @@ if [ -z "${MODULE_PATH}" ]; then
 fi
 
 # Resolve target file. Prefer .sh (must be +x), fall back to .py (any perm).
-# 别名检查 (list_scripts 已用,但 dispatch 前再调一次保险)
+# alias check (list_scripts already does this, call it once more before dispatch for safety)
 list_scripts_alias
 
 TARGET=""
-# 别名:优先用 ALIAS_TARGET (e.g. daily/dashboard → lib/dashboard.py)
+# alias: prefer ALIAS_TARGET (e.g. daily/dashboard → lib/dashboard.py)
 if [ -n "${ALIAS_TARGET:-}" ] && [ -f "${ALIAS_TARGET}" ]; then
     TARGET="${ALIAS_TARGET}"
     SCRIPT="dashboard.py"  # for logging
 fi
-# 先查模块根目录 <SCRIPT>.{sh,py},再查 lib/<SCRIPT>.{sh,py}
+# look in the module root <SCRIPT>.{sh,py} first, then lib/<SCRIPT>.{sh,py}
 for base in "" "lib/"; do
     for ext in sh py; do
         cand="${ROOT_DIR}/${MODULE_PATH}/${base}${SCRIPT}.${ext}"
@@ -137,15 +151,19 @@ fi
 # Dispatch: exec replaces this process so argv / $0 stays correct
 # for the target script (its ${BASH_SOURCE[0]} resolves to itself,
 # not back to this dispatcher).
-# DB 路径解析(由 ./srcradar 顶部统一,免子脚本各自拼路径):
-#   1) env: $RECON_DB / $DB(用户显式 export)
-#   2) config/db.conf 的 recon_db_path(走 modules/main/lib/load_config.sh
-#      跟 config/pdtm.conf 同一套机制;load_config_set 在文件不存在时
-#      静默返回 0,不阻塞 docker / 干净 clone 等场景)
-#   3) 硬编码 image 路径 /opt/srcradar/db/recon.sqlite3(docker entrypoint
-#      init-db 默认落点)
-#   4) 兼容老 mount /data/recon.sqlite3(早期 srcradar-data volume)
-#   5) 都不命中 -> 子脚本走各自默认(<repo>/modules/main/db/...)
+# DB path resolution (done once at the top of ./srcradar, so the sub-scripts do
+# not each assemble their own path):
+#   1) env: $RECON_DB / $DB (explicitly exported by the user)
+#   2) recon_db_path in config/db.conf (via modules/main/lib/load_config.sh,
+#      the same mechanism as config/pdtm.conf; load_config_set returns 0
+#      silently when the file does not exist, so docker / clean clone and
+#      similar scenarios are not blocked)
+#   3) hardcoded image path /opt/srcradar/db/recon.sqlite3 (the default landing
+#      spot of the docker entrypoint init-db)
+#   4) compatibility with the old mount /data/recon.sqlite3 (the early
+#      srcradar-data volume)
+#   5) nothing matches -> each sub-script uses its own default
+#      (<repo>/modules/main/db/...)
 if [ -z "${RECON_DB:-}" ] && [ -z "${DB:-}" ]; then
     # shellcheck disable=SC1091
     source "${ROOT_DIR}/modules/main/lib/load_config.sh"
@@ -161,9 +179,10 @@ if [ -z "${RECON_DB:-}" ] && [ -z "${DB:-}" ]; then
         export DB=/data/recon.sqlite3
     fi
 fi
-# 某些模块脚本(如 pdtm/scan.sh)假设 CWD 在自己的目录。
-# 用模块目录作为 CWD,让用户免去手动 cd。
-# 例外:daily/dashboard 别名要求 CWD 在 lib/(dashboard.py 引用同目录模块)
+# some module scripts (e.g. pdtm/scan.sh) assume CWD is their own directory.
+# use the module directory as CWD so the user does not have to cd manually.
+# exception: the daily/dashboard alias requires CWD in lib/ (dashboard.py
+# imports sibling modules)
 if [ -n "${ALIAS_DAILY_LIB:-}" ]; then
     cd "${ROOT_DIR}/modules/main/daily/lib"
 else

@@ -1,55 +1,70 @@
 #!/usr/bin/env python3
-# migrate_tech_normalize.py — 把 technologies 列的历史 LIST_LITERAL 形态回填成规范形式
+# migrate_tech_normalize.py — backfill the historical LIST_LITERAL form of the technologies column into the canonical form
 #
-# 背景 (2026-10-29):
-#   import 侧把 httpx 的 tech 字段 (恒为 list[str]) 交给通用的 _s() 强转,
-#   而 _s() 对 list 一律 str(v) -> Python 的 list 字面量表示被当成字符串存进
-#   technologies 列:
-#       str(['Alibaba Cloud CDN'])  ->  "['Alibaba Cloud CDN']"
+# Background (2026-10-29):
+#   the import side hands the httpx tech field (always list[str]) to the generic
+#   _s() coercion, and _s() applies str(v) to a list, so the Python list literal
+#   representation ends up stored as a string in the
+#   technologies column:
 #
-#   同一份技术栈, 取决于当次扫描走的是 httpx JSONL 主路径还是 raw text
-#   兜底路径, 落库形态在 "['X']" / "X" / NULL 之间跳。于是 STEP 1 的
-#   technologies 快字段比较命中, 判成变更, 而 body 其实逐字节相同。
+#   The same technology stack, depending on whether the scan took the httpx JSONL
+#   main path or the raw text
+#   fallback path, lands in the database as "['X']" / "X" / NULL. The STEP 1
+#   technologies fast field comparison then hits and calls it a change, while the
+#   body is in fact byte-for-byte identical.
 #
-#   规范化格式沿用仓库内已有约定:
+#   The canonical format follows the convention already used in the repo:
 #       list -> ",".join(str(t) for t in v)      # ["A","B"] -> "A,B"
-#       str  -> 原样
-#       None -> None
-#   导入侧 (import_scan_results.py) 已改为直接写规范形式, 本脚本负责把
-#   历史存量回填 —— 否则新旧行形态不一致, 仍会误判。
+#       str  -> unchanged
 #
-# 用法:
+#   The import side (import_scan_results.py) now writes the canonical form
+#   directly; this script backfills
+#   the existing rows - otherwise the old and the new rows differ in form and it
+#   still misjudges them.
+#
+# Usage:
 #   python3 migrate_tech_normalize.py --db <path> --check
 #   python3 migrate_tech_normalize.py --db <path> --apply
 #   python3 migrate_tech_normalize.py --db <path> --apply --dry-run
 #
-# 幂等: 已规范的行不会被再次改动 (规范化后形态不变即跳过)。
+# Idempotent: a row that is already canonical is not changed again (it is skipped when the form does not change after the normalisation).
 
 import argparse
 import ast
 import sqlite3
 import sys
 from pathlib import Path
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 DEFAULT_DB = str(Path(__file__).resolve().parent / "recon.sqlite3")
 
-# 表 -> 需要回填的列
+# table -> the columns that need the backfill
 TABLES = ("web_subdomains", "web_subdomains_pre")
 COLUMN = "technologies"
 
 
 def normalize(value):
-    """把 list 字面量形态的 technologies 转成规范形式; 其余原样返回。
+    """Turn a technologies value in the list literal form into the canonical
+    form; everything else is returned unchanged.
 
-    返回 (new_value, changed) —— changed 为 True 表示需要写回。
-    无法解析或不是 list 时原样返回 (不做猜测, 不改数据)。
+    Returns (new_value, changed) - changed is True when it has to be written
+    back.
+    When it cannot be parsed, or when it is not a list, it is returned
+    unchanged (no guessing, no data change).
     """
     if value is None:
         return None, False
     if not isinstance(value, str):
         return value, False
     s = value.strip()
-    # 只处理看起来像 list/dict 字面量的值; PLAIN 字符串不动
+    # only the values that look like a list/dict literal are handled; a PLAIN string is left alone
     if not (s.startswith("[") and s.endswith("]")):
         return value, False
     try:
@@ -58,7 +73,7 @@ def normalize(value):
         return value, False
     if not isinstance(parsed, list):
         return value, False
-    # 只处理全字符串元素的 list (httpx 的 tech 就是这种)
+    # only a list whose elements are all strings is handled (the httpx tech is exactly that)
     if not all(isinstance(x, str) for x in parsed):
         return value, False
     new = ",".join(parsed)
@@ -85,10 +100,10 @@ def check_only(db_path: str) -> int:
     try:
         for t in TABLES:
             if not table_exists(conn, t):
-                print(f"[check] {t} 不存在 (跳过)")
+                print(_t("main.migrate_tech_normalize.check_table_missing", {"t": t}))
                 continue
             if not column_exists(conn, t, COLUMN):
-                print(f"[check] {t}.{COLUMN} 不存在 (跳过)")
+                print(_t("main.migrate_tech_normalize.check_column_missing", {"t": t, "COLUMN": COLUMN}))
                 continue
             total = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
             need = 0
@@ -96,7 +111,7 @@ def check_only(db_path: str) -> int:
                 _, changed = normalize(v)
                 if changed:
                     need += 1
-            print(f"[check] {t}.{COLUMN}: 总 {total} 行, 待回填 {need} 行")
+            print(_t("main.migrate_tech_normalize.check_counts", {"t": t, "COLUMN": COLUMN, "total": total, "need": need}))
         return 0
     finally:
         conn.close()
@@ -107,9 +122,9 @@ def apply(db_path: str, dry_run: bool) -> int:
     try:
         for t in TABLES:
             if not table_exists(conn, t) or not column_exists(conn, t, COLUMN):
-                print(f"[apply] {t}.{COLUMN} 不存在 (跳过)")
+                print(_t("main.migrate_tech_normalize.apply_column_missing", {"t": t, "COLUMN": COLUMN}))
                 continue
-            # 先按 id 读出需要改的行, 再逐行 UPDATE (不依赖任何具体业务值)
+            # the rows to change are read out by id first, then updated one by one (it does not depend on any concrete business value)
             rows = conn.execute(
                 f"SELECT id, {COLUMN} FROM {t} WHERE {COLUMN} IS NOT NULL"
             ).fetchall()
@@ -123,8 +138,9 @@ def apply(db_path: str, dry_run: bool) -> int:
                     conn.execute(f"UPDATE {t} SET {COLUMN}=? WHERE id=?", (new, rid))
             if not dry_run:
                 conn.commit()
-            verb = "dry-run 待回填" if dry_run else "已回填"
-            print(f"[apply] {t}.{COLUMN}: {verb} {changed} 行")
+            verb = (_t("main.migrate_tech_normalize.verb_dry_run") if dry_run
+                    else _t("main.migrate_tech_normalize.verb_applied"))
+            print(_t("main.migrate_tech_normalize.apply_counts", {"t": t, "COLUMN": COLUMN, "verb": verb, "changed": changed}))
         return 0
     finally:
         conn.close()

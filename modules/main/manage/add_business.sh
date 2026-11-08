@@ -3,47 +3,59 @@
 # seed companies + optional scope.
 #
 # Usage:
-#   ./manage/add_business.sh -n <业务名>
+#   ./manage/add_business.sh -n <business name>
 #                            [--enabled 0|1] [--web 0|1] [--tcp 0|1] [--icp 0|1]
 #                            [-s <seed.tsv>] [-i <input_dir>] [-d <db>]
-#                            [--keep-input]                   # v0.1.0+: 保留 -i 目录原文件
+#                            [--keep-input]                   # v0.1.0+: keep the files in the -i dir
 #                            [--auto] [--ymicp-base URL] [--ymicp-user U]
 #                            [--ymicp-pass P] [--ymicp-pages N]
 #
-# --auto 与 -i 互斥 (auto 内部生成 target.txt 并自动入 scopes)
+# --auto and -i are mutually exclusive (auto generates target.txt internally
+# and imports it into scopes)
 #
-# 默认 config: enabled=1, web=1, tcp=0, icp=1
+# Default config: enabled=1, web=1, tcp=0, icp=1
 #
-# Steps (顺序固定):
-#   1. INSERT OR IGNORE INTO businesses (business_name)               → biz_id
-#   2. INSERT OR IGNORE INTO recon_business_config                   (用 flag 或默认值)
-#   3. 若 -s: 解析 seed TSV → INSERT OR IGNORE INTO companies
-#   4. 若 -i: 调 ../pdtm/scope_import.sh -b <biz> -i <dir>            (scope 灌库)
+# Steps (the order is fixed):
+#   1. INSERT OR IGNORE INTO businesses (business_name)               -> biz_id
+#   2. INSERT OR IGNORE INTO recon_business_config                   (the flags or the defaults)
+#   3. if -s: parse the seed TSV -> INSERT OR IGNORE INTO companies
+#   4. if -i: call ../pdtm/scope_import.sh -b <biz> -i <dir>          (scope import)
 #
-# 注意: step 2 用 INSERT OR IGNORE — 已存在的 config 行不会被 flag 覆盖。
-#       若要事后调整 config, 用 manage/set_config.sh。
+# Note: step 2 uses INSERT OR IGNORE - an existing config row is not
+#       overwritten by the flags. To adjust the config afterwards, use
+#       manage/set_config.sh.
 #
-# seed TSV 格式（header 必填，列分隔 \t）:
-#   name<TAB>group[TAB<任意附加列，忽略>]
-#   例: ExampleCo子公司有限公司<TAB>核心
-# 多余列（pid / legal_person / status 等老格式里的字段）会被忽略 —
-# 若以后要保留这些元数据，建议迁到独立 biz_seeds 表。
+# seed TSV format (a header is required, the columns are separated by a tab):
+#   name<TAB>group[<any extra columns, ignored>]
+#   example: ExampleCoSubsidiaryLtd<TAB>core
+# The extra columns (pid / legal_person / status and the like, fields from
+# the old format) are ignored - if those metadata are needed later, they
+# should move to a separate biz_seeds table.
 #
-# input_dir 格式: 见 ../pdtm/scope_import.sh（需含 target.txt，可选 exclude.txt）。
-# 之后手动:
-#   cd ../db_align && ./bin/db_align -n '<业务名>' -all
-#   （拉控股树 + ICP / 公众号 / 小程序资产; 可能触发 AQC 风控, 不在 add_business 内自动跑）
+# input_dir format: see ../pdtm/scope_import.sh (it needs target.txt, and
+# exclude.txt is optional). Afterwards, by hand:
+#   cd ../db_align && ./bin/db_align -n '<business name>' -all
+#   (pulls the holding tree + the ICP / WeChat / mini-program assets; it may
+#    trip the AQC risk control, so it does not run automatically here)
 #
-# 已知约束:
-#   - companies.unit_name 是全局 UNIQUE（不带 business_id）。若 seed 里的 name
-#     已存在于另一业务下, INSERT OR IGNORE 会跳过该行（不重绑）。schema 修复见 README §已知问题。
-#   - recon_business_config INSERT OR IGNORE: 已存在行不动, 保护 operator 后调。
+# Known constraints:
+#   - companies.unit_name is globally UNIQUE (it carries no business_id). If
+#     the name in the seed already exists under another business, the INSERT
+#     OR IGNORE skips that row (no rebinding). The schema fix is in
+#     README, "known issues".
+#   - recon_business_config INSERT OR IGNORE: an existing row stays as it is,
+#     which protects against a later operator edit.
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
-# pdtm 工具路径硬编码 (与 scan.sh 一致: Ubuntu .bashrc 头部 case $- 早 return,
-#  source ~/.bashrc 进不去后面的 export, 直接硬编码最可靠).
-# --auto 走 scope_import → check_wildcard.sh 需要 dnsx, 故设 PATH.
+# The pdtm tool paths are hardcoded (as in scan.sh: the head of the Ubuntu
+#  .bashrc returns early in the `case $-` branch, so sourcing ~/.bashrc never
+#  reaches the export later on - hardcoding is the most reliable).
+# --auto goes through scope_import -> check_wildcard.sh needs dnsx, so set PATH.
 export PATH="$PATH:$HOME/.pdtm/go/bin"
 
 RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -57,7 +69,7 @@ WEB=1
 TCP=0
 ICP=1
 
-# --auto: ymicp 前置 (搜业务名 → 写 mapp_records → 拉 domain 写 target.txt → 入库)
+# --auto: the ymicp prerequisite (search the business name -> write mapp_records -> pull the domain into target.txt -> import)
 AUTO=0
 AUTO_INPUT_DIR=""
 KEEP_INPUT=0
@@ -99,16 +111,16 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$NAME" ] || { echo "[-n <业务名>] is required" >&2; usage 1; }
+[ -n "$NAME" ] || { echo "$(t main.add_business.arg_name_required)" >&2; usage 1; }
 [ -f "$DB" ]  || { echo "[-d] db not found: $DB" >&2; exit 1; }
 if [ "$AUTO" = "1" ] && [ -n "$INPUT_DIR" ]; then
-    echo "[--auto] 与 [-i/--input] 互斥, 只能用一个" >&2; exit 1
+    echo "$(t main.add_business.auto_and_input_exclusive)" >&2; exit 1
 fi
 if [ "$KEEP_INPUT" = "1" ] && [ "$AUTO" = "1" ]; then
-    echo "[--keep-input] 与 [--auto] 互斥: --auto 走 mktemp 临时目录,本就用完即删,无 keep 必要" >&2; exit 1
+    echo "$(t main.add_business.keep_input_auto_exclusive)" >&2; exit 1
 fi
 if [ "$KEEP_INPUT" = "1" ] && [ -z "$INPUT_DIR" ]; then
-    echo "[--keep-input] 仅在 [-i/--input] 下生效; 未指定 -i 时忽略" >&2
+    echo "$(t main.add_business.keep_input_needs_input)" >&2
 fi
 
 # ---- step 1+2: business row + config bootstrap ----
@@ -118,7 +130,7 @@ db, biz, en, web, tcp, icp = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4],
 conn = sqlite3.connect(db)
 conn.execute("INSERT OR IGNORE INTO businesses (business_name) VALUES (?)", (biz,))
 bid = int(conn.execute("SELECT id FROM businesses WHERE business_name=?", (biz,)).fetchone()[0])
-# INSERT OR IGNORE — 已有 config 行不动, 保护 operator 后调
+# INSERT OR IGNORE - an existing config row stays as it is, which protects against a later operator edit
 conn.execute(
     "INSERT OR IGNORE INTO recon_business_config (business_id, enabled, web, tcp, icp) "
     "VALUES (?, ?, ?, ?, ?)",
@@ -134,7 +146,7 @@ PY
 )
 echo "[add_biz] step 1-2: business id=$BID name='$NAME' config=enabled=$CUR_ENABLED,web=$CUR_WEB,tcp=$CUR_TCP,icp=$CUR_ICP"
 if [ "$CUR_ENABLED" != "$ENABLED" ] || [ "$CUR_WEB" != "$WEB" ] || [ "$CUR_TCP" != "$TCP" ] || [ "$CUR_ICP" != "$ICP" ]; then
-    echo "[add_biz]   (注: 已有 config 行, 你给的 flag 未应用; 改用 manage/set_config.sh)"
+    echo "$(t main.add_business.config_exists)"
 fi
 
 # ---- step 3: seed companies (optional) ----
@@ -175,21 +187,22 @@ print(f"[seed] inserted={ok} skip={skip} fail={fail}")
 PY
 fi
 
-# ---- step 3.5: --auto 前置 (ymicp /query/web → target.txt → 入库) ----
+# ---- step 3.5: the --auto prerequisite (ymicp /query/web -> target.txt -> import) ----
 if [ "$AUTO" = "1" ]; then
     YMICP_SCRIPT="$RECON_ROOT/public/ymicp/icp_mapp_query.py"
-    [ -f "$YMICP_SCRIPT" ] || { echo "[--auto] 缺少 icp_mapp_query.py: $YMICP_SCRIPT" >&2; exit 1; }
+    [ -f "$YMICP_SCRIPT" ] || { echo "$(t main.add_business.ymicp_script_missing path="$YMICP_SCRIPT")" >&2; exit 1; }
 
     AUTO_INPUT_DIR="$(mktemp -d)"
     AUTO_TARGET="$AUTO_INPUT_DIR/target.txt"
     trap 'rm -rf "$AUTO_INPUT_DIR"' EXIT
 
-    echo "[add_biz] step 3.5: ymicp /query/web 搜 '$NAME' (base=$YMICP_BASE, pages=$YMICP_PAGES)"
+    echo "$(t main.add_business.ymicp_query NAME="$NAME" YMICP_BASE="$YMICP_BASE" YMICP_PAGES="$YMICP_PAGES")"
 
     # icp_mapp_query.py --endpoint web --out-domains <file>:
-    #   - 调 /query/web (网站备案, 不是小程序 /query/mapp)
-    #   - 抽每条记录的 domain 字段去重, 写 <file>
-    #   - 不写 mapp_records (web 备案与 mapp_records 表语义不符)
+    #   - calls /query/web (the website filing, not the mini program /query/mapp)
+    #   - takes the domain field of every record, deduplicates it and writes <file>
+    #   - does not write mapp_records (the web filing and the mapp_records table
+    #     have different semantics)
     YMICP_ARGS=(--endpoint web --out-domains "$AUTO_TARGET"
                 --base "$YMICP_BASE" --user "$YMICP_USER"
                 --pages "$YMICP_PAGES"
@@ -198,24 +211,24 @@ if [ "$AUTO" = "1" ]; then
 
     if ! printf '%s\n' "$NAME" | python3 "$YMICP_SCRIPT" "${YMICP_ARGS[@]}"; then
         rc=$?
-        echo "[--auto] icp_mapp_query.py --endpoint web 失败 (exit=$rc)" >&2
-        echo "[--auto] 临时目录已保留: $AUTO_INPUT_DIR" >&2
+        echo "$(t main.add_business.ymicp_failed rc="$rc")" >&2
+        echo "$(t main.add_business.temp_dir_kept AUTO_INPUT_DIR="$AUTO_INPUT_DIR")" >&2
         trap - EXIT
         exit $rc
     fi
 
     if [ ! -s "$AUTO_TARGET" ]; then
-        echo "[--auto] target.txt 为空 (ymicp /query/web 返回 0 个 domain); step 4 拒绝入 scopes"
-        echo "[--auto] 临时目录已保留: $AUTO_INPUT_DIR (供排查)"
-        trap - EXIT  # 保留临时目录, 让用户能 cat
+        echo "$(t main.add_business.target_empty)"
+        echo "$(t main.add_business.temp_dir_kept_debug AUTO_INPUT_DIR="$AUTO_INPUT_DIR")"
+        trap - EXIT  # the temporary directory is kept, so that the user can cat it
     else
         n=$(wc -l < "$AUTO_TARGET")
-        echo "[--auto] target.txt: $n 个域名"
+        echo "$(t main.add_business.target_count n="$n")"
     fi
 fi
 
 # ---- step 4: scope import (optional) ----
-# 入口: -i 直传 或 --auto 内部生成的 AUTO_INPUT_DIR
+# The entry point: -i passed straight through, or the AUTO_INPUT_DIR that --auto generated
 EFFECTIVE_INPUT_DIR=""
 if [ "$AUTO" = "1" ]; then
     EFFECTIVE_INPUT_DIR="$AUTO_INPUT_DIR"
@@ -224,7 +237,7 @@ elif [ -n "$INPUT_DIR" ]; then
 fi
 if [ -n "$EFFECTIVE_INPUT_DIR" ]; then
     [ -d "$EFFECTIVE_INPUT_DIR" ]   || { echo "[-i] input dir not found: $EFFECTIVE_INPUT_DIR" >&2; exit 1; }
-    [ -f "$EFFECTIVE_INPUT_DIR/target.txt" ] || { echo "[-i] $EFFECTIVE_INPUT_DIR 缺少 target.txt" >&2; exit 1; }
+    [ -f "$EFFECTIVE_INPUT_DIR/target.txt" ] || { echo "$(t main.add_business.target_missing dir="$EFFECTIVE_INPUT_DIR")" >&2; exit 1; }
     echo "[add_biz] step 4: scope_import (source: $([ "$AUTO" = "1" ] && echo --auto || echo -i))"
     if [ "$KEEP_INPUT" = "1" ]; then
         "$RECON_ROOT/main/pdtm/scope_import.sh" -b "$NAME" -i "$EFFECTIVE_INPUT_DIR" -d "$DB" --keep-files
@@ -238,5 +251,5 @@ cat <<EOF
 [add_biz] done.
   next:
     cd $RECON_ROOT/public/db_align && ./bin/db_align -n '$NAME' -all
-    (拉控股树 + ICP / 公众号 / 小程序; 可能耗时较长, 注意 AQC 风控)
+    $(t main.add_business.auto_note)
 EOF

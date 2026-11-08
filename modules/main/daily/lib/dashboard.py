@@ -1,47 +1,47 @@
 #!/usr/bin/env python3
-"""Recon-DB dashboard — ARL 4-tab style, served read-only on localhost.
+"""Recon-DB dashboard — the ARL 4-tab style, served read-only on localhost.
 
-Reads recon.sqlite3 directly via SQLite (no JSON snapshot layer). The cached
-HTML is rebuilt every `reload_interval` seconds (default 30, override with
-DASHBOARD_RELOAD env), or on demand via GET /refresh.
+Reads recon.sqlite3 directly through SQLite (there is no JSON snapshot layer). The cached
+HTML is rebuilt every `reload_interval` seconds (30 by default, override with the
+DASHBOARD_RELOAD env), or on demand through GET /refresh.
 
 Usage:
   dashboard.py [--db PATH] [--port PORT] [--host HOST]
 
-Defaults:
+The defaults:
   --db    <repo>/db/recon.sqlite3
   --port  8765
-  --host  127.0.0.1   <-- intentionally; see SECURITY below
+  --host  127.0.0.1   <-- intentionally; see the SECURITY section below
 
 SECURITY
 ========
-The server binds to 127.0.0.1 ONLY. To access it from your laptop, forward
+The server binds to 127.0.0.1 ONLY. To reach it from your laptop, forward
 the port over SSH:
 
     ssh -L 8765:127.0.0.1:8765 user@recon-host
     open http://localhost:8765
 
-No auth is enforced — the assumption is that the SSH tunnel authenticates the
-caller. If you change --host to 0.0.0.0 you will expose the recon data to
-everyone on the network; don't.
+No auth is enforced - the assumption is that the SSH tunnel authenticates the
+caller. If you change --host to 0.0.0.0 you expose the recon data to
+everyone on the network; do not.
 
 Endpoints
 =========
-  GET /                HTML page (rebuilt on reload interval / /refresh)
-  GET /api/snapshot    raw JSON dump of current DB state (same shape the old
-                       snapshot.py produced, for downstream scripts)
-  GET /refresh         force an immediate reload from DB; returns "reloaded"
-  GET /<业务名>        per-business view (e.g. /ExampleCo, /DemoCorp)
-  GET /<业务名>/new    per-business "new since last diff" view
-  GET /<业务名>/body/raw?url=<domain-url>&side=pre|cur
-                       raw HTTP body of one subdomain, as captured by the
-                       daily snapshot (side=pre) or the latest import
-                       (side=cur); body bytes are returned verbatim and
-                       rendered by the browser under a locked-down CSP
-  GET /diff            global "new since last diff" view
+  GET /                the HTML page (rebuilt on the reload interval / /refresh)
+  GET /api/snapshot    the raw JSON dump of the current DB state (the same shape
+                        the old snapshot.py produced, for the downstream scripts)
+  GET /refresh         forces an immediate reload from the DB; returns "reloaded"
+  GET /<business name>        the per-business view (e.g. /ExampleCo, /DemoCorp)
+  GET /<business name>/new    the per-business "new since the last diff" view
+  GET /<business name>/body/raw?url=<domain-url>&side=pre|cur
+                        the raw HTTP body of one subdomain, as captured by the
+                        daily snapshot (side=pre) or by the latest import
+                        (side=cur); the body bytes are returned verbatim and
+                        rendered by the browser under a locked-down CSP
+  GET /diff            the global "new since the last diff" view
   GET /health          "ok"
 
-The page is read-only — only GET is implemented.
+The page is read-only - only GET is implemented.
 """
 from __future__ import annotations
 import argparse
@@ -66,6 +66,16 @@ from pathlib import Path
 from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import log
+
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import KNOWN_LANGS, get_lang, set_lang
+from i18n import t as _t
 _DB_PORTS = {3306: 'MySQL', 5432: 'PostgreSQL', 27017: 'MongoDB', 6379: 'Redis', 1433: 'MSSQL', 9200: 'Elasticsearch', 11211: 'Memcached', 8529: 'RethinkDB', 5984: 'CouchDB', 28017: 'MongoDB-HTTP', 1521: 'OracleDB', 50000: 'SAP'}
 _REMOTE_PORTS = {22: 'SSH', 23: 'Telnet', 3389: 'RDP', 5900: 'VNC', 5901: 'VNC-1'}
 _MAIL_PORTS = {25: 'SMTP', 110: 'POP3', 143: 'IMAP', 465: 'SMTPS', 587: 'SMTP-submission', 993: 'IMAPS', 995: 'POP3S'}
@@ -185,9 +195,12 @@ def _aggregate(snap: dict) -> dict:
     return {'captured_at': snap.get('captured_at', ''), 'row_counts': snap.get('row_counts', {}), 'tables': {'scopes': scopes, 'tcp_assets': tcp, 'web_subdomains': ws, 'web_hashes': wh}, 'biz': biz, 'by_host': {h: rows for (h, rows) in by_host.items()}, 'risk_by_host': dict(risk_by_host), 'port_class': dict(port_class_counter), 'risk_counter': dict(risk_counter), 'risky_open': risky_open, 'fp_rows': fp_rows, 'fat_hosts': fat_hosts, 'web_status_codes': dict(web_status_codes), 'web_techs': dict(web_techs), 'web_root_domains': dict(web_root_domains), 'web_fp_buckets': fp_buckets, 'companies': companies, 'mp_records': mp_records, 'oa_records': oa_records, 'comp_counts': list(comp_counts.values()), 'biz_stats': _per_biz_stats(tables, biz)}
 
 def _per_biz_stats(tables: dict, biz: dict[int, str]) -> list[dict]:
-    """Per-business asset counts — used by the home page 业务 card link list.
-    Empty rows (total == 0) are included so callers can decide to hide them.
-    mapp_records are counted via companies.company_id → business_id join."""
+    """The per-business asset counts — used by the business card link list on the
+    home page.
+    The empty rows (total == 0) are included so that the callers can decide to
+    hide them.
+    The mapp_records are counted through the companies.company_id -> business_id
+    join."""
     _BID_TABS = ('scopes', 'companies', 'web_subdomains', 'web_hashes', 'tcp_assets')
     bid_counter: dict[str, Counter] = {t: Counter((r.get('business_id') for r in tables.get(t, []) if r.get('business_id') is not None)) for t in _BID_TABS}
     comp_to_bid = {c['id']: c.get('business_id') for c in tables.get('companies', []) if c.get('business_id') is not None}
@@ -203,7 +216,7 @@ def _per_biz_stats(tables: dict, biz: dict[int, str]) -> list[dict]:
         out.append({'id': bid, 'name': name, 'href': '/' + urllib.parse.quote(name), **counts, 'total': sum(counts.values())})
     out.sort(key=lambda x: x['name'])
     return out
-_CSS = '\n* { box-sizing: border-box; }\nbody { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;\n       background: #f4f5f7; color: #1f2328; }\nheader { background: #1f2328; color: #fff; padding: 14px 24px;\n         display: flex; justify-content: space-between; align-items: center; }\nheader h1 { margin: 0; font-size: 18px; font-weight: 600; }\nheader .meta { font-size: 12px; opacity: 0.7; }\nnav.tabs { background: #fff; border-bottom: 1px solid #d0d7de; padding: 0 24px;\n           display: flex; gap: 0; position: sticky; top: 0; z-index: 10; }\nnav.tabs button { background: none; border: none; padding: 14px 18px;\n                  font-size: 14px; color: #57606a; cursor: pointer;\n                  border-bottom: 2px solid transparent; }\nnav.tabs button:hover { color: #1f2328; }\nnav.tabs button.active { color: #0969da; border-bottom-color: #0969da; }\nmain { padding: 24px; max-width: 1400px; margin: 0 auto; }\n.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n         gap: 16px; margin-bottom: 24px; }\n.card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px;\n        padding: 16px; }\n.card .label { font-size: 12px; color: #57606a; text-transform: uppercase;\n               letter-spacing: 0.5px; }\n.card .value { font-size: 28px; font-weight: 600; margin-top: 4px; }\n.tab-pane { display: none; }\n.tab-pane.active { display: block; }\ntable { width: 100%; border-collapse: collapse; background: #fff;\n        border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden;\n        font-size: 13px; }\nth, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eaecef; }\nth { background: #f6f8fa; font-weight: 600; color: #57606a; }\nth.sortable { cursor: pointer; user-select: none; }\nth.sortable:hover { background: #eaeef2; color: #1f2328; }\nth.sortable.asc::after  { content: " ▲"; color: #57606a; font-size: 11px; }\nth.sortable.desc::after { content: " ▼"; color: #57606a; font-size: 11px; }\ntr:last-child td { border-bottom: none; }\ntr:hover td { background: #f6f8fa; }\n.risk-high { background: #ffebe9; }\n.risk-high td:first-child { border-left: 3px solid #cf222e; }\n.risk-med  { background: #fff8c5; }\n.risk-med  td:first-child { border-left: 3px solid #9a6700; }\n.risk-low  td:first-child { border-left: 3px solid #1a7f37; }\n.risk-info td:first-child { border-left: 3px solid #6e7781; }\n.bar { display: inline-block; height: 14px; background: #0969da;\n       border-radius: 2px; vertical-align: middle; }\n.bar-wrap { background: #eaecef; border-radius: 2px;\n            display: inline-block; width: 220px; height: 14px; }\n.tag { display: inline-block; padding: 2px 8px; border-radius: 12px;\n       font-size: 11px; font-weight: 500; }\n.tag-high  { background: #ffebe9; color: #cf222e; }\n.tag-med   { background: #fff8c5; color: #9a6700; }\n.tag-low   { background: #dafbe1; color: #1a7f37; }\n.tag-info  { background: #eaeef2; color: #57606a; }\n.tag-new     { background: #0969da; color: #fff; }   /* /new: 新 (added or reactivated) */\n.tag-changed { background: #8250df; color: #fff; }   /* /new: 变 (any field diff) */\n.note { background: #fff8c5; border-left: 3px solid #9a6700;\n        padding: 10px 14px; border-radius: 4px; margin-bottom: 16px;\n        font-size: 13px; }\n.note-allnew { background: #dafbe1; border-left: 3px solid #1a7f37; }\n.section-title { font-size: 16px; font-weight: 600; margin: 24px 0 12px; }\n.sub-title   { font-size: 13px; font-weight: 600; color: #57606a;\n               margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }\n.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }\n@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }\n.muted { color: #57606a; font-size: 12px; }\ncode { background: #eaeef2; padding: 1px 6px; border-radius: 3px;\n       font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }\n.filter { margin-bottom: 12px; }\n.filter input { padding: 6px 10px; border: 1px solid #d0d7de;\n                border-radius: 4px; width: 280px; font-size: 13px; }\n.fp-warn { background: #fff8c5; padding: 12px; border-radius: 6px;\n           border-left: 3px solid #9a6700; margin-bottom: 12px; }\n.fp-warn b { color: #9a6700; }\n.scroll-x { overflow-x: auto; }\n.mono { font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }\n.toggle { padding: 5px 12px; border: 1px solid #d0d7de;\n          background: #fff; border-radius: 4px; cursor: pointer;\n          font-size: 13px; color: #1f2328; }\n.toggle:hover { background: #f6f8fa; }\n.toggle.on { background: #0969da; color: #fff; border-color: #0969da; }\n.hash-link { color: #0969da; text-decoration: none; cursor: pointer; }\n.hash-link:hover { text-decoration: underline; }\n.hash-count { color: #57606a; font-size: 11px; margin-left: 2px; }\n.num { text-align: right; font-variant-numeric: tabular-nums; }\n.modal { position: fixed; inset: 0; background: rgba(31,35,40,0.5);\n         z-index: 100; display: flex; align-items: center;\n         justify-content: center; }\n.modal-card { background: #fff; border-radius: 8px;\n              max-width: 800px; max-height: 80vh; width: 90%;\n              display: flex; flex-direction: column; overflow: hidden; }\n.modal-header { padding: 12px 16px; border-bottom: 1px solid #d0d7de;\n                display: flex; justify-content: space-between;\n                align-items: center; font-weight: 600; }\n#hash-modal-close { background: none; border: none; font-size: 24px;\n                    cursor: pointer; padding: 0 8px; line-height: 1;\n                    color: #57606a; }\n#hash-modal-close:hover { color: #1f2328; }\n#hash-modal-body { padding: 12px 16px; overflow: auto; font-size: 13px; }\n#hash-modal-body table { font-size: 13px; }\n#hash-modal-body a { color: #0969da; text-decoration: none; }\n#hash-modal-body a:hover { text-decoration: underline; }\n.biz-bar a.active { background:#0969da;color:#fff !important; }\n.biz-bar a:hover { background:#444c56; }\n.biz-card .value { font-size: 13px; font-weight: 400; margin-top: 6px; }\n.biz-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }\n.biz-link { display: flex; justify-content: space-between; align-items: center;\n            padding: 5px 8px; border-radius: 4px; color: #0969da;\n            text-decoration: none; font-size: 13px; }\n.biz-link:hover { background: #f6f8fa; text-decoration: none; }\n.biz-link .biz-name { font-weight: 500; }\n.biz-link .biz-count { font-size: 11px; font-variant-numeric: tabular-nums; }\n\n/* scan-onesite 表单 + 结果页 */\n.scan-form { background:#f6f8fa; border:1px solid #d0d7de; border-radius:6px;\n             padding:10px 12px; margin:0 0 14px 0; font-size:13px; }\n.scan-form summary { cursor:pointer; font-weight:600; color:#1f2328;\n                     user-select:none; }\n.scan-form textarea { width:100%; min-height:80px; padding:6px 10px;\n                      border:1px solid #d0d7de; border-radius:4px;\n                      font-family: ui-monospace, "SF Mono", monospace;\n                      font-size:13px; box-sizing:border-box; }\n.scan-form .hint { color:#57606a; font-size:12px; margin:6px 0 6px 0; }\n.scan-form .submit-row { margin-top:8px; display:flex; align-items:center;\n                         gap:10px; }\n.scan-form .muted { color:#57606a; font-size:12px; }\n\n.btn { padding:6px 14px; border:1px solid #d0d7de; background:#fff;\n       border-radius:4px; cursor:pointer; font-size:13px; color:#1f2328;\n       text-decoration:none; display:inline-block; }\n.btn:hover { background:#f6f8fa; }\n.btn.primary { background:#0969da; color:#fff; border-color:#0969da; }\n.btn.primary:hover { background:#0550ae; border-color:#0550ae; }\n\n.scan-result { background:#fff; border:1px solid #d0d7de; border-radius:6px;\n               padding:18px 22px; margin:14px 0; max-width:720px; }\n.scan-result.ok { border-left:4px solid #1a7f37; }\n.scan-result.err { border-left:4px solid #cf222e; background:#fff5f5; }\n.scan-result pre { background:#fff; border:1px solid #d0d7de; padding:8px;\n                   border-radius:4px; max-height:320px; overflow:auto;\n                   font-size:12px; white-space:pre-wrap; word-break:break-all; }\n.scan-result h2 { margin:0 0 10px 0; font-size:18px; }\n\n.score-cell { white-space:nowrap; }\n.score-cell .score-input { width:4em; padding:2px 4px; border:1px solid #d0d7de;\n                          border-radius:3px; font-size:12px; text-align:center;\n                          font-variant-numeric: tabular-nums; }\n.score-cell .score-input:focus { outline:none; border-color:#0969da; }\n.score-cell .score-save { padding:0 6px; cursor:pointer; border:1px solid #d0d7de;\n                          background:#f6f8fa; border-radius:3px; font-size:11px;\n                          margin-left:2px; }\n.score-cell .score-save:hover { background:#eaeef2; }\n.desc-cell { min-width:240px; }\n.desc-cell .desc-input { width:80%; padding:2px 4px; border:1px solid #d0d7de;\n                          border-radius:3px; font-size:12px; }\n.desc-cell .desc-status { display:inline-block; margin-left:6px; font-size:11px;\n                           color:#57606a; min-width:6em; }\n'
+_CSS = '\n* { box-sizing: border-box; }\nbody { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;\n       background: #f4f5f7; color: #1f2328; }\nheader { background: #1f2328; color: #fff; padding: 14px 24px;\n         display: flex; justify-content: space-between; align-items: center; }\nheader h1 { margin: 0; font-size: 18px; font-weight: 600; }\nheader .meta { font-size: 12px; opacity: 0.7; }\nnav.tabs { background: #fff; border-bottom: 1px solid #d0d7de; padding: 0 24px;\n           display: flex; gap: 0; position: sticky; top: 0; z-index: 10; }\nnav.tabs button { background: none; border: none; padding: 14px 18px;\n                  font-size: 14px; color: #57606a; cursor: pointer;\n                  border-bottom: 2px solid transparent; }\nnav.tabs button:hover { color: #1f2328; }\nnav.tabs button.active { color: #0969da; border-bottom-color: #0969da; }\nmain { padding: 24px; max-width: 1400px; margin: 0 auto; }\n.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n         gap: 16px; margin-bottom: 24px; }\n.card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px;\n        padding: 16px; }\n.card .label { font-size: 12px; color: #57606a; text-transform: uppercase;\n               letter-spacing: 0.5px; }\n.card .value { font-size: 28px; font-weight: 600; margin-top: 4px; }\n.tab-pane { display: none; }\n.tab-pane.active { display: block; }\ntable { width: 100%; border-collapse: collapse; background: #fff;\n        border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden;\n        font-size: 13px; }\nth, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eaecef; }\nth { background: #f6f8fa; font-weight: 600; color: #57606a; }\nth.sortable { cursor: pointer; user-select: none; }\nth.sortable:hover { background: #eaeef2; color: #1f2328; }\nth.sortable.asc::after  { content: " ▲"; color: #57606a; font-size: 11px; }\nth.sortable.desc::after { content: " ▼"; color: #57606a; font-size: 11px; }\ntr:last-child td { border-bottom: none; }\ntr:hover td { background: #f6f8fa; }\n.risk-high { background: #ffebe9; }\n.risk-high td:first-child { border-left: 3px solid #cf222e; }\n.risk-med  { background: #fff8c5; }\n.risk-med  td:first-child { border-left: 3px solid #9a6700; }\n.risk-low  td:first-child { border-left: 3px solid #1a7f37; }\n.risk-info td:first-child { border-left: 3px solid #6e7781; }\n.bar { display: inline-block; height: 14px; background: #0969da;\n       border-radius: 2px; vertical-align: middle; }\n.bar-wrap { background: #eaecef; border-radius: 2px;\n            display: inline-block; width: 220px; height: 14px; }\n.tag { display: inline-block; padding: 2px 8px; border-radius: 12px;\n       font-size: 11px; font-weight: 500; }\n.tag-high  { background: #ffebe9; color: #cf222e; }\n.tag-med   { background: #fff8c5; color: #9a6700; }\n.tag-low   { background: #dafbe1; color: #1a7f37; }\n.tag-info  { background: #eaeef2; color: #57606a; }\n.tag-new     { background: #0969da; color: #fff; }   /* /new: the new ones (added or reactivated) */\n.tag-changed { background: #8250df; color: #fff; }   /* /new: the changed ones (any field diff) */\n.note { background: #fff8c5; border-left: 3px solid #9a6700;\n        padding: 10px 14px; border-radius: 4px; margin-bottom: 16px;\n        font-size: 13px; }\n.note-allnew { background: #dafbe1; border-left: 3px solid #1a7f37; }\n.section-title { font-size: 16px; font-weight: 600; margin: 24px 0 12px; }\n.sub-title   { font-size: 13px; font-weight: 600; color: #57606a;\n               margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }\n.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }\n@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }\n.muted { color: #57606a; font-size: 12px; }\ncode { background: #eaeef2; padding: 1px 6px; border-radius: 3px;\n       font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }\n.filter { margin-bottom: 12px; }\n.filter input { padding: 6px 10px; border: 1px solid #d0d7de;\n                border-radius: 4px; width: 280px; font-size: 13px; }\n.fp-warn { background: #fff8c5; padding: 12px; border-radius: 6px;\n           border-left: 3px solid #9a6700; margin-bottom: 12px; }\n.fp-warn b { color: #9a6700; }\n.scroll-x { overflow-x: auto; }\n.mono { font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }\n.toggle { padding: 5px 12px; border: 1px solid #d0d7de;\n          background: #fff; border-radius: 4px; cursor: pointer;\n          font-size: 13px; color: #1f2328; }\n.toggle:hover { background: #f6f8fa; }\n.toggle.on { background: #0969da; color: #fff; border-color: #0969da; }\n.hash-link { color: #0969da; text-decoration: none; cursor: pointer; }\n.hash-link:hover { text-decoration: underline; }\n.hash-count { color: #57606a; font-size: 11px; margin-left: 2px; }\n.num { text-align: right; font-variant-numeric: tabular-nums; }\n.modal { position: fixed; inset: 0; background: rgba(31,35,40,0.5);\n         z-index: 100; display: flex; align-items: center;\n         justify-content: center; }\n.modal-card { background: #fff; border-radius: 8px;\n              max-width: 800px; max-height: 80vh; width: 90%;\n              display: flex; flex-direction: column; overflow: hidden; }\n.modal-header { padding: 12px 16px; border-bottom: 1px solid #d0d7de;\n                display: flex; justify-content: space-between;\n                align-items: center; font-weight: 600; }\n#hash-modal-close { background: none; border: none; font-size: 24px;\n                    cursor: pointer; padding: 0 8px; line-height: 1;\n                    color: #57606a; }\n#hash-modal-close:hover { color: #1f2328; }\n#hash-modal-body { padding: 12px 16px; overflow: auto; font-size: 13px; }\n#hash-modal-body table { font-size: 13px; }\n#hash-modal-body a { color: #0969da; text-decoration: none; }\n#hash-modal-body a:hover { text-decoration: underline; }\n.biz-bar a.active { background:#0969da;color:#fff !important; }\n.biz-bar a:hover { background:#444c56; }\n.biz-card .value { font-size: 13px; font-weight: 400; margin-top: 6px; }\n.biz-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }\n.biz-link { display: flex; justify-content: space-between; align-items: center;\n            padding: 5px 8px; border-radius: 4px; color: #0969da;\n            text-decoration: none; font-size: 13px; }\n.biz-link:hover { background: #f6f8fa; text-decoration: none; }\n.biz-link .biz-name { font-weight: 500; }\n.biz-link .biz-count { font-size: 11px; font-variant-numeric: tabular-nums; }\n\n/* the scan-onesite form and the result page */\n.scan-form { background:#f6f8fa; border:1px solid #d0d7de; border-radius:6px;\n             padding:10px 12px; margin:0 0 14px 0; font-size:13px; }\n.scan-form summary { cursor:pointer; font-weight:600; color:#1f2328;\n                     user-select:none; }\n.scan-form textarea { width:100%; min-height:80px; padding:6px 10px;\n                      border:1px solid #d0d7de; border-radius:4px;\n                      font-family: ui-monospace, "SF Mono", monospace;\n                      font-size:13px; box-sizing:border-box; }\n.scan-form .hint { color:#57606a; font-size:12px; margin:6px 0 6px 0; }\n.scan-form .submit-row { margin-top:8px; display:flex; align-items:center;\n                         gap:10px; }\n.scan-form .muted { color:#57606a; font-size:12px; }\n\n.btn { padding:6px 14px; border:1px solid #d0d7de; background:#fff;\n       border-radius:4px; cursor:pointer; font-size:13px; color:#1f2328;\n       text-decoration:none; display:inline-block; }\n.btn:hover { background:#f6f8fa; }\n.btn.primary { background:#0969da; color:#fff; border-color:#0969da; }\n.btn.primary:hover { background:#0550ae; border-color:#0550ae; }\n\n.scan-result { background:#fff; border:1px solid #d0d7de; border-radius:6px;\n               padding:18px 22px; margin:14px 0; max-width:720px; }\n.scan-result.ok { border-left:4px solid #1a7f37; }\n.scan-result.err { border-left:4px solid #cf222e; background:#fff5f5; }\n.scan-result pre { background:#fff; border:1px solid #d0d7de; padding:8px;\n                   border-radius:4px; max-height:320px; overflow:auto;\n                   font-size:12px; white-space:pre-wrap; word-break:break-all; }\n.scan-result h2 { margin:0 0 10px 0; font-size:18px; }\n\n.score-cell { white-space:nowrap; }\n.score-cell .score-input { width:4em; padding:2px 4px; border:1px solid #d0d7de;\n                          border-radius:3px; font-size:12px; text-align:center;\n                          font-variant-numeric: tabular-nums; }\n.score-cell .score-input:focus { outline:none; border-color:#0969da; }\n.score-cell .score-save { padding:0 6px; cursor:pointer; border:1px solid #d0d7de;\n                          background:#f6f8fa; border-radius:3px; font-size:11px;\n                          margin-left:2px; }\n.score-cell .score-save:hover { background:#eaeef2; }\n.desc-cell { min-width:240px; }\n.desc-cell .desc-input { width:80%; padding:2px 4px; border:1px solid #d0d7de;\n                          border-radius:3px; font-size:12px; }\n.desc-cell .desc-status { display:inline-block; margin-left:6px; font-size:11px;\n                           color:#57606a; min-width:6em; }\n'
 SCAN_HOSTNAME_RE = re.compile('^([a-zA-Z0-9][-a-zA-Z0-9]*\\.)+[a-zA-Z]{2,}$')
 SCAN_MAX_HOSTS = 200
 SCAN_MAX_BODY = 64 * 1024
@@ -219,10 +232,13 @@ KATANA_ENRICH_TIMEOUT = 600
 SCAN_URLS_DEFAULT_WORDLIST = os.environ.get('SCAN_URLS_WORDLIST', '')
 
 def _scan_urls_default_wordlist_suggestion() -> str:
-    """表单建议值 —— 与 scan_urls.py._resolve_default_wordlist_path 同款探测。
+    """The form suggestion value — the same probing as
+    scan_urls.py._resolve_default_wordlist_path.
 
-    env 已显式设置时直接用 env;否则探测两个候选路径,有就用第一个命中的;
-    都探测不到返回空串(表单渲染空 input,提交后 scan_urls.py 那边再报错)。
+    When env is set explicitly it is used directly; otherwise the two candidate
+    paths are probed and the first hit is used;
+    when neither can be found it returns an empty string (the form renders an
+    empty input and scan_urls.py reports the error after the submit).
     """
     env = os.environ.get('SCAN_URLS_WORDLIST')
     if env:
@@ -239,39 +255,48 @@ def _e(s: Any) -> str:
 
 def _risk_tag(risk: str) -> str:
     cls = {'high': 'tag-high', 'med': 'tag-med', 'low': 'tag-low'}.get(risk, 'tag-info')
-    label = {'high': '高', 'med': '中', 'low': '低', 'info': '提示'}.get(risk, risk)
+    label = {
+        'high': _t("dashboard.risk.high"),
+        'med': _t("dashboard.risk.med"),
+        'low': _t("dashboard.risk.low"),
+        'info': _t("dashboard.risk.info"),
+    }.get(risk, risk)
     return f'<span class="tag {cls}">{label}</span>'
 
 def _build_scan_form(biz_name: str) -> str:
-    """对当前业务发起单点扫描的折叠表单。biz_name 为空则首页 / 全局视图不渲染。"""
+    """The collapsible form that starts a single point scan of the current business. When biz_name is empty the home page / the global view does not render it."""
     if not biz_name:
         return ''
     action = '/' + urllib.parse.quote(biz_name) + '/scan'
-    return f'\n<details class="scan-form">\n  <summary>扫描并入库（向 {_e(biz_name)} 提交新域名）</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">一行一个域名，&le;{SCAN_MAX_HOSTS} 条；自动去重 / 小写 / 忽略空行与井号注释；\n    入库会同步触发 httpx 探测，结果刷新到本页面数据。</div>\n    <textarea name="hosts" rows="4" required\nplaceholder="example.com&#10;api.example.com"></textarea>\n    <div class="submit-row">\n      <button type="submit" class="btn primary">扫描并入库</button>\n      <span class="muted">同步等待（典型 5-30s）</span>\n    </div>\n  </form>\n</details>\n'
+    return f'\n<details class="scan-form">\n  <summary>{_t("dashboard.scan_form.summary", {"biz": _e(biz_name)})}</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">{_t("dashboard.scan_form.hint_input", {"max": SCAN_MAX_HOSTS})}\n    {_t("dashboard.scan_form.hint_effect")}</div>\n    <textarea name="hosts" rows="4" required\nplaceholder="example.com&#10;api.example.com"></textarea>\n    <div class="submit-row">\n      <button type="submit" class="btn primary">{_t("dashboard.scan_form.submit")}</button>\n      <span class="muted">{_t("dashboard.scan_form.wait_hint")}</span>\n    </div>\n  </form>\n</details>\n'
 
 def _build_scan_urls_form(biz_name: str) -> str:
-    """URL 资产扫描折叠表单(ffuf / URLFinder / gau)。点击 POST /<biz>/scan-urls。
+    """The URL asset scan collapsible form (ffuf / URLFinder / gau). It posts to
+    /<biz>/scan-urls.
 
-    设计目标:
-      - 只扫描已存在的 active 子域(POST handler 校验),不会扩散到未知域
-      - 默认 source 勾选 urlfinder(主动爬虫、无字典依赖、最稳)
-      - ffuf / gau 留给用户按需勾选
-      - wordlist 暂用 SCAN_URLS_DEFAULT_WORDLIST;高级用户可在表单里改路径
+    The design goals:
+      - only the active subdomains that already exist are scanned (the POST handler
+        validates that), so it never spreads to unknown domains
+      - urlfinder is checked by default (the active crawler, no dictionary
+        dependency, the most reliable one)
+      - ffuf / gau are left for the user to tick when they want them
+      - the wordlist uses SCAN_URLS_DEFAULT_WORDLIST for now; an advanced user
+        can change the path in the form
     """
     if not biz_name:
         return ''
     action = '/' + urllib.parse.quote(biz_name) + '/scan-urls'
-    return f'\n<details class="scan-form">\n  <summary>URL 资产扫描（向 {_e(biz_name)} 已收录的子域扫 URL 路径）</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">每行一个 <b>已存在的子域</b>(从站点详情 tab 复制)，&le;{SCAN_URLS_MAX_HOSTS} 个;\n    只对各 subdomain 下的 <code>web_subdomains.is_active=1</code> 行做扫描;\n    多次扫描同一目标 = 同 URL 不会被重复插入(ON CONFLICT UPDATE last_seen)。\n    <br>⏱ 大字典 ffuf 单 host 可能 5 分钟以上,整体超时 {SCAN_URLS_TIMEOUT}s。\n    <br>⚠ 不会自动跑 — 仅手动提交触发;结果异步刷到「URL 详情」页面。</div>\n    <textarea name="hosts" rows="4" required\nplaceholder="about.example.com&#10;www.example.com"></textarea>\n    <div class="submit-row" style="flex-wrap:wrap;gap:10px;">\n      <label><input type="checkbox" name="sources" value="ffuf">ffuf（主动爆破,需 wordlist）</label>\n      <label><input type="checkbox" name="sources" value="urlfinder" checked>URLFinder（主动爬虫,推荐）</label>\n      <label><input type="checkbox" name="sources" value="gau">gau（被动扫描,wayback/otx）</label>\n    </div>\n    <div class="hint" style="margin-top:6px;">wordlist(仅 ffuf 生效):\n      <input type="text" name="wordlist" size="60" value="{_e(_scan_urls_default_wordlist_suggestion())}"\n             style="font-family:monospace;font-size:12px;padding:2px 6px;">\n    </div>\n    <div class="submit-row">\n      <button type="submit" class="btn primary">扫描 URL 并入库</button>\n      <span class="muted">同步等待(单 host 60s ~ 600s)</span>\n    </div>\n  </form>\n</details>\n'
+    return f'\n<details class="scan-form">\n  <summary>{_t("dashboard.scan_urls_form.summary", {"biz": _e(biz_name)})}</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">{_t("dashboard.common.each_line")} <b>{_t("dashboard.common.existing_subdomain")}</b>{_t("dashboard.scan_urls_form.hint_copy", {"max": SCAN_URLS_MAX_HOSTS})}\n    {_t("dashboard.common.scan_active_prefix")} <code>web_subdomains.is_active=1</code> {_t("dashboard.common.scan_active_suffix")}\n    {_t("dashboard.common.no_duplicate_insert")}\n    <br>{_t("dashboard.scan_urls_form.hint_timeout", {"timeout": SCAN_URLS_TIMEOUT})}\n    <br>{_t("dashboard.scan_urls_form.hint_manual")}</div>\n    <textarea name="hosts" rows="4" required\nplaceholder="about.example.com&#10;www.example.com"></textarea>\n    <div class="submit-row" style="flex-wrap:wrap;gap:10px;">\n      <label><input type="checkbox" name="sources" value="ffuf">{_t("dashboard.scan_urls_form.source_ffuf")}</label>\n      <label><input type="checkbox" name="sources" value="urlfinder" checked>{_t("dashboard.scan_urls_form.source_urlfinder")}</label>\n      <label><input type="checkbox" name="sources" value="gau">{_t("dashboard.scan_urls_form.source_gau")}</label>\n    </div>\n    <div class="hint" style="margin-top:6px;">{_t("dashboard.scan_urls_form.wordlist_label")}\n      <input type="text" name="wordlist" size="60" value="{_e(_scan_urls_default_wordlist_suggestion())}"\n             style="font-family:monospace;font-size:12px;padding:2px 6px;">\n    </div>\n    <div class="submit-row">\n      <button type="submit" class="btn primary">{_t("dashboard.scan_urls_form.submit")}</button>\n      <span class="muted">{_t("dashboard.scan_urls_form.wait_hint")}</span>\n    </div>\n  </form>\n</details>\n'
 
 def _build_overview(agg: dict, biz_list: bool=False, biz_name: str='') -> str:
     rc = agg['row_counts']
-    cards = [('业务', rc.get('businesses', 0)), ('Scope', rc.get('scopes', 0)), ('子公司', rc.get('companies', 0)), ('小程序', rc.get('mapp_records', 0)), ('公众号', 0), ('Web 子域', rc.get('web_subdomains', 0)), ('TCP 端口', rc.get('tcp_assets', 0))]
+    cards = [(_t('dashboard.overview.card_business'), rc.get('businesses', 0)), ('Scope', rc.get('scopes', 0)), (_t('dashboard.overview.card_companies'), rc.get('companies', 0)), (_t('dashboard.overview.card_mp'), rc.get('mapp_records', 0)), (_t('dashboard.overview.card_oa'), 0), (_t('dashboard.overview.card_web_sub'), rc.get('web_subdomains', 0)), (_t('dashboard.overview.card_tcp_ports'), rc.get('tcp_assets', 0))]
     biz_card_parts = []
     for (i, (n, v)) in enumerate(cards):
         if i == 0 and biz_list:
             non_empty = [b for b in agg.get('biz_stats', []) if b['total'] > 0]
             if non_empty:
-                links = ''.join((f'''<a class="biz-link" href="{_e(b['href'])}" title="{b['total']:,} 条资产"><span class="biz-name">{_e(b['name'])}</span><span class="biz-count muted">{b['total']:,}</span></a>''' for b in non_empty))
+                links = ''.join((f'''<a class="biz-link" href="{_e(b['href'])}" title="{_t('dashboard.overview.biz_assets', {'count': format(b['total'], ',')})}"><span class="biz-name">{_e(b['name'])}</span><span class="biz-count muted">{b['total']:,}</span></a>''' for b in non_empty))
                 value_html = f'<div class="biz-list">{links}</div>'
             else:
                 value_html = '<div class="value">—</div>'
@@ -294,18 +319,21 @@ def _build_overview(agg: dict, biz_list: bool=False, biz_name: str='') -> str:
     bk = agg['web_fp_buckets']
     bk_total = sum(bk.values()) or 1
     bucket_color = {'unique (1 子域)': '#1a7f37', '2-10 子域': '#0969da', '11-50 子域': '#9a6700', '≥51 子域 (批量/默认页)': '#cf222e'}
-    bucket_rows = ''.join((f'<tr><td>{_e(k)}</td><td>{v}</td><td><span class="bar-wrap"><span class="bar" style="width:{v / bk_total * 100:.1f}%;background:{bucket_color[k]}"></span></span></td><td class="muted">{v / bk_total * 100:.1f}%</td></tr>' for (k, v) in bk.items()))
+    # the bucket names are data keys (the aggregate counts them by key);
+    # the label the reader sees comes from the message table.
+    bucket_label_key = {'unique (1 子域)': 'dashboard.overview.bucket_unique', '2-10 子域': 'dashboard.overview.bucket_2_10', '11-50 子域': 'dashboard.overview.bucket_11_50', '≥51 子域 (批量/默认页)': 'dashboard.overview.bucket_51_plus'}
+    bucket_rows = ''.join((f'<tr><td>{_e(_t(bucket_label_key.get(k, k)))}</td><td>{v}</td><td><span class="bar-wrap"><span class="bar" style="width:{v / bk_total * 100:.1f}%;background:{bucket_color[k]}"></span></span></td><td class="muted">{v / bk_total * 100:.1f}%</td></tr>' for (k, v) in bk.items()))
     pc = agg['port_class']
     pc_total = sum(pc.values()) or 1
     web_overlap = pc.get('web', 0)
     pc_rows = ''.join((f'<tr><td>{_e(k)}</td><td>{v}</td><td><span class="bar-wrap"><span class="bar" style="width:{v / pc_total * 100:.1f}%;background:#8250df"></span></span></td><td class="muted">{v / pc_total * 100:.1f}%</td></tr>' for (k, v) in sorted(pc.items(), key=lambda x: -x[1])))
     tcp_note = ''
     if web_overlap:
-        tcp_note = f'<div class="note">⚠ 表中 <b>{web_overlap}</b> 条 web 端口（80/443 等）实际已在 <code>web_subdomains</code> 落库，本表保留用于交叉验证，做纯 TCP 分析时建议剔除。</div>'
+        tcp_note = ('<div class="note">' + _t('dashboard.overview.note_tcp_overlap', {'count': f'<b>{web_overlap}</b>', 'table': '<code>web_subdomains</code>'}) + '</div>')
     form_html = _build_scan_form(biz_name) if biz_name else ''
     form_urls_html = _build_scan_urls_form(biz_name) if biz_name else ''
     form_katana_html = _build_katana_enrich_form(biz_name) if biz_name else ''
-    return f"""\n{form_html}\n{form_urls_html}\n{form_katana_html}\n<section class="cards">{cards_html}</section>\n\n<div class="section-title">ICP 备案资产概览</div>\n<div class="note">按主体聚合子公司与小程序/公众号备案，便于发现主体侧资产集中度。</div>\n<div class="scroll-x"><table>\n<tr><th>主体</th><th>业务</th><th class="num">小程序</th>\n<th class="num">公众号</th><th class="num">合计</th><th></th><th></th></tr>\n{cc_rows or '<tr><td colspan="7" class="muted">无主体数据</td></tr>'}\n</table></div>\n\n<div class="two-col">\n  <div>\n    <div class="section-title">Web 资产分析</div>\n\n    <div class="sub-title">状态码分布</div>\n    <div class="scroll-x"><table>\n    <tr><th>状态码</th><th>数量</th><th>占比</th><th></th></tr>\n    {sc_rows or '<tr><td colspan="4" class="muted">无数据</td></tr>'}\n    </table></div>\n\n    <div class="sub-title">技术栈 (Top 10)</div>\n    <div class="scroll-x"><table>\n    <tr><th>技术</th><th>命中</th><th>占比</th><th></th></tr>\n    {tech_rows or '<tr><td colspan="4" class="muted">无数据</td></tr>'}\n    </table></div>\n\n    <div class="sub-title">注册根域</div>\n    <div class="scroll-x"><table>\n    <tr><th>根域</th><th>子域数</th><th>占比</th><th></th></tr>\n    {root_rows or '<tr><td colspan="4" class="muted">无数据</td></tr>'}\n    </table></div>\n\n    <div class="sub-title">指纹浓度桶 <span class="muted">(覆盖越广，价值越低)</span></div>\n    <div class="scroll-x"><table>\n    <tr><th>桶</th><th>指纹数</th><th>占比</th><th></th></tr>\n    {bucket_rows or '<tr><td colspan="4" class="muted">无数据</td></tr>'}\n    </table></div>\n  </div>\n\n  <div>\n    <div class="section-title">TCP 端口分类</div>\n    {tcp_note}\n    <div class="scroll-x"><table>\n    <tr><th>类别</th><th>数量</th><th>占比</th><th></th></tr>\n    {pc_rows or '<tr><td colspan="4" class="muted">无数据</td></tr>'}\n    </table></div>\n  </div>\n</div>\n"""
+    return f"""\n{form_html}\n{form_urls_html}\n{form_katana_html}\n<section class="cards">{cards_html}</section>\n\n<div class="section-title">{_t('dashboard.overview.section_icp')}</div>\n<div class="note">{_t('dashboard.overview.note_icp')}</div>\n<div class="scroll-x"><table>\n<tr><th>{_t('dashboard.overview.table_entity')}</th><th>{_t('dashboard.overview.table_biz')}</th><th class="num">{_t('dashboard.overview.table_mp')}</th>\n<th class="num">{_t('dashboard.overview.table_oa')}</th><th class="num">{_t('dashboard.overview.table_total')}</th><th></th><th></th></tr>\n{cc_rows or ('<tr><td colspan="7" class="muted">' + _t('dashboard.overview.no_entity_data') + '</td></tr>')}\n</table></div>\n\n<div class="two-col">\n  <div>\n    <div class="section-title">{_t('dashboard.overview.section_web')}</div>\n\n    <div class="sub-title">{_t('dashboard.overview.sub_status_codes')}</div>\n    <div class="scroll-x"><table>\n    <tr><th>{_t('dashboard.overview.table_status_code')}</th><th>{_t('dashboard.common.count')}</th><th>{_t('dashboard.common.share')}</th><th></th></tr>\n    {sc_rows or ('<tr><td colspan="4" class="muted">' + _t('dashboard.common.no_data') + '</td></tr>')}\n    </table></div>\n\n    <div class="sub-title">{_t('dashboard.overview.sub_tech_stack')}</div>\n    <div class="scroll-x"><table>\n    <tr><th>{_t('dashboard.overview.table_tech')}</th><th>{_t('dashboard.overview.table_hits')}</th><th>{_t('dashboard.common.share')}</th><th></th></tr>\n    {tech_rows or ('<tr><td colspan="4" class="muted">' + _t('dashboard.common.no_data') + '</td></tr>')}\n    </table></div>\n\n    <div class="sub-title">{_t('dashboard.overview.sub_root_domains')}</div>\n    <div class="scroll-x"><table>\n    <tr><th>{_t('dashboard.overview.table_root_domain')}</th><th>{_t('dashboard.overview.table_subdomain_count')}</th><th>{_t('dashboard.common.share')}</th><th></th></tr>\n    {root_rows or ('<tr><td colspan="4" class="muted">' + _t('dashboard.common.no_data') + '</td></tr>')}\n    </table></div>\n\n    <div class="sub-title">{_t('dashboard.overview.sub_fp_buckets')} <span class="muted">{_t('dashboard.overview.note_fp_buckets')}</span></div>\n    <div class="scroll-x"><table>\n    <tr><th>{_t('dashboard.overview.table_bucket')}</th><th>{_t('dashboard.overview.table_fingerprint_count')}</th><th>{_t('dashboard.common.share')}</th><th></th></tr>\n    {bucket_rows or ('<tr><td colspan="4" class="muted">' + _t('dashboard.common.no_data') + '</td></tr>')}\n    </table></div>\n  </div>\n\n  <div>\n    <div class="section-title">{_t('dashboard.overview.section_tcp')}</div>\n    {tcp_note}\n    <div class="scroll-x"><table>\n    <tr><th>{_t('dashboard.overview.table_category')}</th><th>{_t('dashboard.common.count')}</th><th>{_t('dashboard.common.share')}</th><th></th></tr>\n    {pc_rows or ('<tr><td colspan="4" class="muted">' + _t('dashboard.common.no_data') + '</td></tr>')}\n    </table></div>\n  </div>\n</div>\n"""
 
 def _score_cell(r: dict) -> str:
     """Render the score/description control cell for a sites-table row.
@@ -331,23 +359,31 @@ def _score_cell(r: dict) -> str:
     desc = r.get('hash_description') or ''
     sort_key = -1 if score is None else score
     score_txt = '—' if score is None else str(score)
-    return f'<td class="score-cell" data-hash-id="{hid}" data-num="{sort_key}"><input type="number" class="score-input" data-hash-id="{hid}" data-cur-score="{score_txt}" value="{score_txt}" min="-1000" max="1000" step="1" title="绝对值(0-100) 或 ±N 相对当前值" /><button type="button" class="score-save" data-hash-id="{hid}" title="保存 score + description">save</button><span class="desc-status" data-hash-id="{hid}"></span></td><td class="desc-cell" data-hash-id="{hid}"><input type="text" class="desc-input" data-hash-id="{hid}" value="{_e(desc)}" maxlength="500" placeholder="备注..." title="回车或 save 保存" /></td>'
+    return f'<td class="score-cell" data-hash-id="{hid}" data-num="{sort_key}"><input type="number" class="score-input" data-hash-id="{hid}" data-cur-score="{score_txt}" value="{score_txt}" min="-1000" max="1000" step="1" title="{_t("dashboard.sites.score_input_title")}" /><button type="button" class="score-save" data-hash-id="{hid}" title="{_t("dashboard.sites.score_save_title")}">save</button><span class="desc-status" data-hash-id="{hid}"></span></td><td class="desc-cell" data-hash-id="{hid}"><input type="text" class="desc-input" data-hash-id="{hid}" value="{_e(desc)}" maxlength="500" placeholder="{_t("dashboard.sites.desc_placeholder")}" title="{_t("dashboard.sites.desc_save_title")}" /></td>'
 
 def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
-    """站点详情 — 隐藏无 TLD 的泛解析噪声（subdomain 不含 '.' 的全部剔除，
-    治 'http://a/' / 'http://j/' 这类单字符 wildcard 命中），按 response_hash
-    去重（每指纹一行，新增 count 列），点 hash 弹窗展示该 hash 下全部子域。
+    """The site details — the wildcard noise without a TLD is hidden (every
+    subdomain that does not contain a "." is dropped,
+    which takes care of the single character wildcard hits such as "http://a/" /
+    "http://j/"), deduplicated by response_hash
+    (one row per fingerprint, with a new count column), and clicking a hash opens
+    a modal that shows every subdomain under that hash.
 
-    行背景按 status_code 分级：5xx=红/4xx=黄/3xx=灰/2xx=绿/None=灰。
-    URL 列按端口拼接（80→http / 443→https / 其它→http://host:port）。
+    The row background is graded by status_code: 5xx=red / 4xx=yellow / 3xx=grey
+    / 2xx=green / None=grey.
+    The URL column is joined by port (80->http / 443->https / the others ->
+    http://host:port).
 
-    `diff_mode=True` (used by /diff and /<biz>/new): deduplication skipped,
-    one row per affected subdomain. A leading category column ("新"/"hash 变")
-    lets the user distinguish new entries from old (which the hash bucket alone
-    hides — same hash can appear on both / and /new).
+    `diff_mode=True` (used by /diff and /<biz>/new): the deduplication is skipped,
+    there is one row per affected subdomain. A leading category column ("new" /
+    "hash changed")
+    lets the user tell the new entries from the old ones (which the hash bucket
+    alone hides — the same hash can appear on both / and /new).
 
-    每行末尾追加「URL 详情」按钮,点击跳到 /<biz>/urls/<hash_id>(新页面,
-    按 hash_id 实时查 web_hash_urls 表 — 严格 lazy,不预加载)。
+    A "URL details" button is appended to the end of every row; clicking it goes
+    to /<biz>/urls/<hash_id> (a new page
+    that queries the web_hash_urls table live by hash_id - strictly lazy, nothing
+    is preloaded).
     """
     if biz_name:
         biz_quoted = urllib.parse.quote(biz_name)
@@ -358,7 +394,8 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
         if not biz_quoted or hash_id is None:
             return ''
         href = f'/{biz_quoted}/urls/{hash_id}'
-        return f'''<td><a class="btn small" href="{_e(href)}" target="_blank" title="查看该 hash 下所有扫到的 URL 路径（按 {_e(subdomain or '')}）">open</a></td>'''
+        detail_title = _t('dashboard.sites.url_detail_title', {'subdomain': _e(subdomain or '')})
+        return f'''<td><a class="btn small" href="{_e(href)}" target="_blank" title="{detail_title}">open</a></td>'''
     ws_raw = agg['tables']['web_subdomains']
     ws = [r for r in ws_raw if '.' in (r.get('subdomain') or '')]
     hidden = len(ws_raw) - len(ws)
@@ -387,13 +424,15 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
         return 1 if any(('一' <= c <= '\u9fff' for c in s)) else 0
 
     def cat_badge(cat: str) -> tuple[str, str]:
-        # reactivated (change_type & 4) 归到 "新": .tag-new 的 CSS 注释即
-        # "/new: 新 (added or reactivated)"。此前 reactivated 未映射, badge
-        # 落到 '?', 用户看不出是复活。
+        # a reactivated row (change_type & 4) counts as "new": the CSS comment of
+        # .tag-new is
+        # "/new: new (added or reactivated)". The reactivated case used to have no
+        # mapping, so the badge
+        # fell back to ?, and the user could not tell that it was a revival.
         return {
-            'added':       ('tag-new', '新'),
-            'reactivated': ('tag-new', '新'),
-            'changed':     ('tag-changed', '变'),
+            'added':       ('tag-new', _t('dashboard.sites.tag_new')),
+            'reactivated': ('tag-new', _t('dashboard.sites.tag_new')),
+            'changed':     ('tag-changed', _t('dashboard.sites.tag_changed')),
         }.get(cat, ('tag-info', '?'))
     rows_html_parts: list[str] = []
     hash_subs_for_modal: dict[str, list[str]] = defaultdict(list)
@@ -424,10 +463,20 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
         n_added = sum((1 for c in bucket_cat.values() if c == 'added'))
         n_changed = sum((1 for c in bucket_cat.values() if c == 'changed'))
         n_subs = sum(hash_count.values())
-        meta_parts = [f'{len(hash_first):,} 条 · 按 hash 去重 · 原始 {n_subs:,}', f'桶标 新 {n_added:,} · 变 {n_changed:,}']
-        meta_parts.append('点 hash 看同指纹子域')
+        meta_parts = [
+            _t('dashboard.sites.meta_dedup', {'count': f'{len(hash_first):,}', 'total': f'{n_subs:,}'}),
+            _t('dashboard.sites.meta_bucket_tags', {'added': f'{n_added:,}', 'changed': f'{n_changed:,}'}),
+        ]
+        meta_parts.append(_t('dashboard.sites.meta_click_hash_same'))
         if n_changed == 0 and n_added > 0:
-            allnew_html = f'<div class="note note-allnew">⚠ 本业务下 <b>全部 {n_subs:,}</b> 条有效子域在本次运行中均为<b>新增</b>（无既有基线对比，新增前可能未扫描过该业务）。如需关注内容变化，需先建立该业务的扫描基线。</div>'
+            allnew_html = (
+                '<div class="note note-allnew">'
+                + _t('dashboard.sites.note_all_new', {
+                    'total': '<b>' + _t('dashboard.sites.note_all_new.total', {'count': f'{n_subs:,}'}) + '</b>',
+                    'added': '<b>' + _t('dashboard.sites.note_all_new.added') + '</b>',
+                })
+                + '</div>'
+            )
         else:
             allnew_html = ''
     else:
@@ -446,19 +495,19 @@ def _build_sites(agg: dict, diff_mode: bool=False, biz_name: str='') -> str:
             rows_html_parts.append(f'''<tr class="risk-{status_risk(r.get('status_code'))}" data-hash="{_e(h)}" data-port="{r['port']}" data-hash-count="{cnt}" data-bucket-urls="{_e(bucket_urls)}" data-zh="{has_zh(r.get('title') or '')}"><td class="mono"><a href="{_e(url_for(r))}" target="_blank" rel="noopener noreferrer">{_e(url_for(r))}</a></td><td>{r['port']}</td><td>{(r.get('status_code') if r.get('status_code') is not None else '—')}</td><td>{(r.get('content_length') if r.get('content_length') is not None else '—')}</td><td>{_e(r.get('title') or '')}</td><td class="muted">{_e(r.get('technologies') or '')}</td><td><a class="hash-link" data-hash="{_e(h)}" href="javascript:void(0)">{_e(h)}</a></td><td class="num">{cnt:,}</td><td>{r.get('is_active', 0)}</td>{_score_cell(r)}{_url_detail_cell(r.get('hash_id'), r.get('subdomain'))}</tr>''')
         rows_html = ''.join(rows_html_parts)
         hash_subs_for_modal = dict(hash_subs)
-        meta_parts = [f'{len(hash_first):,} 条 · 按 hash 去重 · 原始 {len(ws_raw):,}']
+        meta_parts = [_t('dashboard.sites.meta_dedup', {'count': f'{len(hash_first):,}', 'total': f'{len(ws_raw):,}'})]
         if hidden:
-            meta_parts.append(f'隐藏 {hidden:,} 条无 TLD 后缀')
-        meta_parts.append('点 hash 看全部子域')
+            meta_parts.append(_t('dashboard.sites.meta_hidden_no_tld', {'count': f'{hidden:,}'}))
+        meta_parts.append(_t('dashboard.sites.meta_click_hash_all'))
     meta = ' · '.join(meta_parts)
     if diff_mode:
-        head_cells = '<th>类别</th><th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">分数</th><th>备注</th><th>URL 详情</th>'
-        empty = '<tr><td colspan="13" class="muted">无新增站点</td></tr>'
+        head_cells = f'<th>{_t("dashboard.sites.table_category")}</th><th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">{_t("dashboard.sites.table_score")}</th><th>{_t("dashboard.sites.table_note")}</th><th>{_t("dashboard.sites.table_url_detail")}</th>'
+        empty = f'<tr><td colspan="13" class="muted">{_t("dashboard.sites.empty_new")}</td></tr>'
     else:
-        head_cells = '<th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">分数</th><th>备注</th><th>URL 详情</th>'
-        empty = '<tr><td colspan="12" class="muted">无 web 子域</td></tr>'
+        head_cells = f'<th class="sortable" data-type="str">URL</th><th class="sortable" data-type="num">port</th><th class="sortable" data-type="num">status</th><th class="sortable" data-type="num">bytes</th><th class="sortable" data-type="str">title</th><th class="sortable" data-type="str">tech</th><th class="sortable" data-type="str">hash</th><th class="sortable" data-type="num">count</th><th class="sortable" data-type="num">active</th><th class="sortable" data-type="num">{_t("dashboard.sites.table_score")}</th><th>{_t("dashboard.sites.table_note")}</th><th>{_t("dashboard.sites.table_url_detail")}</th>'
+        empty = f'<tr><td colspan="12" class="muted">{_t("dashboard.sites.empty_web")}</td></tr>'
     hash_data_json = json.dumps(dict(hash_subs_for_modal), ensure_ascii=False)
-    return f'\n{allnew_html}\n<div class="filter">\n  <input id="q-sites" placeholder="过滤 URL / title / tech / hash" />\n  &nbsp;\n  <button class="toggle" data-toggle="hide-http">隐藏 http</button>\n  <button class="toggle" data-toggle="unique">仅 unique</button>\n  <button class="toggle" data-toggle="zh">中文优先</button>\n  &nbsp; <span class="muted">{meta}</span>\n</div>\n<div class="scroll-x"><table id="sites-table">\n<thead><tr>\n  {head_cells}\n</tr></thead>\n<tbody>\n{rows_html or empty}\n</tbody>\n</table></div>\n\n<div id="hash-modal" class="modal" style="display:none">\n  <div class="modal-card">\n    <div class="modal-header">\n      <span id="hash-modal-title"></span>\n      <button id="hash-modal-close" aria-label="关闭">×</button>\n    </div>\n    <div id="hash-modal-body"></div>\n  </div>\n</div>\n\n<script id="hash-data" type="application/json">{hash_data_json}</script>\n'
+    return f'\n{allnew_html}\n<div class="filter">\n  <input id="q-sites" placeholder="{_t("dashboard.sites.filter_placeholder")}" />\n  &nbsp;\n  <button class="toggle" data-toggle="hide-http">{_t("dashboard.sites.filter_hide_http")}</button>\n  <button class="toggle" data-toggle="unique">{_t("dashboard.sites.filter_unique_only")}</button>\n  <button class="toggle" data-toggle="zh">{_t("dashboard.sites.filter_zh_first")}</button>\n  &nbsp; <span class="muted">{meta}</span>\n</div>\n<div class="scroll-x"><table id="sites-table">\n<thead><tr>\n  {head_cells}\n</tr></thead>\n<tbody>\n{rows_html or empty}\n</tbody>\n</table></div>\n\n<div id="hash-modal" class="modal" style="display:none">\n  <div class="modal-card">\n    <div class="modal-header">\n      <span id="hash-modal-title"></span>\n      <button id="hash-modal-close" aria-label="{_t("dashboard.sites.modal_close")}">×</button>\n    </div>\n    <div id="hash-modal-body"></div>\n  </div>\n</div>\n\n<script id="hash-data" type="application/json">{hash_data_json}</script>\n'
 
 def _build_ports(agg: dict) -> str:
     tcp = agg['tables']['tcp_assets']
@@ -470,52 +519,98 @@ def _build_ports(agg: dict) -> str:
     rows_html = ''.join((f"""<tr class="risk-{_e(r['risk'])}"><td>{_e(r['biz'])}</td><td class="mono">{(_e(r['ip']) if r['ip'] else '—')}</td><td>{r['port']}</td><td class="mono">{(_e(r['hosts']) if r['hosts'] else '—')}</td><td>{_e(r['category'])}</td><td>{_e(r['service'])}</td><td>{_risk_tag(r['risk'])}</td></tr>""" for r in rows))
     rc = agg['risk_counter']
     rc_total = sum(rc.values()) or 1
-    rc_html = ''.join((f"""<span class="tag tag-{(k if k in ('high', 'med', 'low') else 'info')}">{ {'high': '高', 'med': '中', 'low': '低', 'info': '提示'}.get(k, k)} {v} ({v / rc_total * 100:.0f}%)</span> &nbsp; """ for (k, v) in sorted(rc.items(), key=lambda x: -x[1])))
-    return f"""\n<div class="filter">\n  <input id="q" placeholder="过滤 ip / hosts / service / category" />\n  &nbsp; {rc_html}\n</div>\n<div class="scroll-x"><table id="tcp-table">\n<thead><tr>\n  <th class="sortable" data-type="str">业务</th>\n  <th class="sortable" data-type="str">ip</th>\n  <th class="sortable" data-type="num">port</th>\n  <th class="sortable" data-type="str">hosts</th>\n  <th class="sortable" data-type="str">category</th>\n  <th class="sortable" data-type="str">service</th>\n  <th>risk</th>\n</tr></thead>\n<tbody>\n{rows_html or '<tr><td colspan="7" class="muted">无 tcp_assets</td></tr>'}\n</tbody>\n</table></div>\n<div class="muted">{len(rows)} 条 ip:port · IP 直读自 tcp_assets.ip；hosts 来自 tcp_assets.hosts（多 host 以逗号分隔）。</div>\n"""
+    rc_labels = {'high': _t('dashboard.risk.high'), 'med': _t('dashboard.risk.med'),
+                 'low': _t('dashboard.risk.low'), 'info': _t('dashboard.risk.info')}
+    rc_html = ''.join((f"""<span class="tag tag-{(k if k in ('high', 'med', 'low') else 'info')}">{rc_labels.get(k, k)} {v} ({v / rc_total * 100:.0f}%)</span> &nbsp; """ for (k, v) in sorted(rc.items(), key=lambda x: -x[1])))
+    return f"""\n<div class="filter">\n  <input id="q" placeholder="{_t('dashboard.ports.filter_placeholder')}" />\n  &nbsp; {rc_html}\n</div>\n<div class="scroll-x"><table id="tcp-table">\n<thead><tr>\n  <th class="sortable" data-type="str">{_t('dashboard.common.biz')}</th>\n  <th class="sortable" data-type="str">ip</th>\n  <th class="sortable" data-type="num">port</th>\n  <th class="sortable" data-type="str">hosts</th>\n  <th class="sortable" data-type="str">category</th>\n  <th class="sortable" data-type="str">service</th>\n  <th>risk</th>\n</tr></thead>\n<tbody>\n{rows_html or ('<tr><td colspan="7" class="muted">' + _t('dashboard.ports.no_data') + '</td></tr>')}\n</tbody>\n</table></div>\n<div class="muted">{_t('dashboard.ports.note', {'count': len(rows)})}</div>\n"""
 
 def _build_mapp(agg: dict, kind: str) -> str:
-    """小程序 / 公众号 详情页 — kind='mp' 取 mp_records，否则取 oa_records。"""
+    """The mini program / WeChat details page — kind="mp" takes mp_records, otherwise it takes oa_records."""
     records = agg['mp_records'] if kind == 'mp' else agg['oa_records']
-    title = '小程序' if kind == 'mp' else '公众号'
-    empty_msg = '暂无小程序数据' if kind == 'mp' else '暂无公众号数据'
+    title = _t('dashboard.mapp.tab.mp') if kind == 'mp' else _t('dashboard.mapp.tab.oa')
+    empty_msg = _t('dashboard.mapp.no_data.mp') if kind == 'mp' else _t('dashboard.mapp.no_data.oa')
     records = sorted(records, key=lambda r: (r.get('unit_name') or '', r.get('service_name') or ''))
     rows_html = ''.join((f"""<tr><td>{_e(r.get('unit_name') or '—')}</td><td>{_e(r.get('service_name') or '')}</td><td class="mono">{_e(r.get('service_licence') or '')}</td><td>{_e(r.get('content_type_name') or '')}</td><td>{_e(r.get('domain') or '')}</td><td>{_e(r.get('record_updated_at') or r.get('fetched_at') or '')}</td></tr>""" for r in records))
-    return f'''\n<div class="filter">\n  <input id="q-{kind}" placeholder="过滤 主体 / 名称 / 备案号 / 域名" />\n  &nbsp; <span class="muted">{len(records)} 条 {title}备案</span>\n</div>\n<div class="scroll-x"><table id="{kind}-table">\n<thead><tr>\n  <th class="sortable" data-type="str">主体</th>\n  <th class="sortable" data-type="str">名称</th>\n  <th class="sortable" data-type="str">备案号</th>\n  <th class="sortable" data-type="str">类型</th>\n  <th class="sortable" data-type="str">域名</th>\n  <th class="sortable" data-type="str">更新时间</th>\n</tr></thead>\n<tbody>\n{rows_html or f'<tr><td colspan="6" class="muted">{empty_msg}</td></tr>'}\n</tbody>\n</table></div>\n<script>\n(function() {{\n  const q = document.getElementById('q-{kind}');\n  const tbody = document.querySelector('#{kind}-table tbody');\n  if (!q || !tbody) return;\n  q.addEventListener('input', () => {{\n    const v = q.value.toLowerCase();\n    tbody.querySelectorAll('tr').forEach(tr => {{\n      tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none';\n    }});\n  }});\n}})();\n</script>\n'''
+    return f'''\n<div class="filter">\n  <input id="q-{kind}" placeholder="{_t('dashboard.mapp.filter_placeholder')}" />\n  &nbsp; <span class="muted">{_t('dashboard.mapp.count_note', {'count': len(records), 'kind': title})}</span>\n</div>\n<div class="scroll-x"><table id="{kind}-table">\n<thead><tr>\n  <th class="sortable" data-type="str">{_t('dashboard.mapp.table.entity')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.mapp.table.name')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.mapp.table.licence')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.mapp.table.type')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.mapp.table.domain')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.mapp.table.updated_at')}</th>\n</tr></thead>\n<tbody>\n{rows_html or f'<tr><td colspan="6" class="muted">{empty_msg}</td></tr>'}\n</tbody>\n</table></div>\n<script>\n(function() {{\n  const q = document.getElementById('q-{kind}');\n  const tbody = document.querySelector('#{kind}-table tbody');\n  if (!q || !tbody) return;\n  q.addEventListener('input', () => {{\n    const v = q.value.toLowerCase();\n    tbody.querySelectorAll('tr').forEach(tr => {{\n      tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none';\n    }});\n  }});\n}})();\n</script>\n'''
 
 def _build_companies(agg: dict) -> str:
-    """子公司详情 — 直接列 companies 表。"""
+    """The subsidiary details — it lists the companies table directly."""
     rows = sorted(agg['companies'], key=lambda c: (c.get('business_id') or 0, c.get('unit_name') or ''))
     counts = {c['unit_name']: c for c in agg['comp_counts']}
     rows_html = ''.join((f"""<tr><td>{_e(c.get('unit_name') or '')}</td><td class="muted">{_e(agg['biz'].get(c.get('business_id'), ''))}</td><td>{_e(c.get('nature_name') or '')}</td><td class="mono">{_e(c.get('main_licence') or '')}</td><td class="num">{counts.get(c.get('unit_name'), {}).get('mp', 0)}</td><td class="num">{counts.get(c.get('unit_name'), {}).get('oa', 0)}</td><td class="muted">{_e(c.get('updated_at') or '')}</td></tr>""" for c in rows))
-    return f"""\n<div class="filter">\n  <input id="q-comp" placeholder="过滤 主体 / 备案号 / 业务" />\n  &nbsp; <span class="muted">{len(rows)} 家子公司</span>\n</div>\n<div class="scroll-x"><table id="comp-table">\n<thead><tr>\n  <th class="sortable" data-type="str">主体名称</th>\n  <th class="sortable" data-type="str">业务</th>\n  <th class="sortable" data-type="str">主体类型</th>\n  <th class="sortable" data-type="str">主备案号</th>\n  <th class="sortable" data-type="num">小程序</th>\n  <th class="sortable" data-type="num">公众号</th>\n  <th class="sortable" data-type="str">更新时间</th>\n</tr></thead>\n<tbody>\n{rows_html or '<tr><td colspan="7" class="muted">无子公司数据</td></tr>'}\n</tbody>\n</table></div>\n<script>\n(function() {{\n  const q = document.getElementById('q-comp');\n  const tbody = document.querySelector('#comp-table tbody');\n  if (!q || !tbody) return;\n  q.addEventListener('input', () => {{\n    const v = q.value.toLowerCase();\n    tbody.querySelectorAll('tr').forEach(tr => {{\n      tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none';\n    }});\n  }});\n}})();\n</script>\n"""
+    return f"""\n<div class="filter">\n  <input id="q-comp" placeholder="{_t('dashboard.companies.filter_placeholder')}" />\n  &nbsp; <span class="muted">{_t('dashboard.companies.count_note', {'count': len(rows)})}</span>\n</div>\n<div class="scroll-x"><table id="comp-table">\n<thead><tr>\n  <th class="sortable" data-type="str">{_t('dashboard.companies.table.entity_name')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.common.biz')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.companies.table.entity_type')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.companies.table.main_licence')}</th>\n  <th class="sortable" data-type="num">{_t('dashboard.mapp.tab.mp')}</th>\n  <th class="sortable" data-type="num">{_t('dashboard.mapp.tab.oa')}</th>\n  <th class="sortable" data-type="str">{_t('dashboard.mapp.table.updated_at')}</th>\n</tr></thead>\n<tbody>\n{rows_html or ('<tr><td colspan="7" class="muted">' + _t('dashboard.companies.no_data') + '</td></tr>')}\n</tbody>\n</table></div>\n<script>\n(function() {{\n  const q = document.getElementById('q-comp');\n  const tbody = document.querySelector('#comp-table tbody');\n  if (!q || !tbody) return;\n  q.addEventListener('input', () => {{\n    const v = q.value.toLowerCase();\n    tbody.querySelectorAll('tr').forEach(tr => {{\n      tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none';\n    }});\n  }});\n}})();\n</script>\n"""
 
 def _build_risk(agg: dict) -> str:
     parts = []
     risky = agg['risky_open']
     risky_rows = ''.join((f"""<tr class="risk-high"><td>{_e(r['business'])}</td><td class="mono">{_e(r['host'])}</td><td>{r['port']}</td><td>{_e(r['service'])}</td><td>{_e(r['category'])}</td></tr>""" for r in risky))
-    parts.append(f"""\n<div class="section-title">① 暴露的高危端口 ({len(risky)})</div>\n<div class="note">DB / 远程管理 / Memcached 等无认证服务暴露在公网。</div>\n<div class="scroll-x"><table>\n<tr><th>业务</th><th>host</th><th>port</th><th>service</th><th>category</th></tr>\n{risky_rows or '<tr><td colspan="5" class="muted">无</td></tr>'}\n</table></div>\n""")
+    parts.append(f"""\n<div class="section-title">{_t('dashboard.risk.section.exposed_ports', {'count': len(risky)})}</div>\n<div class="note">{_t('dashboard.risk.note.exposed_ports')}</div>\n<div class="scroll-x"><table>\n<tr><th>{_t('dashboard.common.biz')}</th><th>host</th><th>port</th><th>service</th><th>category</th></tr>\n{risky_rows or ('<tr><td colspan="5" class="muted">' + _t('dashboard.common.none') + '</td></tr>')}\n</table></div>\n""")
     big_fps = [r for r in agg['fp_rows'] if r['count'] >= 50]
     fp_html = ''.join((f"""<tr class="risk-med"><td class="mono">{(_e(r['hash'][:14]) if r['hash'] else '—')}</td><td>{r['count']}</td><td class="mono">{_e(r['sample'])}</td><td>{_e(r['title'])}</td><td>{_e(r['tech'])}</td></tr>""" for r in big_fps))
-    parts.append(f"""\n<div class="section-title">② 批量指纹告警 ({len(big_fps)})</div>\n<div class="note">同一响应指纹覆盖 ≥50 个子域 — 多为泛解析/默认页/未配置独立站点。</div>\n<div class="scroll-x"><table>\n<tr><th>response_hash</th><th>子域数</th><th>示例</th><th>title</th><th>tech</th></tr>\n{fp_html or '<tr><td colspan="5" class="muted">无</td></tr>'}\n</table></div>\n""")
+    parts.append(f"""\n<div class="section-title">{_t('dashboard.risk.section.batch_fingerprint', {'count': len(big_fps)})}</div>\n<div class="note">{_t('dashboard.risk.note.batch_fingerprint')}</div>\n<div class="scroll-x"><table>\n<tr><th>response_hash</th><th>{_t('dashboard.risk.table.subdomain_count')}</th><th>{_t('dashboard.risk.table.sample_fingerprint')}</th><th>title</th><th>tech</th></tr>\n{fp_html or ('<tr><td colspan="5" class="muted">' + _t('dashboard.common.none') + '</td></tr>')}\n</table></div>\n""")
     fh = agg['fat_hosts']
     fh_rows = ''.join((f"""<tr class="risk-med"><td class="mono">{_e(r['host'])}</td><td>{r['port_count']}</td><td class="muted">{_e(r['sample_ports'])}</td></tr>""" for r in fh))
-    parts.append(f"""\n<div class="section-title">③ 端口展开过宽的主机 ({len(fh)})</div>\n<div class="note">单 host 开放 ≥50 个端口 — 看起来像端口段扫描产物，web 视角可剔除。</div>\n<div class="scroll-x"><table>\n<tr><th>host</th><th>port 数</th><th>样本</th></tr>\n{fh_rows or '<tr><td colspan="3" class="muted">无</td></tr>'}\n</table></div>\n""")
+    parts.append(f"""\n<div class="section-title">{_t('dashboard.risk.section.wide_ports', {'count': len(fh)})}</div>\n<div class="note">{_t('dashboard.risk.note.wide_ports')}</div>\n<div class="scroll-x"><table>\n<tr><th>host</th><th>{_t('dashboard.risk.table.port_count')}</th><th>{_t('dashboard.risk.table.sample_port')}</th></tr>\n{fh_rows or ('<tr><td colspan="3" class="muted">' + _t('dashboard.common.none') + '</td></tr>')}\n</table></div>\n""")
     return ''.join(parts)
+
+def _js_messages_json() -> str:
+    """The messages the script of the page needs, as a JSON object.
+
+    The script runs in the browser and cannot reach the message table
+    of the server, so the messages it shows are injected into the page
+    as JSON. Only the keys the script uses are included.
+    """
+    keys = (
+        'dashboard.sites.score.saving',
+        'dashboard.sites.score.invalid',
+        'dashboard.sites.score.saved',
+        'dashboard.sites.score.save_error',
+        'dashboard.sites.hash_modal.empty_hash',
+        'dashboard.sites.hash_modal.site_count',
+        'dashboard.sites.desc.placeholder',
+    )
+    out = {}
+    for key in keys:
+        value = _t(key)
+        if value != key:
+            out[key] = value
+    return json.dumps(out, ensure_ascii=False)
+
+
+def _lang_switcher(current: str) -> str:
+    """The language switcher of the header.
+
+    It is a small form that posts the language back to the same page, so
+    it works without JavaScript. The current language is marked, and the
+    links of the page keep the language of the request.
+    """
+    labels = {'zh': '中文', 'en': 'English'}
+    parts = []
+    for lang in KNOWN_LANGS:
+        cls = ' style="color:#cfd7e3;font-weight:600"' if lang == current else ' style="color:#9da5b4"'
+        parts.append(
+            '<a%s href="?lang=%s">%s</a>' % (cls, lang, labels.get(lang, lang))
+        )
+    return '<span style="font-size:12px">· ' + ' | '.join(parts) + '</span>'
+
 
 def render_html(agg: dict, *, mode: str='overview', run_id: str='', biz_name: str='', biz_nav: list[dict]='', home: bool=False) -> bytes:
     diff_mode = mode == 'diff'
+    _lang = get_lang()
+    _html_lang = 'zh-CN' if _lang == 'zh' else 'en'
+    _switcher_html = _lang_switcher(_lang)
     biz_suffix = f' — {_e(biz_name)}' if biz_name else ''
     if mode == 'diff':
-        title = f'SRC Recon — 本次变动{biz_suffix} — {_e(run_id)}'
-        h1 = f'SRC Recon — 本次变动{biz_suffix}'
+        title = f'{_t("dashboard.title.diff", {"biz": biz_suffix, "run_id": _e(run_id)})}'
+        h1 = f'{_t("dashboard.title.diff_short", {"biz": biz_suffix})}'
         back_href = f'/{_e(biz_name)}' if biz_name else '/'
-        back_label = f'← /{_e(biz_name)}' if biz_name else '← / 总览'
+        back_label = f'← /{_e(biz_name)}' if biz_name else _t('dashboard.back_to_overview')
         back = f'<a style="color:#9da5b4" href="{back_href}">{back_label}</a> · '
     else:
         title = f'SRC Recon Dashboard{biz_suffix}'
         h1 = f'SRC Recon Dashboard{biz_suffix}'
         diff_href = f'/{_e(biz_name)}/new' if biz_name else '/diff'
-        diff_label = '本次变动'
+        diff_label = _t('dashboard.diff_label')
         back = f'<a style="color:#9da5b4" href="{diff_href}">{diff_label}</a> · '
     nav_html = ''
     if biz_nav:
@@ -523,9 +618,9 @@ def render_html(agg: dict, *, mode: str='overview', run_id: str='', biz_name: st
         for b in biz_nav:
             cls = ' class="active"' if b.get('name') == biz_name else ''
             links.append(f'''<a{cls} style="color:#cfd7e3;text-decoration:none;padding:6px 10px;border-radius:4px;font-size:13px" href="{_e(b['href'])}">{_e(b['name'])}</a>''')
-        links.append('<a style="color:#cfd7e3;text-decoration:none;padding:6px 10px;border-radius:4px;font-size:13px" href="/">全部</a>')
-        nav_html = '<nav class="biz-bar" style="background:#2d333b;padding:8px 24px;display:flex;gap:6px;align-items:center;border-bottom:1px solid #1f2328"><span style="color:#9da5b4;font-size:12px;margin-right:4px">业务：</span>' + ''.join(links) + '</nav>'
-    page = f"""<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8">\n<title>{title}</title>\n<style>{_CSS}</style></head>\n<body>\n<header>\n  <h1>{h1}</h1>\n  <div class="meta">\n    snapshot: {_e(agg['captured_at'])}\n    · {back}<a style="color:#9da5b4" href="/api/snapshot">JSON</a>\n  </div>\n</header>\n{nav_html}\n<nav class="tabs">\n  <button data-tab="status" class="active">任务状态</button>\n  <button data-tab="screens">站点详情</button>\n  <button data-tab="ports">端口服务</button>\n  <button data-tab="risk">风险等级</button>\n  <button data-tab="companies">子公司</button>\n  <button data-tab="mp">小程序</button>\n  <button data-tab="oa">公众号</button>\n</nav>\n<main>\n  <section class="tab-pane active" id="tab-status">{_build_overview(agg, biz_list=home, biz_name=biz_name)}</section>\n  <section class="tab-pane" id="tab-screens">{_build_sites(agg, diff_mode=diff_mode, biz_name=biz_name)}</section>\n  <section class="tab-pane" id="tab-ports">{_build_ports(agg)}</section>\n  <section class="tab-pane" id="tab-risk">{_build_risk(agg)}</section>\n  <section class="tab-pane" id="tab-companies">{_build_companies(agg)}</section>\n  <section class="tab-pane" id="tab-mp">{_build_mapp(agg, 'mp')}</section>\n  <section class="tab-pane" id="tab-oa">{_build_mapp(agg, 'oa')}</section>\n</main>\n<script>\ndocument.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => {{\n  document.querySelectorAll('nav.tabs button').forEach(x => x.classList.remove('active'));\n  document.querySelectorAll('.tab-pane').forEach(x => x.classList.remove('active'));\n  b.classList.add('active');\n  document.getElementById('tab-' + b.dataset.tab).classList.add('active');\n}}));\nconst q = document.getElementById('q');\nif (q) q.addEventListener('input', () => {{\n  const v = q.value.toLowerCase();\n  document.querySelectorAll('#tcp-table tr').forEach(tr => {{\n    tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none';\n  }});\n}});\n\n// sites tab: filter (search + 3 toggles)\nconst sitesTbody = document.querySelector('#sites-table tbody');\nconst allSitesRows = Array.from(sitesTbody?.querySelectorAll('tr') || []);\nconst toggleStates = {{}};\nconst qSites = document.getElementById('q-sites');\n\nfunction applySitesFilters() {{\n  const v = (qSites?.value || '').toLowerCase();\n  const hideHttp = toggleStates['hide-http'];\n  const unique = toggleStates['unique'];\n  allSitesRows.forEach(tr => {{\n    let show = true;\n    if (v && !tr.textContent.toLowerCase().includes(v)) {{\n      // For buckets with >1 sibling subdomains, the visible row URL is just\n      // one of them; fall back to data-bucket-urls so queries hit siblings\n      // (e.g. searching "oa.example.com" finds the row whose visible URL is\n      // a permutation sibling sharing the same fingerprint).\n      const cnt = parseInt(tr.dataset.hashCount) || 1;\n      const bucket = tr.dataset.bucketUrls || '';\n      if (!(cnt > 1 && bucket.toLowerCase().includes(v))) show = false;\n    }}\n    if (show && hideHttp && tr.dataset.port === '80') show = false;\n    if (show && unique && tr.dataset.hashCount !== '1') show = false;\n    tr.style.display = show ? '' : 'none';\n  }});\n  // 中文优先: re-sort visible rows (Chinese-title first)\n  if (toggleStates['zh']) {{\n    const rows = allSitesRows.filter(tr => tr.style.display !== 'none');\n    rows.sort((a, b) => (parseInt(b.dataset.zh) || 0) - (parseInt(a.dataset.zh) || 0));\n    rows.forEach(r => sitesTbody.appendChild(r));\n  }}\n}}\n\ndocument.querySelectorAll('button.toggle').forEach(btn => {{\n  btn.addEventListener('click', () => {{\n    btn.classList.toggle('on');\n    toggleStates[btn.dataset.toggle] = btn.classList.contains('on');\n    applySitesFilters();\n  }});\n}});\n\nif (qSites) qSites.addEventListener('input', applySitesFilters);\n\n// generic column sort (works for sites-table, tcp-table, any th.sortable)\ndocument.querySelectorAll('th.sortable').forEach(th => {{\n  let asc = true;\n  th.addEventListener('click', () => {{\n    const table = th.closest('table');\n    const tbody = table.querySelector('tbody') || table;\n    const idx = Array.from(th.parentElement.children).indexOf(th);\n    const type = th.dataset.type;\n    const rows = Array.from(tbody.querySelectorAll('tr')).filter(\n      r => !(r.children.length === 1 && r.children[0].hasAttribute('colspan')));\n    if (!rows.length) return;\n    const cmp = (a, b) => {{\n      // 优先读 data-num（score-cell 上的排序键；input.textContent 是空字符串）\n      const an = a.children[idx]?.dataset?.num;\n      const bn = b.children[idx]?.dataset?.num;\n      const av = (an !== undefined ? an : (a.children[idx]?.textContent || '')).trim();\n      const bv = (bn !== undefined ? bn : (b.children[idx]?.textContent || '')).trim();\n      if (type === 'num') {{\n        return (parseFloat(av) || 0) - (parseFloat(bv) || 0);\n      }}\n      return av.localeCompare(bv, 'zh-Hans-CN');\n    }};\n    rows.sort((a, b) => asc ? cmp(a, b) : -cmp(a, b));\n    rows.forEach(r => tbody.appendChild(r));\n    th.parentElement.querySelectorAll('th').forEach(x => {{\n      x.classList.remove('asc', 'desc');\n    }});\n    th.classList.add(asc ? 'asc' : 'desc');\n    asc = !asc;\n  }});\n}});\n\n// hash modal: click hash link → show all sites for that hash\nconst hashData = JSON.parse(document.getElementById('hash-data')?.textContent || '{{}}');\nconst modal = document.getElementById('hash-modal');\ndocument.querySelectorAll('.hash-link').forEach(a => {{\n  a.addEventListener('click', () => {{\n    const h = a.dataset.hash;\n    const subs = hashData[h] || [];\n    document.getElementById('hash-modal-title').textContent =\n      `hash ${{h || '(空)'}} · ${{subs.length}} 个站点`;\n    const rowsHtml = subs.map(s =>\n      `<tr><td class="mono"><a href="http://${{s}}/" target="_blank" rel="noopener noreferrer">${{s}}</a></td></tr>`\n    ).join('');\n    document.getElementById('hash-modal-body').innerHTML =\n      '<table><tr><th>subdomain</th></tr>' + rowsHtml + '</table>';\n    modal.style.display = 'flex';\n  }});\n}});\ndocument.getElementById('hash-modal-close')?.addEventListener('click', () => {{\n  modal.style.display = 'none';\n}});\nmodal?.addEventListener('click', e => {{\n  if (e.target === modal) modal.style.display = 'none';\n}});\ndocument.addEventListener('keydown', e => {{\n  if (e.key === 'Escape' && modal?.style.display === 'flex') {{\n    modal.style.display = 'none';\n  }}\n}});\n\n// --- score / description edit ---\n// score 列换成 input：绝对值 (0-100) 或 ±N 相对当前；分数列点击排序由\n// 通用 th.sortable 处理（data-num 已是排序键）。POST 成功时服务端会局部\n// 更新 _State.cached_snap 并重算 cached_snap_json。\nfunction parseScoreInput(raw, cur) {{\n  if (raw === null) return null;\n  const s = String(raw).trim();\n  if (!s) return null;\n  let n;\n  if (s[0] === '+' || s[0] === '-') {{\n    const delta = parseInt(s, 10);\n    if (Number.isNaN(delta) || cur === null || cur === undefined) return null;\n    n = cur + delta;\n  }} else {{\n    n = parseInt(s, 10);\n    if (Number.isNaN(n)) return null;\n  }}\n  if (n < 0 || n > 100) return null;\n  return n;\n}}\n\nasync function editHash(hashId, newScore, newDesc) {{\n  const status = document.querySelector('.desc-status[data-hash-id="' + hashId + '"]');\n  if (status) status.textContent = '保存中…';\n  try {{\n    const body = new URLSearchParams();\n    body.set('score', String(newScore));\n    body.set('description', newDesc || '');\n    const r = await fetch('/api/hash/' + hashId + '/edit', {{\n      method: 'POST',\n      headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},\n      body: body.toString(),\n    }});\n    const j = await r.json();\n    if (!j.ok) throw new Error(j.error || 'http ' + r.status);\n    // 同步刷新所有 score-cell td 的 data-num（让排序立即生效）\n    document.querySelectorAll('.score-cell[data-hash-id="' + hashId + '"]').forEach(td => {{\n      td.setAttribute('data-num', String(j.score));\n    }});\n    document.querySelectorAll('.score-input[data-hash-id="' + hashId + '"]').forEach(el => {{\n      el.value = String(j.score);\n      el.setAttribute('data-cur-score', String(j.score));\n    }});\n    if (status) status.textContent = '✓ ' + j.score;\n    setTimeout(() => {{ if (status && status.textContent.startsWith('✓')) status.textContent = ''; }}, 2000);\n  }} catch (e) {{\n    if (status) status.textContent = '✗ ' + e.message;\n  }}\n}}\n\nfunction triggerSave(hid) {{\n  const input = document.querySelector('.score-input[data-hash-id="' + hid + '"]');\n  const descEl = document.querySelector('.desc-input[data-hash-id="' + hid + '"]');\n  if (!input) return;\n  const cur = parseInt(input.getAttribute('data-cur-score'), 10);\n  const parsed = parseScoreInput(input.value, cur);\n  if (parsed === null) {{\n    const status = document.querySelector('.desc-status[data-hash-id="' + hid + '"]');\n    if (status) status.textContent = '✗ 输入需是 0-100 整数或 ±N';\n    setTimeout(() => {{ if (status && status.textContent.startsWith('✗')) status.textContent = ''; }}, 2500);\n    return;\n  }}\n  editHash(hid, parsed, descEl ? descEl.value : '');\n}}\n\ndocument.addEventListener('click', e => {{\n  const btn = e.target.closest('.score-save');\n  if (btn) {{\n    const hid = btn.getAttribute('data-hash-id');\n    triggerSave(hid);\n  }}\n}});\n\ndocument.addEventListener('keydown', e => {{\n  if (e.key === 'Enter' && e.target.classList?.contains('score-input')) {{\n    e.preventDefault();\n    triggerSave(e.target.getAttribute('data-hash-id'));\n  }}\n  // 描述 input 按 Enter 触发保存；分数无效时只刷状态、不存描述\n  if (e.key === 'Enter' && e.target.classList?.contains('desc-input')) {{\n    e.preventDefault();\n    const hid = e.target.getAttribute('data-hash-id');\n    const input = document.querySelector('.score-input[data-hash-id="' + hid + '"]');\n    if (!input) return;\n    const cur = parseInt(input.getAttribute('data-cur-score'), 10);\n    const parsed = parseScoreInput(input.value, cur);\n    if (parsed === null) return;\n    editHash(hid, parsed, e.target.value);\n  }}\n}});\n</script>\n</body></html>\n"""
+        links.append('<a style="color:#cfd7e3;text-decoration:none;padding:6px 10px;border-radius:4px;font-size:13px" href="/">' + _t('dashboard.all_businesses') + '</a>')
+        nav_html = '<nav class="biz-bar" style="background:#2d333b;padding:8px 24px;display:flex;gap:6px;align-items:center;border-bottom:1px solid #1f2328"><span style="color:#9da5b4;font-size:12px;margin-right:4px">' + _t('dashboard.business_label') + '</span>' + ''.join(links) + '</nav>'
+    page = f"""<!doctype html>\n<html lang="{_html_lang}"><head><meta charset="utf-8">\n<title>{title}</title>\n<style>{_CSS}</style></head>\n<body>\n<script>window.I18N = {_js_messages_json()};</script>\n<header>\n  <h1>{h1}</h1>\n  <div class="meta">\n    snapshot: {_e(agg['captured_at'])}\n    · {back}<a style="color:#9da5b4" href="/api/snapshot">JSON</a>\n    · {_switcher_html}\n  </div>\n</header>\n{nav_html}\n<nav class="tabs">\n  <button data-tab="status" class="active">{_t('dashboard.tab.status')}</button>\n  <button data-tab="screens">{_t('dashboard.tab.screens')}</button>\n  <button data-tab="ports">{_t('dashboard.tab.ports')}</button>\n  <button data-tab="risk">{_t('dashboard.tab.risk')}</button>\n  <button data-tab="companies">{_t('dashboard.tab.companies')}</button>\n  <button data-tab="mp">{_t('dashboard.mapp.tab.mp')}</button>\n  <button data-tab="oa">{_t('dashboard.mapp.tab.oa')}</button>\n</nav>\n<main>\n  <section class="tab-pane active" id="tab-status">{_build_overview(agg, biz_list=home, biz_name=biz_name)}</section>\n  <section class="tab-pane" id="tab-screens">{_build_sites(agg, diff_mode=diff_mode, biz_name=biz_name)}</section>\n  <section class="tab-pane" id="tab-ports">{_build_ports(agg)}</section>\n  <section class="tab-pane" id="tab-risk">{_build_risk(agg)}</section>\n  <section class="tab-pane" id="tab-companies">{_build_companies(agg)}</section>\n  <section class="tab-pane" id="tab-mp">{_build_mapp(agg, 'mp')}</section>\n  <section class="tab-pane" id="tab-oa">{_build_mapp(agg, 'oa')}</section>\n</main>\n<script>\ndocument.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => {{\n  document.querySelectorAll('nav.tabs button').forEach(x => x.classList.remove('active'));\n  document.querySelectorAll('.tab-pane').forEach(x => x.classList.remove('active'));\n  b.classList.add('active');\n  document.getElementById('tab-' + b.dataset.tab).classList.add('active');\n}}));\nconst q = document.getElementById('q');\nif (q) q.addEventListener('input', () => {{\n  const v = q.value.toLowerCase();\n  document.querySelectorAll('#tcp-table tr').forEach(tr => {{\n    tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none';\n  }});\n}});\n\n// sites tab: filter (search + 3 toggles)\nconst sitesTbody = document.querySelector('#sites-table tbody');\nconst allSitesRows = Array.from(sitesTbody?.querySelectorAll('tr') || []);\nconst toggleStates = {{}};\nconst qSites = document.getElementById('q-sites');\n\nfunction applySitesFilters() {{\n  const v = (qSites?.value || '').toLowerCase();\n  const hideHttp = toggleStates['hide-http'];\n  const unique = toggleStates['unique'];\n  allSitesRows.forEach(tr => {{\n    let show = true;\n    if (v && !tr.textContent.toLowerCase().includes(v)) {{\n      // For buckets with >1 sibling subdomains, the visible row URL is just\n      // one of them; fall back to data-bucket-urls so queries hit siblings\n      // (e.g. searching "oa.example.com" finds the row whose visible URL is\n      // a permutation sibling sharing the same fingerprint).\n      const cnt = parseInt(tr.dataset.hashCount) || 1;\n      const bucket = tr.dataset.bucketUrls || '';\n      if (!(cnt > 1 && bucket.toLowerCase().includes(v))) show = false;\n    }}\n    if (show && hideHttp && tr.dataset.port === '80') show = false;\n    if (show && unique && tr.dataset.hashCount !== '1') show = false;\n    tr.style.display = show ? '' : 'none';\n  }});\n  // Chinese first: re-sort the visible rows (the Chinese title first)\n  if (toggleStates['zh']) {{\n    const rows = allSitesRows.filter(tr => tr.style.display !== 'none');\n    rows.sort((a, b) => (parseInt(b.dataset.zh) || 0) - (parseInt(a.dataset.zh) || 0));\n    rows.forEach(r => sitesTbody.appendChild(r));\n  }}\n}}\n\ndocument.querySelectorAll('button.toggle').forEach(btn => {{\n  btn.addEventListener('click', () => {{\n    btn.classList.toggle('on');\n    toggleStates[btn.dataset.toggle] = btn.classList.contains('on');\n    applySitesFilters();\n  }});\n}});\n\nif (qSites) qSites.addEventListener('input', applySitesFilters);\n\n// generic column sort (works for sites-table, tcp-table, any th.sortable)\ndocument.querySelectorAll('th.sortable').forEach(th => {{\n  let asc = true;\n  th.addEventListener('click', () => {{\n    const table = th.closest('table');\n    const tbody = table.querySelector('tbody') || table;\n    const idx = Array.from(th.parentElement.children).indexOf(th);\n    const type = th.dataset.type;\n    const rows = Array.from(tbody.querySelectorAll('tr')).filter(\n      r => !(r.children.length === 1 && r.children[0].hasAttribute('colspan')));\n    if (!rows.length) return;\n    const cmp = (a, b) => {{\n      // read data-num first (the sort key of the score cell; the textContent of the input is an empty string)\n      const an = a.children[idx]?.dataset?.num;\n      const bn = b.children[idx]?.dataset?.num;\n      const av = (an !== undefined ? an : (a.children[idx]?.textContent || '')).trim();\n      const bv = (bn !== undefined ? bn : (b.children[idx]?.textContent || '')).trim();\n      if (type === 'num') {{\n        return (parseFloat(av) || 0) - (parseFloat(bv) || 0);\n      }}\n      return av.localeCompare(bv, 'zh-Hans-CN');\n    }};\n    rows.sort((a, b) => asc ? cmp(a, b) : -cmp(a, b));\n    rows.forEach(r => tbody.appendChild(r));\n    th.parentElement.querySelectorAll('th').forEach(x => {{\n      x.classList.remove('asc', 'desc');\n    }});\n    th.classList.add(asc ? 'asc' : 'desc');\n    asc = !asc;\n  }});\n}});\n\n// hash modal: click hash link → show all sites for that hash\nconst hashData = JSON.parse(document.getElementById('hash-data')?.textContent || '{{}}');\nconst modal = document.getElementById('hash-modal');\ndocument.querySelectorAll('.hash-link').forEach(a => {{\n  a.addEventListener('click', () => {{\n    const h = a.dataset.hash;\n    const subs = hashData[h] || [];\n    document.getElementById('hash-modal-title').textContent =\n      `hash ${{h || window.I18N['dashboard.sites.hash_modal.empty_hash']}} · ${{subs.length}} ${{window.I18N['dashboard.sites.hash_modal.site_count']}}`;\n    const rowsHtml = subs.map(s =>\n      `<tr><td class="mono"><a href="http://${{s}}/" target="_blank" rel="noopener noreferrer">${{s}}</a></td></tr>`\n    ).join('');\n    document.getElementById('hash-modal-body').innerHTML =\n      '<table><tr><th>subdomain</th></tr>' + rowsHtml + '</table>';\n    modal.style.display = 'flex';\n  }});\n}});\ndocument.getElementById('hash-modal-close')?.addEventListener('click', () => {{\n  modal.style.display = 'none';\n}});\nmodal?.addEventListener('click', e => {{\n  if (e.target === modal) modal.style.display = 'none';\n}});\ndocument.addEventListener('keydown', e => {{\n  if (e.key === 'Escape' && modal?.style.display === 'flex') {{\n    modal.style.display = 'none';\n  }}\n}});\n\n// --- score / description edit ---\n// the score column becomes an input: an absolute value (0-100) or +/-N relative to the current one; the sorting of the score column is done by\n// the generic th.sortable handler (data-num is already the sort key). When the POST succeeds the server updates the\n// _State.cached_snap in place and recalculates cached_snap_json.\nfunction parseScoreInput(raw, cur) {{\n  if (raw === null) return null;\n  const s = String(raw).trim();\n  if (!s) return null;\n  let n;\n  if (s[0] === '+' || s[0] === '-') {{\n    const delta = parseInt(s, 10);\n    if (Number.isNaN(delta) || cur === null || cur === undefined) return null;\n    n = cur + delta;\n  }} else {{\n    n = parseInt(s, 10);\n    if (Number.isNaN(n)) return null;\n  }}\n  if (n < 0 || n > 100) return null;\n  return n;\n}}\n\nasync function editHash(hashId, newScore, newDesc) {{\n  const status = document.querySelector('.desc-status[data-hash-id="' + hashId + '"]');\n  if (status) status.textContent = window.I18N['dashboard.sites.score.saving'];\n  try {{\n    const body = new URLSearchParams();\n    body.set('score', String(newScore));\n    body.set('description', newDesc || '');\n    const r = await fetch('/api/hash/' + hashId + '/edit', {{\n      method: 'POST',\n      headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},\n      body: body.toString(),\n    }});\n    const j = await r.json();\n    if (!j.ok) throw new Error(j.error || 'http ' + r.status);\n    // refresh the data-num of every score-cell td at once (the sorting works right away)\n    document.querySelectorAll('.score-cell[data-hash-id="' + hashId + '"]').forEach(td => {{\n      td.setAttribute('data-num', String(j.score));\n    }});\n    document.querySelectorAll('.score-input[data-hash-id="' + hashId + '"]').forEach(el => {{\n      el.value = String(j.score);\n      el.setAttribute('data-cur-score', String(j.score));\n    }});\n    if (status) status.textContent = window.I18N['dashboard.sites.score.saved'] + ' ' + j.score;\n    setTimeout(() => {{ if (status && status.textContent.startsWith('✓')) status.textContent = ''; }}, 2000);\n  }} catch (e) {{\n    if (status) status.textContent = window.I18N['dashboard.sites.score.save_error'] + ' ' + e.message;\n  }}\n}}\n\nfunction triggerSave(hid) {{\n  const input = document.querySelector('.score-input[data-hash-id="' + hid + '"]');\n  const descEl = document.querySelector('.desc-input[data-hash-id="' + hid + '"]');\n  if (!input) return;\n  const cur = parseInt(input.getAttribute('data-cur-score'), 10);\n  const parsed = parseScoreInput(input.value, cur);\n  if (parsed === null) {{\n    const status = document.querySelector('.desc-status[data-hash-id="' + hid + '"]');\n    if (status) status.textContent = window.I18N['dashboard.sites.score.invalid'];\n    setTimeout(() => {{ if (status && status.textContent.startsWith('✗')) status.textContent = ''; }}, 2500);\n    return;\n  }}\n  editHash(hid, parsed, descEl ? descEl.value : '');\n}}\n\ndocument.addEventListener('click', e => {{\n  const btn = e.target.closest('.score-save');\n  if (btn) {{\n    const hid = btn.getAttribute('data-hash-id');\n    triggerSave(hid);\n  }}\n}});\n\ndocument.addEventListener('keydown', e => {{\n  if (e.key === 'Enter' && e.target.classList?.contains('score-input')) {{\n    e.preventDefault();\n    triggerSave(e.target.getAttribute('data-hash-id'));\n  }}\n  // the description input saves on Enter; an invalid score only refreshes the status, it does not store the description\n  if (e.key === 'Enter' && e.target.classList?.contains('desc-input')) {{\n    e.preventDefault();\n    const hid = e.target.getAttribute('data-hash-id');\n    const input = document.querySelector('.score-input[data-hash-id="' + hid + '"]');\n    if (!input) return;\n    const cur = parseInt(input.getAttribute('data-cur-score'), 10);\n    const parsed = parseScoreInput(input.value, cur);\n    if (parsed === null) return;\n    editHash(hid, parsed, e.target.value);\n  }}\n}});\n</script>\n</body></html>\n"""
     return page.encode('utf-8')
 _DIFF_TABLES = ('scopes', 'companies', 'mapp_records', 'web_hashes', 'web_subdomains', 'tcp_assets')
 
@@ -581,18 +676,21 @@ def _snapshot_row_key(table: str, r: dict) -> tuple | None:
     return None
 
 def _load_changed_keys(report_dir: Path, snap: dict) -> dict[str, dict[tuple, str]]:
-    """Scan added/reactivated/changed CSVs; any difference vs the previous
+    """Scan the added/reactivated/changed CSVs; any difference against the
+    previous
     run qualifies. Returns {table: {key_tuple: category_label}}.
 
-    Categories used:
-        "added"      — row did not exist in the previous snapshot
-        "added"      — row was inactive before, is active now (reactivated)
-        "changed"    — row existed and was active in both runs, but some
+    The categories used:
+        "added"      — the row did not exist in the previous snapshot
+        "added"      — the row was inactive before and is active now (reactivated)
+        "changed"    — the row existed and was active in both runs, but a
                        field (hash / status / title / tech / etc.) differs
 
-    Category is informational — the /new site tab badges rows as "新" or "变"
-    purely for visual identification. Inclusion is uniform across all three
-    CSVs: a row is on /new iff it shows up in any of them.
+    The category is informational — the /new site tab badges the rows as "new" or
+    "changed"
+    purely for the visual identification. The inclusion is uniform across all
+    three CSVs:
+    a row is on /new if and only if it shows up in any of them.
     """
     if not report_dir or not report_dir.exists():
         return {t: {} for t in _DIFF_TABLES}
@@ -694,13 +792,15 @@ def _changed_keys_for_business(tagged: dict[str, dict[tuple, str]], bid: int, sn
     return out
 
 class _State:
+    # The rendered pages are cached per language: the language of a page
+    # is a request setting, so one cache entry cannot serve both. The
+    # key is the language, the value is (home, overview) of the rendered
+    # pages and of their gzip form.
+    cached_pages: dict = {}
+
     db_path: Path = Path(__file__).resolve().parents[2] / 'db' / 'recon.sqlite3'
     reload_interval: float = float(os.environ.get('DASHBOARD_RELOAD', '30'))
     last_reload_ts: float = 0.0
-    cached_html_home: bytes = b''
-    cached_html_overview: bytes = b''
-    cached_gz_home: bytes = b''
-    cached_gz_overview: bytes = b''
     cached_snap: dict = {}
     cached_snap_json: bytes = b''
     reload_lock: Any = None
@@ -788,24 +888,35 @@ def _latest_run_id() -> str:
 
 
 # ---------------------------------------------------------------------------
-# /<业务名>/body/raw?url=<domain-url>&side=pre|cur
+# /<business name>/body/raw?url=<domain-url>&side=pre|cur
 # ---------------------------------------------------------------------------
-# 把某个子域在"前 / 后"两个时刻的 HTTP body 原文取出来, 交给浏览器渲染。
+# Take the raw HTTP body of one subdomain at the "before / after" moments and hand
+# it to the browser to render.
+# side=pre -> web_subdomains_pre.curr_body (the version in the step 0 snapshot of
+# daily_monitor)
+# side=cur -> web_subdomains.curr_body       (the version the latest import
+# wrote)
 #
-# side=pre -> web_subdomains_pre.curr_body (daily_monitor step 0 那次快照里的版本)
-# side=cur -> web_subdomains.curr_body       (最近一次 import 落库的版本)
-#
-# 三条硬约束:
-# 1) 数据每次现查 SQLite, 不进 snapshot 缓存。body 列本来就不在
-#    _DB_SNAPSHOT_QUERIES 里, 且 side=pre 依赖 step 0 快照语义, 缓存会串味。
-# 2) pre 侧 JOIN 用 (id + business_id + subdomain + port) 四个条件全等, 不
-#    只用 id —— 判定期 (algo_diff_cpp) 用的是 pre.id = cur.id, 但 id 回收后
-#    可能指向别的逻辑行; 补齐三个业务列后两者的语义才真正等价。
-#    也不取 ws.prev_body: import_scan_results 的 UPSERT 会滚动 prev_body,
-#    它与快照表在实测中有 56/272 行不一致。
-# 3) 响应必须带 CSP sandbox。body 是被扫描目标的第三方内容, 而本端点与
-#    dashboard 同源 —— 不 sandbox 的话, body 里的 <script> 能同源调用
-#    dashboard 的 POST (触发扫描 / 改 score) 并 GET /api/snapshot 读全量业务。
+# Three hard constraints:
+# 1) The data is queried from SQLite every time, it does not go into the snapshot
+#    cache. The body column is not in
+#    _DB_SNAPSHOT_QUERIES to begin with, and side=pre depends on the semantics of
+#    the step 0 snapshot, so the cache would mix things up.
+# 2) The pre side joins on the four conditions (id + business_id + subdomain +
+#    port) being equal, not
+#    only on the id — the judgement period (algo_diff_cpp) uses pre.id = cur.id,
+#    but after an id is recycled
+#    it may point at a different logical row; only with the three business columns
+#    added are the two really equivalent.
+#    It does not take ws.prev_body either: the UPSERT of import_scan_results
+#    rolls prev_body over,
+#    and it differs from the snapshot table in 56/272 rows in the measurements.
+# 3) The response has to carry a CSP sandbox. The body is the third party content
+#    of the scanned target, and this endpoint is
+#    same-origin with the dashboard — without the sandbox a <script> in the body
+#    could call
+#    the POST of the dashboard (trigger a scan / change the score) and GET
+#    /api/snapshot to read all the business data.
 
 _MIME_TOKEN_RE = re.compile(r'^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$')
 _CHARSET_TOKEN_RE = re.compile(r'^[A-Za-z0-9_.:+-]{1,40}$')
@@ -813,15 +924,23 @@ _SCHEME_TOKEN_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.\-]*$')
 _META_CHARSET_RE = re.compile(rb'<meta[^>]{0,200}?charset\s*=\s*["\']?\s*([A-Za-z0-9_.:+-]{1,40})', re.I)
 _XML_ENCODING_RE = re.compile(rb'<\?xml[^>]{0,200}?encoding\s*=\s*["\']?\s*([A-Za-z0-9_.:+-]{1,40})', re.I)
 
-# 第三方 body 在 dashboard 自己的源下被解析, 用 CSP 把活动面收干净:
-#   sandbox (不给 allow-scripts / allow-same-origin) -> body 里的脚本不执行,
-#     origin 不透明, 无法反向调 dashboard 的 POST 或读 /api/snapshot;
-#   default-src 'none' -> 所有子资源都不加载, 浏览器不会回连目标站泄漏 IP;
-#   style-src 'unsafe-inline' -> 保留原站内联样式, 否则页面全裸无排版;
-#   img-src data: blob: -> 只放行内联图, 挡掉远程图片 beacon;
-#   base-uri 'none' -> body 里的 <base href> 不能改写相对链接指向 dashboard;
-#   form-action 'none' -> 捕获到的钓鱼页不能提交表单 (sandbox 之外再加一道);
-#   frame-ancestors 'self' -> 只允许 dashboard 自己内嵌。
+# The third party body is parsed under the origin of the dashboard itself, so the
+# CSP keeps the active surface clean:
+#   sandbox (no allow-scripts / allow-same-origin) -> the scripts in the body do
+#     not run, the
+#     origin is opaque and they cannot call the POST of the dashboard or read
+#     /api/snapshot;
+#   default-src 'none' -> no subresource is loaded, so the browser does not call
+#     back to the target site and leak the IP;
+#   style-src 'unsafe-inline' -> the inline styles of the page are kept, otherwise
+#     the page has no layout at all;
+#   img-src data: blob: -> only the inline images are allowed, which blocks the
+#     remote image beacons;
+#   base-uri 'none' -> a <base href> in the body cannot rewrite the relative links
+#     to point at the dashboard;
+#   form-action 'none' -> a captured phishing page cannot submit a form (one more
+#     layer on top of the sandbox);
+#   frame-ancestors 'self' -> only the dashboard itself may embed it.
 _BODY_RAW_CSP = (
     "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; "
     "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
@@ -830,11 +949,13 @@ _BODY_RAW_CSP = (
 
 
 def _parse_body_url(raw: str) -> tuple[str, int | None, int] | None:
-    """解析 ?url= 参数 -> (host, 显式端口或 None, 按 scheme 推断的默认端口)。
+    """Parse the ?url= parameter -> (host, the explicit port or None, the default
+    port inferred from the scheme).
 
-    只取 host[:port], path / query / fragment 一律丢弃 —— web_subdomains 的
-    唯一键是 (business_id, subdomain, port), 没有 path 维度。
-    解析不出来时返回 None。
+    Only host[:port] is taken, the path / query / fragment are dropped — the
+    unique key of web_subdomains
+    is (business_id, subdomain, port), it has no path dimension.
+    It returns None when it cannot be parsed.
     """
     s = (raw or '').strip()
     if not s:
@@ -843,8 +964,9 @@ def _parse_body_url(raw: str) -> tuple[str, int | None, int] | None:
     if '://' in s:
         scheme, _, s = s.partition('://')
         scheme = scheme.strip().lower()
-        # scheme 必须是合法 token, 否则整串当作 host 处理会得到误导性的
-        # "no such subdomain" (404) 而不是 "cannot parse url" (400)。
+        # the scheme has to be a valid token, otherwise treating the whole string as
+        # the host would give a misleading
+        # "no such subdomain" (404) instead of "cannot parse url" (400).
         if not scheme or not _SCHEME_TOKEN_RE.match(scheme):
             return None
     s = s.split('/', 1)[0].split('?', 1)[0].split('#', 1)[0]
@@ -878,10 +1000,12 @@ def _parse_body_url(raw: str) -> tuple[str, int | None, int] | None:
 
 
 def _snapshot_at_iso(raw: str) -> str:
-    """web_subdomains_pre._snapshot_at 存的是 SQLite datetime('now') = UTC。
+    """The _snapshot_at of web_subdomains_pre holds SQLite datetime('now') = UTC.
 
-    仓内其它时间戳 (fetched_at / last_seen) 都是 +08:00 ISO, 这里统一成同一
-    口径, 免得两个 header 一头 UTC 一头 +08:00 被误读成同一时刻。
+    The other timestamps in the repo (fetched_at / last_seen) are all +08:00 ISO,
+    so they are unified into the same
+    reading here, to avoid two headers that are one UTC and one +08:00 being
+    misread as the same moment.
     """
     s = (raw or '').strip()
     if not s:
@@ -894,9 +1018,11 @@ def _snapshot_at_iso(raw: str) -> str:
 
 
 def _declared_body_charset(data: bytes) -> str:
-    """从 body 里读它自己声明的 charset (HTML <meta charset> 或 XML 声明)。
+    """Read the charset the body declares for itself (the HTML <meta charset> or
+    the XML declaration).
 
-    只看前 4KB —— 浏览器也只在前 1KB 找 meta charset。
+    Only the first 4KB are looked at — the browser only looks for the meta
+    charset in the first 1KB either.
     """
     head = data[:4096]
     for rx in (_META_CHARSET_RE, _XML_ENCODING_RE):
@@ -909,11 +1035,13 @@ def _declared_body_charset(data: bytes) -> str:
 
 
 def _pick_body_charset(data: bytes, declared: str) -> str:
-    """选一个能真正解出这串字节的 charset。
+    """Pick a charset that can really decode this byte string.
 
-    utf-8 优先: 全串能干净解成 utf-8 是很强的信号, 就算 body 自己声明了
-    别的 charset 也该信字节; 解不动再退到声明值, 再退 gb18030 (GBK 超集),
-    最后 utf-8 兜底。
+    utf-8 comes first: the whole string decoding cleanly as utf-8 is a strong
+    signal, so the bytes should be
+    trusted even when the body declares another charset; when it does not decode
+    it falls back to the declared value, then to gb18030 (a superset of GBK),
+    and utf-8 is the last fallback.
     """
     order = ['utf-8']
     if declared and declared.lower() not in order:
@@ -930,7 +1058,7 @@ def _pick_body_charset(data: bytes, declared: str) -> str:
 
 
 def _sniff_body_mime(data: bytes) -> str:
-    """存储的 content_type 为空时, 按字节猜一个 MIME。"""
+    """When the stored content_type is empty, guess a MIME from the bytes."""
     head = data[:512].lstrip().lower()
     if head.startswith(b'<!doctype') or head.startswith(b'<html'):
         return 'text/html'
@@ -942,10 +1070,13 @@ def _sniff_body_mime(data: bytes) -> str:
 
 
 def _body_content_type(stored: str | None, data: bytes) -> str:
-    """算出回给浏览器的 Content-Type (含 charset)。
+    """Compute the Content-Type (with the charset) that goes back to the browser.
 
-    存储值优先 (那是扫描时对方真正回的类型), 但必须过 token 校验 —— 它来自
-    第三方响应头, 不能直接拼进响应头。存值为空或不合规时按字节嗅探。
+    The stored value comes first (that is the type the other side really sent
+    during the scan), but it has to pass a token check — it comes
+    from a third party response header, so it cannot be pasted into a response
+    header directly. When the stored value is empty or invalid it is sniffed
+    from the bytes.
     """
     mime = ''
     if stored:
@@ -966,6 +1097,7 @@ class Handler(BaseHTTPRequestHandler):
         accept_enc = self.headers.get('Accept-Encoding', '').encode()
         raw, _, raw_query = self.path.partition('?')
         path = urllib.parse.unquote(raw).rstrip('/') or '/'
+        self._apply_request_lang(raw_query)
         if path == '/':
             self._serve_page(accept_enc, home=True)
             return
@@ -984,8 +1116,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith('/'):
             biz_part = path[1:]
-            # /<业务名>/body/raw?url=<domain-url>&side=pre|cur
-            # 放在 snapshot 之前: 该端点一律现查 SQLite, 不吃 snapshot 缓存。
+            # /<business name>/body/raw?url=<domain-url>&side=pre|cur
+            # it comes before the snapshot: this endpoint always queries SQLite
+            # live, it does not use the snapshot cache.
             if biz_part.endswith('/body/raw'):
                 self._serve_body_raw(biz_part[:-len('/body/raw')], raw_query, accept_enc)
                 return
@@ -1005,12 +1138,21 @@ class Handler(BaseHTTPRequestHandler):
         self._respond(404, 'text/plain', f'not found: {raw}'.encode(), accept_enc)
 
     def do_POST(self) -> None:
-        """POST routes:
-          /<业务名>/scan              — 提交 hosts 列表触发 scan-onesite 子流程
-          /<业务名>/scan-urls         — 提交 hosts + sources + wordlist 触发 URL 资产扫描
-          /api/hash/<id>/edit         — 改 score + description(纯 JSON 响应,无重定向)
-          /<业务名>/schedule/toggle   — 用户 2026-08-26:toggle 子域加入/移除每日扫描
-                                        (纯 JSON 响应,无重定向 — JS 处理跳转 / 提示)
+        # The thread serves one request after the other, so the language
+        # of the request is released when it is done.
+        self._apply_request_lang(self.path.partition('?')[2])
+        """The POST routes:
+          /<business name>/scan              — post the hosts list to trigger the
+                                          scan-onesite sub flow
+          /<business name>/scan-urls         — post hosts + sources + wordlist to
+                                          trigger the URL asset scan
+          /api/hash/<id>/edit         — change the score + the description (a
+                                     plain JSON response, no redirect)
+          /<business name>/schedule/toggle   — the user decided on 2026-08-26:
+                                         toggle a subdomain in and out of the
+                                         daily scan
+                                         (a plain JSON response, no redirect —
+                                          the JS handles the redirect / the hint)
         """
         accept_enc = self.headers.get('Accept-Encoding', '').encode()
         raw = self.path.split('?', 1)[0]
@@ -1059,18 +1201,21 @@ class Handler(BaseHTTPRequestHandler):
         self._handle_scan(biz_name, accept_enc)
 
     def _handle_hash_edit(self, path: str, accept_enc: bytes) -> None:
-        """POST /api/hash/<id>/edit — 改 score + description，纯 JSON 响应。
+        """POST /api/hash/<id>/edit — changes the score + the description, the
+        response is plain JSON.
 
         Body: application/x-www-form-urlencoded
           score       = int 0..100   (required)
-          description = str          (optional, defaults to '')
+          description = str          (optional, it defaults to '')
 
-        响应：200 {"ok": true, "id": <id>, "score": ..., "description": "..."}
-              400 参数错 / 404 hash 不存在
+        The response: 200 {"ok": true, "id": <id>, "score": ..., "description": "..."}
+                    400 bad arguments / 404 the hash does not exist
 
-        写入后立即局部更新 _State.cached_snap，避免等5 分钟 reload 看到陈旧数据。
-        cron 下次跑时（按 §"Web Hash 评分"）只会处理新增 hash + 未评分 hash，
-        所以本次手动修改不会被 cron 覆盖。
+        The _State.cached_snap is updated in place right after the write, so that
+        the stale data is not shown for the 5 minutes until the reload.
+        On the next cron run (per the "Web Hash scoring" section) only the new
+        hashes + the unscored hashes are
+        processed, so this manual change is not overwritten by the cron.
         """
         prefix = '/api/hash/'
         suffix = '/edit'
@@ -1140,7 +1285,7 @@ class Handler(BaseHTTPRequestHandler):
         log.info(f'hash edit id={hash_id} score={new_score} desc_len={len(new_desc)}')
 
     def _handle_scan(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务>/scan 的实际处理：解析 body → 预校验 → subprocess 调 scan-onesite。"""
+        """The actual handling of POST /<business>/scan: parse the body -> pre-validate -> subprocess call scan-onesite."""
         try:
             length = int(self.headers.get('Content-Length') or 0)
         except ValueError:
@@ -1167,14 +1312,14 @@ class Handler(BaseHTTPRequestHandler):
             seen.add(s)
             hosts.append(s)
         if not hosts:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=['未提供有效域名（空行/井号会被忽略）'], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.no_valid_domain")], accept_enc=accept_enc, status=400)
             return
         if len(hosts) > SCAN_MAX_HOSTS:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f'域名数量 {len(hosts)} 超过上限 {SCAN_MAX_HOSTS}'], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.too_many_domains", {"count": len(hosts), "max": SCAN_MAX_HOSTS})], accept_enc=accept_enc, status=400)
             return
         invalid = [h for h in hosts if not SCAN_HOSTNAME_RE.match(h)]
         if invalid:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f"hostname 不合法：{', '.join(invalid[:5])}"], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.invalid_hostname", {"hosts": ', '.join(invalid[:5])})], accept_enc=accept_enc, status=400)
             return
         (tmp_fd, tmp_name) = tempfile.mkstemp(prefix='scan-hosts-', suffix='.txt', dir='/tmp')
         tmp_path = Path(tmp_name)
@@ -1186,10 +1331,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 proc = subprocess.run(cmd, capture_output=True, timeout=SCAN_TIMEOUT, check=False)
             except subprocess.TimeoutExpired:
-                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f'subprocess 超时（{SCAN_TIMEOUT}s）'], accept_enc=accept_enc, status=504)
+                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.subprocess_timeout", {"timeout": SCAN_TIMEOUT})], accept_enc=accept_enc, status=504)
                 return
             except FileNotFoundError as e:
-                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f'无法启动 python3：{e}'], accept_enc=accept_enc, status=500)
+                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.python_start_failed", {"error": e})], accept_enc=accept_enc, status=500)
                 return
             if proc.returncode != 0:
                 err = (proc.stderr or b'').decode('utf-8', 'replace').strip() or f'exit={proc.returncode}'
@@ -1208,22 +1353,28 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _render_scan_result(self, biz_name: str, *, ok: bool, n_total: int, error_lines: list[str], accept_enc: bytes, status: int) -> None:
-        """POST /<业务>/scan 之后返回的小结果页（绿/红 panel + 返回链接）。"""
+        """The small result page returned after POST /<business>/scan (a green/red panel + a back link)."""
         biz_quoted = urllib.parse.quote(biz_name)
         back_href = '/' + biz_quoted
         cls = 'ok' if ok else 'err'
         if ok:
             stdout = error_lines[0] if error_lines else ''
-            body_inner = f'<h2>扫描完成</h2><p>写入 <b>{_e(biz_name)}</b>：<b>{n_total}</b> 条</p><pre>{_e(stdout)}</pre>'
+            biz_html = f'<b>{_e(biz_name)}</b>'
+            count_html = f'<b>{n_total}</b>'
+            body_inner = f'<h2>{_t("dashboard.scan_done")}</h2><p>{_t("dashboard.scan_result.written", {"biz": biz_html, "count": count_html})}</p><pre>{_e(stdout)}</pre>'
         else:
-            body_inner = '<h2>扫描失败</h2>' + ''.join((f'<pre>{_e(line)}</pre>' for line in error_lines))
-        page = f'<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8">\n<title>扫描结果 · {_e(biz_name)}</title>\n<style>{_CSS}</style></head>\n<body>\n<header><h1>SRC Recon — 扫描结果</h1>\n  <div class="meta">业务：{_e(biz_name)}</div></header>\n<main>\n  <div class="scan-result {cls}">\n    {body_inner}\n    <a class="btn primary" href="{_e(back_href)}">返回 /{_e(biz_name)}</a>\n    <a class="btn" href="/" style="margin-left:6px">返回总览</a>\n  </div>\n</main>\n</body></html>\n'
+            body_inner = f'<h2>{_t("dashboard.scan_failed")}</h2>' + ''.join((f'<pre>{_e(line)}</pre>' for line in error_lines))
+        _lang = get_lang()
+        _html_lang = 'zh-CN' if _lang == 'zh' else 'en'
+        page = f'<!doctype html>\n<html lang="{_html_lang}"><head><meta charset="utf-8">\n<title>{_t("dashboard.scan_result.page_title", {"biz": _e(biz_name)})}</title>\n<style>{_CSS}</style></head>\n<body>\n<header><h1>{_t("dashboard.scan_result.page_heading")}</h1>\n  <div class="meta">{_t("dashboard.scan_result.business_label", {"biz": _e(biz_name)})}</div></header>\n<main>\n  <div class="scan-result {cls}">\n    {body_inner}\n    <a class="btn primary" href="{_e(back_href)}">{_t("dashboard.common.back_to_business", {"biz": _e(biz_name)})}</a>\n    <a class="btn" href="/" style="margin-left:6px">{_t("dashboard.common.back_to_overview")}</a>\n  </div>\n</main>\n</body></html>\n'
         self._respond(status, 'text/html; charset=utf-8', page.encode('utf-8'), accept_enc)
 
     def _dispatch_scan_urls(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<biz>/scan-urls 的入口校验 + dispatch 到 _handle_scan_urls。
+        """The entry validation of POST /<biz>/scan-urls + the dispatch to
+        _handle_scan_urls.
 
-        业务存在性:同 /scan,优先 _State.cached_snap,缺时 _load_snap 兜底。
+        The business existence: the same as /scan, _State.cached_snap comes
+        first and _load_snap is the fallback.
         """
         snap = _State.cached_snap
         if not snap:
@@ -1235,12 +1386,13 @@ class Handler(BaseHTTPRequestHandler):
         self._handle_scan_urls(biz_name, accept_enc)
 
     def _handle_scan_urls(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务>/scan-urls 的实际处理。
+        """The actual handling of POST /<business>/scan-urls.
 
-        body 字段:
-          hosts    = 多行子域(必填)
-          sources  = 多值('ffuf' / 'urlfinder' / 'gau',至少 1 个)
-          wordlist = ffuf 字典路径(可空,空则用 SCAN_URLS_DEFAULT_WORDLIST)
+        The body fields:
+          hosts    = the subdomains, one per line (required)
+          sources  = the multiple values ('ffuf' / 'urlfinder' / 'gau', at least 1)
+          wordlist = the path of the ffuf dictionary (it may be empty, then
+                     SCAN_URLS_DEFAULT_WORDLIST is used)
         """
         try:
             length = int(self.headers.get('Content-Length') or 0)
@@ -1270,21 +1422,21 @@ class Handler(BaseHTTPRequestHandler):
             seen.add(s)
             hosts.append(s)
         if not hosts:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=['未提供有效域名（空行/井号会被忽略）'], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.no_valid_domain")], accept_enc=accept_enc, status=400)
             return
         if len(hosts) > SCAN_URLS_MAX_HOSTS:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f'域名数量 {len(hosts)} 超过上限 {SCAN_URLS_MAX_HOSTS}'], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.too_many_domains", {"count": len(hosts), "max": SCAN_URLS_MAX_HOSTS})], accept_enc=accept_enc, status=400)
             return
         invalid = [h for h in hosts if not SCAN_HOSTNAME_RE.match(h)]
         if invalid:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f"hostname 不合法:{', '.join(invalid[:5])}"], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.invalid_hostname_urls", {"hosts": ', '.join(invalid[:5])})], accept_enc=accept_enc, status=400)
             return
         if not sources:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=['至少勾选一个扫描阶段(ffuf/urlfinder/gau)'], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.no_source")], accept_enc=accept_enc, status=400)
             return
         bad_src = [s for s in sources if s not in SCAN_URLS_VALID_SOURCES]
         if bad_src:
-            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f'未知 source:{bad_src};合法: {list(SCAN_URLS_VALID_SOURCES)}'], accept_enc=accept_enc, status=400)
+            self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.unknown_source", {"source": bad_src, "valid": list(SCAN_URLS_VALID_SOURCES)})], accept_enc=accept_enc, status=400)
             return
         seen_s = set()
         sources = [s for s in sources if not (s in seen_s or seen_s.add(s))]
@@ -1300,10 +1452,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 proc = subprocess.run(cmd, capture_output=True, timeout=SCAN_URLS_TIMEOUT, check=False)
             except subprocess.TimeoutExpired:
-                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f'subprocess 超时({SCAN_URLS_TIMEOUT}s)'], accept_enc=accept_enc, status=504)
+                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.subprocess_timeout_urls", {"timeout": SCAN_URLS_TIMEOUT})], accept_enc=accept_enc, status=504)
                 return
             except FileNotFoundError as e:
-                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[f'无法启动 python3:{e}'], accept_enc=accept_enc, status=500)
+                self._render_scan_result(biz_name, ok=False, n_total=0, error_lines=[_t("dashboard.scan_result.python_start_failed_urls", {"error": e})], accept_enc=accept_enc, status=500)
                 return
             if proc.returncode != 0:
                 err = (proc.stderr or b'').decode('utf-8', 'replace').strip() or f'exit={proc.returncode}'
@@ -1318,7 +1470,7 @@ class Handler(BaseHTTPRequestHandler):
                     n_total = int(m.group(1))
                     break
             _State.last_reload_ts = 0.0
-            self._render_scan_result(biz_name, ok=True, n_total=n_total, error_lines=[out.strip() + '\n\n(到「站点详情」点对应 hash 的「URL 详情」按钮查看新结果)'], accept_enc=accept_enc, status=200)
+            self._render_scan_result(biz_name, ok=True, n_total=n_total, error_lines=[out.strip() + '\n\n' + _t("dashboard.scan_result.hint_details")], accept_enc=accept_enc, status=200)
         finally:
             try:
                 tmp_path.unlink()
@@ -1326,21 +1478,28 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _handle_schedule_toggle(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务名>/schedule/toggle — 用户 2026-08-26 拍板。
+        """POST /<business name>/schedule/toggle — the user decided on
+        2026-08-26.
 
-        body 字段(x-www-form-urlencoded):
-          subdomain = 子域名(必填,FQDN 格式,经 SCAN_HOSTNAME_RE 校验)
-          action    = 'add' / 'remove'(必填)
+        The body fields (x-www-form-urlencoded):
+          subdomain = the subdomain (required, the FQDN format, validated by
+                      SCAN_HOSTNAME_RE)
+          action    = 'add' / 'remove' (required)
 
-        语义:
-          - add    → INSERT INTO web_subdomain_scan_schedule(biz_id, sub, sources='urlfinder')
-                     同 (biz_id, sub) 已存在 → 不动(幂等),返回 ok=1 / created=0
-          - remove → DELETE FROM web_subdomain_scan_schedule WHERE biz_id & sub
-                     不存在行也算 ok(幂等)
+        The semantics:
+          - add    -> INSERT INTO web_subdomain_scan_schedule(biz_id, sub,
+                     sources='urlfinder')
+                     when the same (biz_id, sub) already exists it is left alone
+                     (idempotent) and it returns ok=1 / created=0
+          - remove -> DELETE FROM web_subdomain_scan_schedule WHERE biz_id & sub
+                     a missing row also counts as ok (idempotent)
 
-        返回纯 JSON(200 / 400 / 404),前端 JS 解析后提示用户 + 刷新页面。
-        不刷新 cache:schedule 不在 _State.cached_snap 里(配置不在快照里),
-        下次 _serve_urls_detail 查 schedule 表时即生效。
+        It returns plain JSON (200 / 400 / 404) and the front end JS parses it,
+        hints the user and reloads the page.
+        The cache is not reloaded: the schedule is not in _State.cached_snap
+        (the configuration is not in the snapshot),
+        so it takes effect the next time _serve_urls_detail queries the schedule
+        table.
         """
         try:
             length = int(self.headers.get('Content-Length') or 0)
@@ -1386,14 +1545,16 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
 
     def _respond_json(self, status: int, payload: dict, accept_enc: bytes) -> None:
-        """JSON 响应 helper,仅用于 _handle_hash_edit / _handle_schedule_toggle。"""
+        """The JSON response helper, only used by _handle_hash_edit / _handle_schedule_toggle."""
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         self._respond(status, 'application/json; charset=utf-8', body, accept_enc)
 
     def _serve_urls_detail(self, biz_name: str, hash_id_str: str, accept_enc: bytes) -> None:
-        """GET /<业务名>/urls/<hash_id> — 实时查 web_hash_urls 渲染 URL 详情页。
+        """GET /<business name>/urls/<hash_id> — queries web_hash_urls live and
+        renders the URL details page.
 
-        用户决策:严格 lazy,这个页面打开时才查 SQL,不在 reload snapshot 里预加载。
+        The user decided: strictly lazy, the SQL is only queried when this page
+        is opened, it is not preloaded in the reload snapshot.
         """
         try:
             hash_id = int(hash_id_str)
@@ -1461,24 +1622,34 @@ class Handler(BaseHTTPRequestHandler):
             return 'low'
 
         def _schedule_label(state):
-            return {'enabled': '已开启', 'disabled': '已暂停', 'absent': '未加入'}.get(state, '未知')
+            labels = {
+                'enabled': _t("dashboard.urls.schedule_enabled"),
+                'disabled': _t("dashboard.urls.schedule_disabled"),
+                'absent': _t("dashboard.urls.schedule_absent"),
+            }
+            return labels.get(state, _t("dashboard.urls.schedule_unknown"))
         SOURCE_DISPLAY_ORDER = ('urlfinder', 'ffuf', 'gau')
-        SOURCE_HEADING = {'urlfinder': 'URLFinder 主动爬虫', 'ffuf': 'ffuf 字典爆破', 'gau': 'gau 被动收集 (wayback / otx / commoncrawl)'}
+        SOURCE_HEADING = {
+            'urlfinder': _t("dashboard.urls.source_heading_urlfinder"),
+            'ffuf': _t("dashboard.urls.source_heading_ffuf"),
+            'gau': _t("dashboard.urls.source_heading_gau"),
+        }
         COMMON_COLS = (('URL', 'url', 'a'), ('path', 'path', 'text'), ('status', 'status_code', 'num'), ('bytes', 'content_length', 'num'), ('host:port', '_hostport', 'host'), ('risk', 'risk_flag', 'risk'), ('danger', '_danger', 'danger'), ('last_seen', 'fetched_at', 'time'))
         URLFINDER_EXTRA_COLS = (('title', 'title', 'text'), ('words', 'word_count', 'num'), ('redirect', 'redirect', 'text'), ('link_source', 'link_source', 'text'))
         FFUF_GAU_EXTRA_COLS = (('words', 'word_count', 'num'),)
 
         def _trunc(html_inner, css_class=''):
-            """把已渲染好的 cell 内容包进 <div class="trunc">,触发可滚动行为。"""
+            """Wrap the already rendered cell content in <div class="trunc">, which triggers the scrollable behaviour."""
             extra = f' {css_class}' if css_class else ''
             return f'<div class="trunc{extra}">{html_inner}</div>'
 
         def _render_cell(kind, key, e):
-            """返回单 cell 的完整 <td>...</td>。
+            """Return the full <td>...</td> of a single cell.
 
-            kind 决定样式 (a/text/num/host/time/risk/danger);
-            key 决定取哪一列的值 — 同一 kind (如 num) 在 status / bytes / words
-            三个列各自取不同字段,所以参数化避免 bug。
+            kind decides the style (a/text/num/host/time/risk/danger);
+            key decides which column the value comes from — the same kind (such as
+            num) takes a different field in the status / bytes / words
+            columns, so the parameterisation avoids the bug.
             """
             url = e.get('url') or ''
             path = e.get('path') or ''
@@ -1566,7 +1737,7 @@ class Handler(BaseHTTPRequestHandler):
             return COMMON_COLS + FFUF_GAU_EXTRA_COLS
 
         def _colgroup(cols):
-            """按列类型返回 col 元素(比例贴近 ant-table 默认 150px 最小宽度)。"""
+            """Return the col element for a column type (the width is close to the 150px minimum of the ant-table default)."""
             parts = []
             for (label, _key, _kind) in cols:
                 if label == 'URL':
@@ -1608,25 +1779,29 @@ class Handler(BaseHTTPRequestHandler):
                     return f'<th class="sortable" data-col="{_e(key)}" data-kind="{_e(kind)}">{_e(label)}</th>'
                 return f'<th>{_e(label)}</th>'
             head = ''.join((_th(label, key, kind) for (label, key, kind) in cols))
-            rows_html = ''.join((_render_row(e, cols, src) for e in entries)) if entries else f'<tr><td colspan="{len(cols)}" class="muted">(无)</td></tr>'
+            rows_html = ''.join((_render_row(e, cols, src) for e in entries)) if entries else f'<tr><td colspan="{len(cols)}" class="muted">{_t("dashboard.urls.no_rows")}</td></tr>'
             heading = SOURCE_HEADING.get(src, src)
-            tbl_html = f'<h3 class="src-heading">{_e(heading)} <span class="muted">· {_e(src)} · {len(entries):,} 条</span></h3><div class="ant-table-wrapper"><div class="ant-table"><table class="urls-table"><thead><tr>{head}</tr></thead><tbody>{rows_html}</tbody></table></div></div>'
+            tbl_html = f'<h3 class="src-heading">{_e(heading)} <span class="muted">· {_e(src)} · {len(entries):,} {_t("dashboard.urls.count_unit")}</span></h3><div class="ant-table-wrapper"><div class="ant-table"><table class="urls-table"><thead><tr>{head}</tr></thead><tbody>{rows_html}</tbody></table></div></div>'
             source_tables.append(tbl_html)
         biz_quoted = urllib.parse.quote(biz_name)
         back_href = f'/{biz_quoted}'
         _sample_sub_json = json.dumps(sample_subdomain)
         _last_scan_json = json.dumps(last_scan_at or '')
         _biz_quoted_json = json.dumps(biz_quoted)
-        page = f'''<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8">\n<title>URL 详情 · hash #{hash_id} · {_e(biz_name)}</title>\n<style>{_CSS}</style>\n#<style>\n/* URL 详情页:URLFinder ant-table 视觉风格(提炼自 demo.html,~3KB,不引入 3.8MB Ant Design 全套 CSS) */\n.ant-table-wrapper {{ zoom:1; }}\n.ant-table-wrapper::before, .ant-table-wrapper::after {{ display:table; content:""; }}\n.ant-table-wrapper::after {{ clear:both; }}\n.ant-table {{\n  -webkit-box-sizing:border-box; box-sizing:border-box; margin:0; padding:0;\n  color:rgba(0,0,0,.65); font-size:14px; font-variant:tabular-nums;\n  line-height:1.5; list-style:none; position:relative; clear:both;\n}}\n.urls-table {{\n  width:100%; text-align:left; border-radius:4px 4px 0 0;\n  border-collapse:separate; border-spacing:0;\n  word-wrap:break-word; word-break:break-all;\n  font-variant:tabular-nums; -webkit-font-feature-settings:"tnum";\n  font-feature-settings:"tnum";\n  /* 列宽由该列最长内容决定(自适应);数字列加 min-width 防过窄 */\n  table-layout:auto;\n}}\n.urls-table th, .urls-table td {{\n  border-bottom:1px solid #e8e8e8; padding:8px 12px;\n  color:rgba(0,0,0,.65); font-size:13px;\n  /* 长内容多行展示 — 不再 nowrap + 横向滚动;过长 URL/路径自动 wrap */\n  white-space:normal; word-break:break-all; vertical-align:top;\n}}\n.urls-table thead > tr > th {{\n  background:#fafafa; font-weight:500; text-align:left; color:rgba(0,0,0,.85);\n  border-bottom:1px solid #e8e8e8;\n  -webkit-transition:background .3s ease; transition:background .3s ease;\n  position:relative; white-space:nowrap; /* 表头不换行,看着整齐 */\n}}\n/* ant-table 表头分隔线 */\n.urls-table thead > tr > th:not(:last-child)::after {{\n  content:""; position:absolute; right:0; top:8px; bottom:8px;\n  width:1px; background:rgba(0,0,0,.06);\n}}\n.urls-table tbody > tr:not(:last-child) > td {{ border-bottom:1px solid #eaecef; }}\n.urls-table tbody > tr:hover > td {{ background:#fafafa; }}\n.urls-table tbody > tr > td .mono {{ font-family:monospace; }}\n.urls-table tbody > tr > td.num,\n.urls-table td.num {{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }}\n/* 数字列 min-width 兜底 — table-layout:auto 时空字符串会被压到 0;\n   用户拍板:status/bytes/words 列里数值都不会太长,40~70px 足够 */\n.urls-table th.col-num, .urls-table td.num {{ min-width:48px; }}\n/* .trunc 现在只是空容器 wrapper(为了 future 可选加 max-height),\n   不再强制 nowrap + overflow;内容自然 wrap */\n.urls-table .trunc {{\n  display:block; max-width:100%;\n  /* 不再 overflow-x:auto;让长 URL 多行 */\n}}\n/* 可点击表头(只 status / bytes 列) */\n.urls-table th.sortable {{\n  cursor:pointer; user-select:none;\n  -webkit-user-select:none;\n  transition:background .15s ease;\n}}\n.urls-table th.sortable:hover {{ background:#f0f0f0; }}\n.urls-table th.sortable::after {{\n  content:"⇅"; opacity:.35; margin-left:6px; font-size:11px;\n  display:inline-block;\n}}\n.urls-table th.sortable.sort-asc::after  {{ content:"▲"; opacity:1; color:#0969da; }}\n.urls-table th.sortable.sort-desc::after {{ content:"▼"; opacity:1; color:#0969da; }}\n/* 风险行底色(贴近 ant-table token) */\n.urls-table tbody > tr.risk-high > td {{ background:#fff1f0; }}\n.urls-table tbody > tr.risk-high:hover > td {{ background:#ffccc7; }}\n.urls-table tbody > tr.risk-med  > td {{ background:#fffbe6; }}\n.urls-table tbody > tr.risk-med:hover  > td {{ background:#fff1b8; }}\n.urls-table tbody > tr.risk-info > td {{ background:#fafafa; }}\n.urls-table tbody > tr.risk-low  > td {{ background:#fcffe6; }}\n.urls-table td.danger-cell {{\n  background:#ffccc7; color:#cf222e; font-weight:600;\n  border-left:3px solid #cf222e;\n}}\n.urls-table td.risk-cell {{\n  background:#fffbe6; color:#d4380d; font-weight:500;\n}}\nh3.src-heading {{\n  margin:18px 0 8px 0; font-size:15px; font-weight:500; color:rgba(0,0,0,.85);\n}}\n.urls-summary {{ display:flex; gap:14px; margin:8px 0 16px; flex-wrap:wrap;\n                  align-items:center; }}\n.urls-summary .chip {{\n  background:#fafafa; border:1px solid #e8e8e8; border-radius:4px;\n  padding:4px 10px; font-size:13px; color:rgba(0,0,0,.65);\n}}\n.urls-filter {{ display:flex; gap:14px; margin:0 0 16px 0; padding:8px 12px;\n                background:#fafafa; border:1px solid #e8e8e8; border-radius:4px;\n                align-items:center; font-size:13px; }}\n.urls-filter label {{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }}\n.urls-filter input[type=checkbox] {{ cursor:pointer; }}\n.urls-filter .sample-sub {{ color:#57606a; margin-left:8px; }}\n\n/* 用户 2026-08-26:默认染色 + schedule 按钮样式。\n   row-new  = change_type & 1(新增)— 浅绿背景\n   row-changed = change_type & 2(内容变化)— 浅蓝背景\n   row-reactivated = change_type & 4 / 6(复活)— 浅橙背景\n   这些 class 只在 _serve_urls_detail 给"满足当前子域 && 非静态 &&\n   change_type>0"的行加;默认就对所有用户可见 */\n.urls-table tbody > tr.row-new > td {{ background:#f6ffed; }}\n.urls-table tbody > tr.row-new:hover > td {{ background:#d9f7be; }}\n.urls-table tbody > tr.row-changed > td {{ background:#e6f7ff; }}\n.urls-table tbody > tr.row-changed:hover > td {{ background:#bae7ff; }}\n.urls-table tbody > tr.row-reactivated > td {{ background:#fff7e6; }}\n.urls-table tbody > tr.row-reactivated:hover > td {{ background:#ffe7ba; }}\n\n/* schedule chip + 按钮 */\n.schedule-chip {{ font-weight:500; }}\n.schedule-chip.schedule-enabled {{ background:#f6ffed; border-color:#b7eb8f;\n                                     color:#389e0d; }}\n.schedule-chip.schedule-disabled {{ background:#fffbe6; border-color:#ffe58f;\n                                      color:#d48806; }}\n.schedule-chip.schedule-absent {{ background:#fafafa; border-color:#d9d9d9;\n                                    color:#8c8c8c; }}\n.schedule-toggle-btn {{ margin-left:8px; }}\n.schedule-toggle-btn:hover {{ background:#0969da; color:#fff; border-color:#0969da; }}\n</style>\n</head>\n<body>\n<header><h1>URL 资产详情 — hash #{hash_id}</h1>\n  <div class="meta">业务:{_e(biz_name)} · 来源子域:{_e(sample_subdomain)}\n    {(f':{sample_port}' if sample_port and sample_port not in (80, 443) else '')}\n    · response_hash: <code>{_e(str(hash_meta.get('response_hash')))}</code>\n    · subdomain_count: {hash_meta.get('subdomain_count', '—')}\n    · url_count(活跃): <b>{url_count:,}</b></div></header>\n<main>\n  <div class="urls-summary">\n    <span class="chip">ffuf: {per_source_count.get('ffuf', 0):,}</span>\n    <span class="chip">urlfinder: {per_source_count.get('urlfinder', 0):,}</span>\n    <span class="chip">gau: {per_source_count.get('gau', 0):,}</span>\n    <span class="chip">合计: {len(rows):,}</span>\n    <span class="chip schedule-chip schedule-{schedule_state}">每日扫描:{_schedule_label(schedule_state)}</span>\n    {(f"""<button class="btn schedule-toggle-btn" id="schedule-toggle-btn" data-action="{('remove' if schedule_state == 'enabled' else 'add')}">{('移除每日扫描' if schedule_state == 'enabled' else '加入每日扫描')}</button>""" if sample_subdomain else '')}\n  </div>\n  <div class="urls-filter">\n    <label><input type="checkbox" id="only-this-sub"> 仅显示当前子域</label>\n    <label><input type="checkbox" id="only-200"> 仅显示 status=200</label>\n    <label><input type="checkbox" id="hide-static"> 去除 .js / .css</label>\n    <label><input type="checkbox" id="only-new-changed"> 仅显示新增或改变</label>\n    <span class="sample-sub">来源子域:<code>{_e(sample_subdomain)}</code></span>\n  </div>\n  {(''.join(source_tables) if source_tables else '<p class="muted">该 hash 下暂无 URL 资产记录。回业务页用「URL 资产扫描」表单发起一次扫描。</p>')}\n  <p style="margin-top:16px;">\n    <a class="btn primary" href="{_e(back_href)}">返回 /{_e(biz_name)}</a>\n    <a class="btn" href="/" style="margin-left:6px">返回总览</a>\n  </p>\n</main>\n<script>\n(function() {{\n  // 客户端筛选 — 纯 DOM,无网络往返\n  // 数据来源:每行 <tr data-subdomain data-status>;sample_subdomain 由页面渲染时 inline 注入\n  var sampleSub = {_sample_sub_json};\n  var lastScanAt = {_last_scan_json};\n  var bizName = {_biz_quoted_json};\n  var cbSub = document.getElementById('only-this-sub');\n  var cb200 = document.getElementById('only-200');\n  var cbStatic = document.getElementById('hide-static');\n  var cbNewChanged = document.getElementById('only-new-changed');\n\n  function applyFilters() {{\n    var onlySub = cbSub.checked;\n    var only200 = cb200.checked;\n    var hideStatic = cbStatic && cbStatic.checked;\n    var onlyNewChanged = cbNewChanged && cbNewChanged.checked;\n    var rows = document.querySelectorAll('.urls-table tbody tr[data-subdomain]');\n    rows.forEach(function(tr) {{\n      var host = tr.getAttribute('data-host') || '';\n      var st  = tr.getAttribute('data-status') || '';\n      var isStatic = tr.getAttribute('data-static') === '1';\n      var ct = parseInt(tr.getAttribute('data-change-type') || '0', 10);\n      var lsa = tr.getAttribute('data-last-scan-at') || '';\n      var ok = true;\n      // 「仅显示当前子域」→ URL 实际 host === sample_subdomain(过滤掉 test-internal 这种杂 host)\n      if (onlySub && host !== sampleSub) ok = false;\n      if (only200 && st !== '200') ok = false;\n      if (hideStatic && isStatic) ok = false;\n      // 用户 2026-08-26:「仅显示新增或改变」(独立 toggle — 用户拍板分离,不联动\n      // 「去除 .js / .css」)。语义:当前子域 + 非 js/css + (新增 / 内容变)。\n      //   ct & 1 → INSERT 触发;ct & 2 → AU 触发;这两个 >0 表示本轮变了\n      //   ls > lsa 兜底(若 schedule 缺失 last_run_at,永不命中 → 安全)\n      if (onlyNewChanged) {{\n        if (host !== sampleSub) ok = false;\n        if (isStatic) ok = false;\n        if (!((ct & 1) || (ct & 2))) ok = false;\n      }}\n      tr.style.display = ok ? '' : 'none';\n    }});\n    // 同步每张表的可见数到 h3 标题\n    // DOM 结构:<h3 class="src-heading"> 是 <table>.parentElement.parentElement.previousElementSibling\n    document.querySelectorAll('.urls-table').forEach(function(tbl) {{\n      var wrapper = tbl.parentElement && tbl.parentElement.parentElement;\n      var h = wrapper && wrapper.previousElementSibling;\n      if (!h || !h.classList.contains('src-heading')) return;\n      var n = 0, total = 0;\n      tbl.querySelectorAll('tbody tr[data-subdomain]').forEach(function(tr) {{\n        total++;\n        if (tr.style.display !== 'none') n++;\n      }});\n      var chip = h.querySelector('.count-chip');\n      if (!chip) {{\n        chip = document.createElement('span');\n        chip.className = 'count-chip muted';\n        chip.style.marginLeft = '8px';\n        h.appendChild(chip);\n      }}\n      chip.textContent = '· 可见 ' + n + '/' + total + ' 条';\n    }});\n  }}\n\n  cbSub.addEventListener('change', applyFilters);\n  cb200.addEventListener('change', applyFilters);\n  if (cbStatic) cbStatic.addEventListener('change', applyFilters);\n  if (cbNewChanged) cbNewChanged.addEventListener('change', applyFilters);\n\n  // 用户 2026-08-26:schedule 按钮 → POST /<biz>/schedule/toggle\n  var schedBtn = document.getElementById('schedule-toggle-btn');\n  if (schedBtn) {{\n    schedBtn.addEventListener('click', function() {{\n      var action = schedBtn.getAttribute('data-action') || 'add';\n      schedBtn.disabled = true;\n      var origText = schedBtn.textContent;\n      schedBtn.textContent = action === 'add' ? '加入中…' : '移除中…';\n      var body = 'subdomain=' + encodeURIComponent(sampleSub) +\n                 '&action=' + encodeURIComponent(action);\n      fetch('/' + bizName + '/schedule/toggle', {{\n        method: 'POST',\n        headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},\n        body: body\n      }}).then(function(r) {{\n        return r.json().then(function(j) {{ return {{status: r.status, body: j}}; }});\n      }}).then(function(res) {{\n        if (res.status === 200 && res.body.ok) {{\n          // 成功后提示并刷新页面,反映新 schedule 状态 + 按钮文案\n          alert((action === 'add' ? '已加入每日扫描\\n' : '已移除每日扫描\\n') +\n                '子域:' + sampleSub);\n          location.reload();\n        }} else {{\n          alert('操作失败: ' + (res.body.error || JSON.stringify(res.body)));\n          schedBtn.disabled = false;\n          schedBtn.textContent = origText;\n        }}\n      }}).catch(function(e) {{\n        alert('网络错误: ' + e);\n        schedBtn.disabled = false;\n        schedBtn.textContent = origText;\n      }});\n    }});\n  }}\n\n  // 列头排序:每张表独立维护 asc/desc/none 三态。点击触发 sortTable;\n  // status/bytes 是数字列,直接数值比较;空值(None / —)排到末尾。\n  function sortValue(tr, key) {{\n    if (key === 'status_code') {{\n      var s = tr.getAttribute('data-status');\n      return s === '' || s == null ? null : Number(s);\n    }}\n    if (key === 'content_length') {{\n      // bytes:从 tr 上没存 data-bytes,直接读第 4 个 td (按列序固定)的文本\n      var tds = tr.querySelectorAll('td');\n      // 列序:URL, path, status, bytes, host:port, ...\n      var td = tds[3];\n      var txt = td ? td.textContent.trim() : '';\n      if (txt === '—' || txt === '') return null;\n      var n = Number(txt.replace(/,/g, ''));\n      return isNaN(n) ? null : n;\n    }}\n    return null;\n  }}\n\n  function sortTable(tbl, key, dir) {{\n    // dir: 'asc' | 'desc' | null(回到原顺序)\n    var tbody = tbl.tBodies[0];\n    if (!tbody) return;\n    var trs = Array.from(tbody.querySelectorAll('tr[data-host]'));\n    if (dir === null) {{\n      // 用 tr 在 DOM 里的初始顺序排序(原顺序) — 我们没有原始 index,\n      // 用 dataset._idx 写在初次渲染时打的标\n      trs.sort(function(a, b) {{\n        return (Number(a.dataset._idx) || 0) - (Number(b.dataset._idx) || 0);\n      }});\n    }} else {{\n      trs.sort(function(a, b) {{\n        var va = sortValue(a, key);\n        var vb = sortValue(b, key);\n        // null 排到末尾(无论 asc/desc)\n        if (va == null && vb == null) return 0;\n        if (va == null) return 1;\n        if (vb == null) return -1;\n        return dir === 'asc' ? va - vb : vb - va;\n      }});\n    }}\n    // 重排 DOM\n    var frag = document.createDocumentFragment();\n    trs.forEach(function(tr) {{ frag.appendChild(tr); }});\n    tbody.appendChild(frag);\n    // 同步 th 视觉\n    tbl.querySelectorAll('th.sortable').forEach(function(th) {{\n      th.classList.remove('sort-asc', 'sort-desc');\n      if (th.getAttribute('data-col') === key && dir) {{\n        th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');\n      }}\n    }});\n  }}\n\n  document.querySelectorAll('.urls-table').forEach(function(tbl) {{\n    // 给每行打 idx 标签(用於 sort=null 还原顺序)\n    Array.from(tbl.tBodies[0].querySelectorAll('tr[data-host]')).forEach(function(tr, i) {{\n      tr.dataset._idx = String(i);\n    }});\n    tbl.querySelectorAll('th.sortable').forEach(function(th) {{\n      th.addEventListener('click', function() {{\n        var key = th.getAttribute('data-col');\n        var cur = th.classList.contains('sort-asc') ? 'asc'\n                 : th.classList.contains('sort-desc') ? 'desc' : null;\n        var next = (cur === 'asc') ? 'desc' : (cur === 'desc') ? null : 'asc';\n        sortTable(tbl, key, next);\n      }});\n    }});\n  }});\n\n  applyFilters();\n}})();\n</script>\n</body></html>\n'''
+        _lang = get_lang()
+        _html_lang = 'zh-CN' if _lang == 'zh' else 'en'
+        page = f'''<!doctype html>\n<html lang="{_html_lang}"><head><meta charset="utf-8">\n<title>{_t("dashboard.urls.page_title", {"hash_id": hash_id, "biz": _e(biz_name)})}</title>\n<style>{_CSS}</style>\n#<style>\n/* URL detail page: the URLFinder ant-table look (distilled from demo.html, ~3KB, without the full 3.8MB Ant Design CSS) */\n.ant-table-wrapper {{ zoom:1; }}\n.ant-table-wrapper::before, .ant-table-wrapper::after {{ display:table; content:""; }}\n.ant-table-wrapper::after {{ clear:both; }}\n.ant-table {{\n  -webkit-box-sizing:border-box; box-sizing:border-box; margin:0; padding:0;\n  color:rgba(0,0,0,.65); font-size:14px; font-variant:tabular-nums;\n  line-height:1.5; list-style:none; position:relative; clear:both;\n}}\n.urls-table {{\n  width:100%; text-align:left; border-radius:4px 4px 0 0;\n  border-collapse:separate; border-spacing:0;\n  word-wrap:break-word; word-break:break-all;\n  font-variant:tabular-nums; -webkit-font-feature-settings:"tnum";\n  font-feature-settings:"tnum";\n  /* the column width follows its longest cell (adaptive); the numeric columns get a min-width so they cannot get too narrow */\n  table-layout:auto;\n}}\n.urls-table th, .urls-table td {{\n  border-bottom:1px solid #e8e8e8; padding:8px 12px;\n  color:rgba(0,0,0,.65); font-size:13px;\n  /* long content is shown over several lines - no nowrap and no horizontal scrolling; a long URL/path wraps on its own */\n  white-space:normal; word-break:break-all; vertical-align:top;\n}}\n.urls-table thead > tr > th {{\n  background:#fafafa; font-weight:500; text-align:left; color:rgba(0,0,0,.85);\n  border-bottom:1px solid #e8e8e8;\n  -webkit-transition:background .3s ease; transition:background .3s ease;\n  position:relative; white-space:nowrap; /* the header does not wrap, it looks tidy */\n}}\n/* the ant-table header separator */\n.urls-table thead > tr > th:not(:last-child)::after {{\n  content:""; position:absolute; right:0; top:8px; bottom:8px;\n  width:1px; background:rgba(0,0,0,.06);\n}}\n.urls-table tbody > tr:not(:last-child) > td {{ border-bottom:1px solid #eaecef; }}\n.urls-table tbody > tr:hover > td {{ background:#fafafa; }}\n.urls-table tbody > tr > td .mono {{ font-family:monospace; }}\n.urls-table tbody > tr > td.num,\n.urls-table td.num {{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }}\n/* the numeric column min-width is the safety net - with table-layout:auto an empty string is squeezed to 0;\n   the user decided: the values of the status/bytes/words columns are never long, 40~70px is enough */\n.urls-table th.col-num, .urls-table td.num {{ min-width:48px; }}\n/* .trunc is now only an empty container wrapper (a max-height can be added later if needed),\n   it no longer forces nowrap + overflow; the content wraps on its own */\n.urls-table .trunc {{\n  display:block; max-width:100%;\n  /* no more overflow-x:auto; a long URL spans several lines */\n}}\n/* the clickable header (the status / bytes columns only) */\n.urls-table th.sortable {{\n  cursor:pointer; user-select:none;\n  -webkit-user-select:none;\n  transition:background .15s ease;\n}}\n.urls-table th.sortable:hover {{ background:#f0f0f0; }}\n.urls-table th.sortable::after {{\n  content:"⇅"; opacity:.35; margin-left:6px; font-size:11px;\n  display:inline-block;\n}}\n.urls-table th.sortable.sort-asc::after  {{ content:"▲"; opacity:1; color:#0969da; }}\n.urls-table th.sortable.sort-desc::after {{ content:"▼"; opacity:1; color:#0969da; }}\n/* the row background of the risk levels (close to the ant-table token) */\n.urls-table tbody > tr.risk-high > td {{ background:#fff1f0; }}\n.urls-table tbody > tr.risk-high:hover > td {{ background:#ffccc7; }}\n.urls-table tbody > tr.risk-med  > td {{ background:#fffbe6; }}\n.urls-table tbody > tr.risk-med:hover  > td {{ background:#fff1b8; }}\n.urls-table tbody > tr.risk-info > td {{ background:#fafafa; }}\n.urls-table tbody > tr.risk-low  > td {{ background:#fcffe6; }}\n.urls-table td.danger-cell {{\n  background:#ffccc7; color:#cf222e; font-weight:600;\n  border-left:3px solid #cf222e;\n}}\n.urls-table td.risk-cell {{\n  background:#fffbe6; color:#d4380d; font-weight:500;\n}}\nh3.src-heading {{\n  margin:18px 0 8px 0; font-size:15px; font-weight:500; color:rgba(0,0,0,.85);\n}}\n.urls-summary {{ display:flex; gap:14px; margin:8px 0 16px; flex-wrap:wrap;\n                  align-items:center; }}\n.urls-summary .chip {{\n  background:#fafafa; border:1px solid #e8e8e8; border-radius:4px;\n  padding:4px 10px; font-size:13px; color:rgba(0,0,0,.65);\n}}\n.urls-filter {{ display:flex; gap:14px; margin:0 0 16px 0; padding:8px 12px;\n                background:#fafafa; border:1px solid #e8e8e8; border-radius:4px;\n                align-items:center; font-size:13px; }}\n.urls-filter label {{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }}\n.urls-filter input[type=checkbox] {{ cursor:pointer; }}\n.urls-filter .sample-sub {{ color:#57606a; margin-left:8px; }}\n\n/* decided by the user on 2026-08-26: the default colouring and the schedule button style.\n   row-new  = change_type & 1 (new) - light green background\n   row-changed = change_type & 2 (content changed) - light blue background\n   row-reactivated = change_type & 4 / 6 (reactivated) - light orange background\n   these classes are only added by _serve_urls_detail to the rows that match\n   the current subdomain && are not static && have change_type>0; by default\n   every user sees them */\n.urls-table tbody > tr.row-new > td {{ background:#f6ffed; }}\n.urls-table tbody > tr.row-new:hover > td {{ background:#d9f7be; }}\n.urls-table tbody > tr.row-changed > td {{ background:#e6f7ff; }}\n.urls-table tbody > tr.row-changed:hover > td {{ background:#bae7ff; }}\n.urls-table tbody > tr.row-reactivated > td {{ background:#fff7e6; }}\n.urls-table tbody > tr.row-reactivated:hover > td {{ background:#ffe7ba; }}\n\n/* the schedule chip and its button */\n.schedule-chip {{ font-weight:500; }}\n.schedule-chip.schedule-enabled {{ background:#f6ffed; border-color:#b7eb8f;\n                                     color:#389e0d; }}\n.schedule-chip.schedule-disabled {{ background:#fffbe6; border-color:#ffe58f;\n                                      color:#d48806; }}\n.schedule-chip.schedule-absent {{ background:#fafafa; border-color:#d9d9d9;\n                                    color:#8c8c8c; }}\n.schedule-toggle-btn {{ margin-left:8px; }}\n.schedule-toggle-btn:hover {{ background:#0969da; color:#fff; border-color:#0969da; }}\n</style>\n</head>\n<body>\n<header><h1>{_t("dashboard.urls.page_heading", {"hash_id": hash_id})}</h1>\n  <div class="meta">{_t("dashboard.urls.meta_business", {"biz": _e(biz_name)})} · {_t("dashboard.urls.meta_source_subdomain", {"sub": _e(sample_subdomain)})}\n    {(f':{sample_port}' if sample_port and sample_port not in (80, 443) else '')}\n    · response_hash: <code>{_e(str(hash_meta.get('response_hash')))}</code>\n    · subdomain_count: {hash_meta.get('subdomain_count', '—')}\n    · url_count({_t("dashboard.urls.label_active")}): <b>{url_count:,}</b></div></header>\n<main>\n  <div class="urls-summary">\n    <span class="chip">ffuf: {per_source_count.get('ffuf', 0):,}</span>\n    <span class="chip">urlfinder: {per_source_count.get('urlfinder', 0):,}</span>\n    <span class="chip">gau: {per_source_count.get('gau', 0):,}</span>\n    <span class="chip">{_t("dashboard.urls.chip_total")} {len(rows):,}</span>\n    <span class="chip schedule-chip schedule-{schedule_state}">{_t("dashboard.urls.chip_daily_scan", {"state": _schedule_label(schedule_state)})}</span>\n    {(f"""<button class="btn schedule-toggle-btn" id="schedule-toggle-btn" data-action="{('remove' if schedule_state == 'enabled' else 'add')}">{(_t('dashboard.urls.schedule_remove') if schedule_state == 'enabled' else _t('dashboard.urls.schedule_add'))}</button>""" if sample_subdomain else '')}\n  </div>\n  <div class="urls-filter">\n    <label><input type="checkbox" id="only-this-sub"> {_t("dashboard.urls.filter_only_this_subdomain")}</label>\n    <label><input type="checkbox" id="only-200"> {_t("dashboard.urls.filter_only_200")}</label>\n    <label><input type="checkbox" id="hide-static"> {_t("dashboard.urls.filter_hide_static")}</label>\n    <label><input type="checkbox" id="only-new-changed"> {_t("dashboard.urls.filter_only_new_changed")}</label>\n    <span class="sample-sub">{_t("dashboard.urls.filter_source_subdomain")} <code>{_e(sample_subdomain)}</code></span>\n  </div>\n  {(''.join(source_tables) if source_tables else '<p class="muted">' + _t("dashboard.urls.no_records") + '</p>')}\n  <p style="margin-top:16px;">\n    <a class="btn primary" href="{_e(back_href)}">{_t("dashboard.common.back_to_business", {"biz": _e(biz_name)})}</a>\n    <a class="btn" href="/" style="margin-left:6px">{_t("dashboard.common.back_to_overview")}</a>\n  </p>\n</main>\n<script>\n(function() {{\n  // client side filtering - pure DOM, no network round trip\n  // the data source: every row <tr data-subdomain data-status>; sample_subdomain is injected inline while the page is rendered\n  var sampleSub = {_sample_sub_json};\n  var lastScanAt = {_last_scan_json};\n  var bizName = {_biz_quoted_json};\n  var cbSub = document.getElementById('only-this-sub');\n  var cb200 = document.getElementById('only-200');\n  var cbStatic = document.getElementById('hide-static');\n  var cbNewChanged = document.getElementById('only-new-changed');\n\n  function applyFilters() {{\n    var onlySub = cbSub.checked;\n    var only200 = cb200.checked;\n    var hideStatic = cbStatic && cbStatic.checked;\n    var onlyNewChanged = cbNewChanged && cbNewChanged.checked;\n    var rows = document.querySelectorAll('.urls-table tbody tr[data-subdomain]');\n    rows.forEach(function(tr) {{\n      var host = tr.getAttribute('data-host') || '';\n      var st  = tr.getAttribute('data-status') || '';\n      var isStatic = tr.getAttribute('data-static') === '1';\n      var ct = parseInt(tr.getAttribute('data-change-type') || '0', 10);\n      var lsa = tr.getAttribute('data-last-scan-at') || '';\n      var ok = true;\n      // "only this subdomain" -> the real host of the URL === sample_subdomain (drops the junk hosts such as test-internal)\n      if (onlySub && host !== sampleSub) ok = false;\n      if (only200 && st !== '200') ok = false;\n      if (hideStatic && isStatic) ok = false;\n      // decided by the user on 2026-08-26: "only the new or the changed ones" (a separate toggle -\n    // the user decided to split it, it does not follow "exclude .js / .css"). The meaning: the\n    // current subdomain + not js/css + (new / content changed).\n    //   ct & 1 -> triggered by an INSERT; ct & 2 -> triggered by an AU; both >0 mean that this round changed something\n    //   ls > lsa is the fallback (if the schedule has no last_run_at it never matches -> safe)\n      if (onlyNewChanged) {{\n        if (host !== sampleSub) ok = false;\n        if (isStatic) ok = false;\n        if (!((ct & 1) || (ct & 2))) ok = false;\n      }}\n      tr.style.display = ok ? '' : 'none';\n    }});\n    // sync the visible row count of every table into its h3 title\n    // the DOM structure: the <h3 class="src-heading"> is the previousElementSibling of <table>.parentElement.parentElement\n    document.querySelectorAll('.urls-table').forEach(function(tbl) {{\n      var wrapper = tbl.parentElement && tbl.parentElement.parentElement;\n      var h = wrapper && wrapper.previousElementSibling;\n      if (!h || !h.classList.contains('src-heading')) return;\n      var n = 0, total = 0;\n      tbl.querySelectorAll('tbody tr[data-subdomain]').forEach(function(tr) {{\n        total++;\n        if (tr.style.display !== 'none') n++;\n      }});\n      var chip = h.querySelector('.count-chip');\n      if (!chip) {{\n        chip = document.createElement('span');\n        chip.className = 'count-chip muted';\n        chip.style.marginLeft = '8px';\n        h.appendChild(chip);\n      }}\n      chip.textContent = '{_t("dashboard.urls.visible_count_prefix")} ' + n + '/' + total + ' {_t("dashboard.urls.count_unit")}';\n    }});\n  }}\n\n  cbSub.addEventListener('change', applyFilters);\n  cb200.addEventListener('change', applyFilters);\n  if (cbStatic) cbStatic.addEventListener('change', applyFilters);\n  if (cbNewChanged) cbNewChanged.addEventListener('change', applyFilters);\n\n  // decided by the user on 2026-08-26: the schedule button -> POST /<biz>/schedule/toggle\n  var schedBtn = document.getElementById('schedule-toggle-btn');\n  if (schedBtn) {{\n    schedBtn.addEventListener('click', function() {{\n      var action = schedBtn.getAttribute('data-action') || 'add';\n      schedBtn.disabled = true;\n      var origText = schedBtn.textContent;\n      schedBtn.textContent = action === 'add' ? '{_t("dashboard.urls.schedule_adding")}' : '{_t("dashboard.urls.schedule_removing")}';\n      var body = 'subdomain=' + encodeURIComponent(sampleSub) +\n                 '&action=' + encodeURIComponent(action);\n      fetch('/' + bizName + '/schedule/toggle', {{\n        method: 'POST',\n        headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},\n        body: body\n      }}).then(function(r) {{\n        return r.json().then(function(j) {{ return {{status: r.status, body: j}}; }});\n      }}).then(function(res) {{\n        if (res.status === 200 && res.body.ok) {{\n          // after the success it tells the user and reloads the page, showing the new schedule state and the button text\n          alert((action === 'add' ? '{_t("dashboard.urls.schedule_added")}\\n' : '{_t("dashboard.urls.schedule_removed")}\\n') +\n                '{_t("dashboard.urls.label_subdomain")}' + sampleSub);\n          location.reload();\n        }} else {{\n          alert('{_t("dashboard.urls.operation_failed")} ' + (res.body.error || JSON.stringify(res.body)));\n          schedBtn.disabled = false;\n          schedBtn.textContent = origText;\n        }}\n      }}).catch(function(e) {{\n        alert('{_t("dashboard.urls.network_error")} ' + e);\n        schedBtn.disabled = false;\n        schedBtn.textContent = origText;\n      }});\n    }});\n  }}\n\n  // header sorting: every table keeps its own asc/desc/none state. A click calls sortTable;\n  // status/bytes are numeric columns, they are compared as numbers; the empty values (None / -) go last.\n  function sortValue(tr, key) {{\n    if (key === 'status_code') {{\n      var s = tr.getAttribute('data-status');\n      return s === '' || s == null ? null : Number(s);\n    }}\n    if (key === 'content_length') {{\n      // bytes: the tr does not store data-bytes, the text of the 4th td is read (the column order is fixed)\n      var tds = tr.querySelectorAll('td');\n      // column order: URL, path, status, bytes, host:port, ...\n      var td = tds[3];\n      var txt = td ? td.textContent.trim() : '';\n      if (txt === '—' || txt === '') return null;\n      var n = Number(txt.replace(/,/g, ''));\n      return isNaN(n) ? null : n;\n    }}\n    return null;\n  }}\n\n  function sortTable(tbl, key, dir) {{\n    // dir: 'asc' | 'desc' | null (back to the original order)\n    var tbody = tbl.tBodies[0];\n    if (!tbody) return;\n    var trs = Array.from(tbody.querySelectorAll('tr[data-host]'));\n    if (dir === null) {{\n      // sort by the initial order of the tr in the DOM (the original order) - there is no original index,\n      // the dataset._idx written during the first render is used instead\n      trs.sort(function(a, b) {{\n        return (Number(a.dataset._idx) || 0) - (Number(b.dataset._idx) || 0);\n      }});\n    }} else {{\n      trs.sort(function(a, b) {{\n        var va = sortValue(a, key);\n        var vb = sortValue(b, key);\n        // the null values go last (whatever asc/desc is)\n        if (va == null && vb == null) return 0;\n        if (va == null) return 1;\n        if (vb == null) return -1;\n        return dir === 'asc' ? va - vb : vb - va;\n      }});\n    }}\n    // reorder the DOM\n    var frag = document.createDocumentFragment();\n    trs.forEach(function(tr) {{ frag.appendChild(tr); }});\n    tbody.appendChild(frag);\n    // sync the th look\n    tbl.querySelectorAll('th.sortable').forEach(function(th) {{\n      th.classList.remove('sort-asc', 'sort-desc');\n      if (th.getAttribute('data-col') === key && dir) {{\n        th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');\n      }}\n    }});\n  }}\n\n  document.querySelectorAll('.urls-table').forEach(function(tbl) {{\n    // tag every row with idx (used to restore the original order for sort=null)\n    Array.from(tbl.tBodies[0].querySelectorAll('tr[data-host]')).forEach(function(tr, i) {{\n      tr.dataset._idx = String(i);\n    }});\n    tbl.querySelectorAll('th.sortable').forEach(function(th) {{\n      th.addEventListener('click', function() {{\n        var key = th.getAttribute('data-col');\n        var cur = th.classList.contains('sort-asc') ? 'asc'\n                 : th.classList.contains('sort-desc') ? 'desc' : null;\n        var next = (cur === 'asc') ? 'desc' : (cur === 'desc') ? null : 'asc';\n        sortTable(tbl, key, next);\n      }});\n    }});\n  }});\n\n  applyFilters();\n}})();\n</script>\n</body></html>\n'''
         self._respond(200, 'text/html; charset=utf-8', page.encode('utf-8'), accept_enc)
         log.info(f'urls detail biz={biz_name} hash_id={hash_id} rows={len(rows)} per_source={per_source_count}')
 
     def _serve_body_raw(self, biz_name: str, raw_query: str, accept_enc: bytes) -> None:
-        """GET /<业务名>/body/raw?url=<domain-url>&side=pre|cur
+        """GET /<business name>/body/raw?url=<domain-url>&side=pre|cur
 
-        返回该子域某一侧保存下来的 HTTP body 原文 (zlib 解压后), 由浏览器
-        按 Content-Type 渲染。side=pre 取 daily run 快照里的那一版,
-        side=cur 取最近一次 import 落库的那一版。
+        It returns the raw HTTP body that was stored for one side of that
+        subdomain (after the zlib decompression), and the browser
+        renders it according to the Content-Type. side=pre takes the version in
+        the daily run snapshot,
+        side=cur takes the version the latest import wrote.
         """
         def _fail(status: int, msg: str) -> None:
             self._respond(status, 'text/plain; charset=utf-8', msg.encode('utf-8'), accept_enc)
@@ -1653,7 +1828,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             conn.row_factory = sqlite3.Row
-            # 业务可见性取判定口径: enabled=1 或者根本没有 config 行。
+            # the business visibility follows the judgement rule: enabled=1 or there is no config row at all.
             biz = conn.execute(
                 "SELECT b.id FROM businesses b "
                 "LEFT JOIN recon_business_config c ON c.business_id = b.id "
@@ -1685,8 +1860,10 @@ class Handler(BaseHTTPRequestHandler):
             _fail(404, 'no such subdomain in this business\n')
             return
 
-        # 端口回退链: 显式端口精确匹配 -> 推断端口先试 scheme 默认再试另一个
-        # 默认端口 -> 该子域在本业务下只有一行时直接用那一行。
+        # the port fallback chain: an explicit port matches exactly -> an inferred
+        # port tries the scheme default first and then the other
+        # default port -> when the subdomain has only one row under this business
+        # that row is used directly.
         match: list[Any] = []
         if explicit_port is not None:
             match = [r for r in rows if r['port'] == explicit_port]
@@ -1721,8 +1898,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             data = zlib.decompress(bytes(blob))
         except zlib.error:
-            # 与 algo_diff/compute.py::_decompress 同约定: 解不开就当未压缩
-            # 原文处理 (blob 可能是未压缩/损坏的)。渲染时给出的是字节原样。
+            # the same convention as algo_diff/compute.py::_decompress: when it
+            # cannot be decompressed it is treated as not compressed
+            # raw text (the blob may be uncompressed / corrupted). The bytes are
+            # returned as they are when it is rendered.
             data = bytes(blob)
 
         extra = {
@@ -1740,13 +1919,53 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         log.info(f'dashboard {self.address_string()} {fmt % args}')
 
+    def _render_pages(self, lang: str) -> dict:
+        """Render the pages of one language and cache them.
+
+        The pages are built with the language of the request, so they
+        hold the text of that language. The cache holds one entry per
+        language, and the entry is replaced when the data is reloaded.
+        """
+        agg = _aggregate(_State.cached_snap)
+        html_home = render_html(agg, home=True, biz_name='')
+        html_overview = render_html(agg, home=False, biz_name='')
+        pages = {
+            'home': html_home,
+            'overview': html_overview,
+            'gz_home': gzip.compress(html_home, compresslevel=6) if len(html_home) > 1024 else b'',
+            'gz_overview': gzip.compress(html_overview, compresslevel=6) if len(html_overview) > 1024 else b'',
+        }
+        _State.cached_pages[lang] = pages
+        return pages
+
     def _serve_page(self, accept_enc: bytes=b'', *, home: bool=True) -> None:
         self._maybe_reload()
+        lang = get_lang()
+        pages = _State.cached_pages.get(lang)
+        if pages is None:
+            pages = self._render_pages(lang)
         if home:
-            (body, gz) = (_State.cached_html_home, _State.cached_gz_home)
+            (body, gz) = (pages['home'], pages['gz_home'])
         else:
-            (body, gz) = (_State.cached_html_overview, _State.cached_gz_overview)
+            (body, gz) = (pages['overview'], pages['gz_overview'])
         self._respond(200, 'text/html; charset=utf-8', body, accept_enc, cached_gz=gz)
+
+    def _apply_request_lang(self, raw_query: str) -> None:
+        """Take the language of the request out of the query string.
+
+        The language is a per-request setting: the dashboard serves the
+        requests concurrently, so it belongs to the thread that serves
+        the request and not to the process. The configuration stays the
+        default when the query does not name a language.
+        """
+        want = ''
+        if raw_query:
+            params = urllib.parse.parse_qs(raw_query)
+            values = params.get('lang') or []
+            if values:
+                want = values[0]
+        if want:
+            set_lang(want)
 
     def _serve_snapshot(self, accept_enc: bytes=b'') -> None:
         self._maybe_reload()
@@ -1796,15 +2015,22 @@ class Handler(BaseHTTPRequestHandler):
         biz_snap = _filter_snap_by_business(snap, bid)
         hash_total = Counter((r.get('response_hash') or '' for r in biz_snap.get('tables', {}).get('web_subdomains', [])))
         if is_new:
-            # 2026-10-24: /new 直接按 DB 的 change_type > 0 过滤, 不再依赖
-            # reports/ 目录下的 diff CSV。理由:
-            #   - 实时性: 报告只在 daily_monitor 跑完时更新 (每天一次), 手动
-            #     跑完 algo_diff_cpp 后 DB 变了但报告没变 -> /new 不反映最新数据。
-            #   - 抗污染: _find_latest_report() 按目录名倒序取第一个, 任何往
-            #     reports/ 塞目录的动作都会劫持 /new (空目录 -> changed_keys
-            #     为空 -> 一条也没有)。2026-10-24 smoke 测试就在生产 reports/
-            #     下留了两个目录, 导致 /<业务>/new 全空。
-            # 分类规则沿用 diff.py 的 bitmask 语义 (added/reactivated/changed)。
+            # 2026-10-24: /new filters directly on the change_type > 0 of the DB, it
+            # does not depend on
+            # the diff CSV under the reports/ directory any more. The reason:
+            #   - the freshness: the report is only updated when daily_monitor has
+            #     finished (once a day), so after a manual
+            #     run of algo_diff_cpp the DB changed but the report did not ->
+            #     /new did not reflect the newest data.
+            #   - the resistance to poisoning: _find_latest_report() takes the
+            #     first one by the reverse order of the directory names, so any
+            #     action that pushes a directory into
+            #     reports/ hijacks /new (an empty directory -> changed_keys
+            #     is empty -> not a single row). The smoke test of 2026-10-24 left
+            #     two directories under the production reports/
+            #     directory, which made /<business>/new completely empty.
+            # The classification follows the bitmask semantics of diff.py
+            # (added/reactivated/changed).
             run_id = _latest_run_id()
             filtered = _filter_snapshot_by_ct(biz_snap)
             agg = _aggregate(filtered)
@@ -1829,29 +2055,27 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 snap = _load_snap_from_db(_State.db_path)
                 agg = _aggregate(snap)
-                html_home = render_html(agg, home=True, biz_name='')
-                html_overview = render_html(agg, home=False, biz_name='')
-                gz_home = gzip.compress(html_home, compresslevel=6) if len(html_home) > 1024 else b''
-                gz_overview = gzip.compress(html_overview, compresslevel=6) if len(html_overview) > 1024 else b''
                 snap_json = json.dumps(snap, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
                 row_total = sum(agg['row_counts'].values())
-                _State.cached_html_home = html_home
-                _State.cached_html_overview = html_overview
-                _State.cached_gz_home = gz_home
-                _State.cached_gz_overview = gz_overview
+                # the pages are cached per language, so the reload drops
+                # the cache of every language and each one is built again
+                # on the next request
+                _State.cached_pages = {}
                 _State.cached_snap = snap
                 _State.cached_snap_json = snap_json
                 _State.last_reload_ts = time.time()
-                del snap, snap_json, html_home, html_overview, gz_home, gz_overview
+                del snap, snap_json
                 import gc
                 gc.collect()
-                log.info(f'dashboard reloaded: {_State.db_path} ({row_total} rows; home={len(_State.cached_html_home):,}/{len(_State.cached_gz_home):,} gz, overview={len(_State.cached_html_overview):,}/{len(_State.cached_gz_overview):,} gz)')
+                log.info(f'dashboard reloaded: {_State.db_path} ({row_total} rows; the pages are rendered per language on the next request)')
             except Exception as e:
                 log.error(f'dashboard reload failed: {e}')
-                if not _State.cached_html_home:
+                if not _State.cached_pages:
                     err = f'<html><body><h1>Snapshot error</h1><pre>{_e(e)}</pre></body></html>'.encode()
-                    _State.cached_html_home = err
-                    _State.cached_html_overview = err
+                    _State.cached_pages = {
+                        lang: {'home': err, 'overview': err, 'gz_home': b'', 'gz_overview': b''}
+                        for lang in KNOWN_LANGS
+                    }
 
     def _load_snap(self) -> dict:
         """Cached parse of the active snapshot; reads + caches on first call,
@@ -1879,27 +2103,35 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 def _build_katana_enrich_form(biz_name: str) -> str:
-    """katana enrich 折叠表单(2026-09-22 加)。点击 POST /<biz>/katana-enrich。
+    """The katana enrich collapsible form (added 2026-09-22). It posts to
+    /<biz>/katana-enrich.
 
-    跟 _build_scan_urls_form 平级,但只一个 textbox(hosts),没有 sources / wordlist:
-      - katana 自动启用 js-crawl / form-extraction / xhr-extraction
-      - 字典不需要(katana 主动爬虫)
-      - 字段对齐 httpx(详见 modules/public/katana/README.md §三)
+    It is at the same level as _build_scan_urls_form, but it only has one textbox
+(the hosts), no sources / wordlist:
+      - katana turns on js-crawl / form-extraction / xhr-extraction on its own
+      - no dictionary is needed (katana is an active crawler)
+      - the fields are aligned with httpx (see modules/public/katana/README.md
+        section 3)
 
-    设计目标:
-      - 只扫已存在的 active 子域(POST handler 校验)
-      - 单次 host 上限收紧到 30(katana 比 URLFinder 重,大字典场景超时)
-      - 5 词风险黑名单沿用 URLFinder,katana -crawl-out-scope 源头 + 入库前双重 gate
+    The design goals:
+      - only the active subdomains that already exist are scanned (the POST
+        handler validates that)
+      - the per-invocation host limit is tightened to 30 (katana is heavier than
+        URLFinder and it times out with a big dictionary)
+      - the 5 word risk blacklist is the one of URLFinder, katana gates it at
+        the source with -crawl-out-scope and a second gate before the write
     """
     if not biz_name:
         return ''
     action = '/' + urllib.parse.quote(biz_name) + '/katana-enrich'
-    return f'\n<details class="scan-form">\n  <summary>katana URL 扫描(向 {_e(biz_name)} 已收录的子域跑 katana,字段对齐 httpx)</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">每行一个 <b>已存在的子域</b>(从站点详情 tab 复制),&le;{KATANA_ENRICH_MAX_HOSTS} 个;\n    只对各 subdomain 下的 <code>web_subdomains.is_active=1</code> 行做扫描;\n    katana 自动启用 js-crawl / form-extraction / xhr-extraction,字段对齐 httpx(response_hash = mmh3 body);\n    危险路由(remove/delete/insert/update/logout)双重 gate(源头 -crawl-out-scope + 入库前 is_dangerous=1)。\n    多次扫描同一目标 = 同 URL 不会被重复插入(ON CONFLICT UPDATE last_seen)。</div>\n    <textarea name="hosts" rows="6" cols="60" placeholder="a.example.com&#10;b.example.com"></textarea><br>\n    <button type="submit">Run katana</button>\n  </form>\n</details>\n'
+    return f'\n<details class="scan-form">\n  <summary>{_t("dashboard.katana_form.summary", {"biz": _e(biz_name)})}</summary>\n  <form method="post" action="{_e(action)}">\n    <div class="hint">{_t("dashboard.common.each_line")} <b>{_t("dashboard.common.existing_subdomain")}</b>{_t("dashboard.katana_form.hint_copy", {"max": KATANA_ENRICH_MAX_HOSTS})}\n    {_t("dashboard.common.scan_active_prefix")} <code>web_subdomains.is_active=1</code> {_t("dashboard.common.scan_active_suffix")}\n    {_t("dashboard.katana_form.hint_features")}\n    {_t("dashboard.katana_form.hint_danger")}\n    {_t("dashboard.common.no_duplicate_insert")}</div>\n    <textarea name="hosts" rows="6" cols="60" placeholder="a.example.com&#10;b.example.com"></textarea><br>\n    <button type="submit">Run katana</button>\n  </form>\n</details>\n'
 
     def _dispatch_katana_enrich(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<biz>/katana-enrich 入口校验 + dispatch 到 _handle_katana_enrich。
+        """The entry validation of POST /<biz>/katana-enrich + the dispatch to
+        _handle_katana_enrich.
 
-        katana 模块不存在 / 二进制没装 → 404 + 提示,不要静默 fallback。
+        The katana module does not exist / the binary is not installed -> 404 + a
+        hint, do not fall back silently.
         """
         snap = _State.cached_snap
         if not snap:
@@ -1911,15 +2143,18 @@ def _build_katana_enrich_form(biz_name: str) -> str:
         self._handle_katana_enrich(biz_name, accept_enc)
 
     def _handle_katana_enrich(self, biz_name: str, accept_enc: bytes) -> None:
-        """POST /<业务>/katana-enrich 的实际处理。
+        """The actual handling of POST /<business>/katana-enrich.
 
-        body 字段:
-          hosts = 多行子域(必填,<= KATANA_ENRICH_MAX_HOSTS)
+        The body fields:
+          hosts = the subdomains, one per line (required, <=
+                 KATANA_ENRICH_MAX_HOSTS)
 
-        行为:
-          - katana_enrich.sh 不存在(模块没装) → 503 + 提示装法
-          - subprocess.run + KATANA_ENRICH_TIMEOUT 全局超时
-          - 跑完 stdout 是 JSON summary;非零退出 → 502 + stderr 摘要
+        The behaviour:
+          - katana_enrich.sh does not exist (the module is not installed) -> 503 +
+            a hint on how to install it
+          - subprocess.run + KATANA_ENRICH_TIMEOUT as the global timeout
+          - when it finishes the stdout is a JSON summary; a non-zero exit -> 502
+            + a summary of the stderr
         """
         try:
             length = int(self.headers.get('Content-Length') or 0)
@@ -2044,19 +2279,10 @@ def main() -> int:
     _State.reload_lock = threading.Lock()
     try:
         snap = _load_snap_from_db(_State.db_path)
-        agg = _aggregate(snap)
-        html_home = render_html(agg, home=True, biz_name='')
-        html_overview = render_html(agg, home=False, biz_name='')
-        _State.cached_html_home = html_home
-        _State.cached_html_overview = html_overview
-        if len(html_home) > 1024:
-            _State.cached_gz_home = gzip.compress(html_home, compresslevel=6)
-        if len(html_overview) > 1024:
-            _State.cached_gz_overview = gzip.compress(html_overview, compresslevel=6)
         _State.cached_snap = snap
         _State.cached_snap_json = json.dumps(snap, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         _State.last_reload_ts = time.time()
-        log.info(f"initial load: {_State.db_path} ({sum(agg['row_counts'].values())} rows; home={len(html_home):,}/{len(_State.cached_gz_home):,} gz)")
+        log.info(f"initial load: {_State.db_path} ({sum(len(v) for v in snap.get('tables', {}).values())} rows; the pages are rendered per language on the first request)")
     except Exception as e:
         log.error(f'initial load failed: {e}')
     ThreadingHTTPServer.allow_reuse_address = True

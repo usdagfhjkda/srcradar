@@ -8,8 +8,8 @@
 #   2. start cron service (so daily 03:00 CST schedule fires)
 #   3. exec the user-provided CMD (default: srcradar --help)
 #
-# DB 路径固定 /opt/srcradar/db/recon.sqlite3(用户无需任何 env)。
-# /data 仅承接 enscan cookie(TODO Q3);不再承担 DB 持久化职责。
+# The DB path is fixed at /opt/srcradar/db/recon.sqlite3 (the user needs no env vars).
+# /data only carries the enscan cookie (TODO Q3); it no longer holds the DB.
 #
 # TODO(Q3): ENScan cookie handling
 #   - First preference: /data/enscan/ directory mounted by user (persistent)
@@ -78,8 +78,8 @@ else
 fi
 
 # ---- 2) cron service (TODO(Q4)) ----
-# 检测顺序: service 命令 → 直接 /usr/sbin/cron → /etc/init.d/cron
-# ubuntu:22.04 slim 默认无 service,但 cron daemon 本身装在 /usr/sbin/cron
+# detection order: service command → direct /usr/sbin/cron → /etc/init.d/cron
+# ubuntu:22.04 slim has no service by default, but the cron daemon itself is installed at /usr/sbin/cron
 if command -v service >/dev/null 2>&1; then
     if service cron start >/dev/null 2>&1; then
         log "cron started (TZ=$TZ)"
@@ -87,7 +87,7 @@ if command -v service >/dev/null 2>&1; then
         warn "service cron start failed; daily 03:00 schedule will not fire"
     fi
 elif [ -x /usr/sbin/cron ]; then
-    # 直接跑 cron daemon(前台 or 后台)
+    # run the cron daemon directly (foreground or background)
     if /usr/sbin/cron && sleep 1 && pgrep -x cron >/dev/null 2>&1; then
         log "cron started directly (TZ=$TZ)"
     else

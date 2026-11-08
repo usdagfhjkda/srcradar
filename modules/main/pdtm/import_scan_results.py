@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""将 scanner.sh 的 Web/TCP 结果写入 recon.sqlite3。"""
+"""Write the Web/TCP results produced by scanner.sh into recon.sqlite3."""
 
 from __future__ import annotations
 
@@ -16,25 +16,39 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t as _t
 
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "db" / "recon.sqlite3"
 DEFAULT_SCAN_DIR = Path(__file__).resolve().parent / "scan_results"
 
-# 单点扫描模式 (scan-onesite 子命令) 用的常量。
-# 2026-10-03: HTTPX_BIN 路径解析优先级 — env HTTPX_BIN 覆盖 > config/pdtm.conf httpx_bin > 默认 bin/httpx。
-# 与 pdtm/lib/resolve_tools.sh 的 bash helper 行为对齐(单源 config)。
+# Constants used by the single-site scan mode (the scan-onesite
+# subcommand).
+# 2026-10-03: HTTPX_BIN path resolution priority - the HTTPX_BIN
+# environment variable overrides > httpx_bin in config/pdtm.conf > the
+# default bin/httpx. Kept in step with the bash helper in
+# pdtm/lib/resolve_tools.sh so that there is a single source of truth
+# for the config.
 
 def _resolve_httpx_bin() -> str:
-    """解析 httpx 二进制路径,优先级:
-    1. 环境变量 HTTPX_BIN (caller 覆盖)
-    2. config/pdtm.conf 的 httpx_bin (由 install.sh / patches/install.sh 写入)
-       — 路径由 SRCRADAR_CONF 环境变量覆盖,默认 <repo>/config/pdtm.conf
-    3. 默认 <script_dir>/bin/httpx (与本脚本同目录)
+    """Resolve the httpx binary path. Priority:
+    1. the HTTPX_BIN environment variable (caller override)
+    2. httpx_bin in config/pdtm.conf (written by install.sh / patches/install.sh)
+       - the config path itself is overridden by the SRCRADAR_CONF environment
+         variable, defaulting to <repo>/config/pdtm.conf
+    3. the default <script_dir>/bin/httpx (same directory as this script)
 
-    返回第一个 Path.exists() 的路径;都不存在时返回默认路径(由 caller 检查).
+    Returns the first path that exists; when none exist it returns the
+    default path and the caller checks it.
     """
-    # 1. 环境变量
+    # 1. environment variable
     env_val = os.environ.get("HTTPX_BIN")
     if env_val and Path(env_val).exists():
         return env_val
@@ -49,19 +63,20 @@ def _resolve_httpx_bin() -> str:
                 if v and Path(v).exists():
                     return v
 
-    # 3. 默认
+    # 3. default
     return str(Path(__file__).resolve().parent / "bin" / "httpx")
 
 
 def _find_pdtm_conf() -> "Path | None":
-    """定位 config/pdtm.conf 路径。
-    优先级: 环境变量 SRCRADAR_CONF > 相对脚本位置推断 <repo>/config/pdtm.conf.
-    返回 None 当无法推断。
+    """Locate the config/pdtm.conf path.
+    Priority: the SRCRADAR_CONF environment variable > <repo>/config/pdtm.conf
+    inferred from this script's location.
+    Returns None when it cannot be inferred.
     """
     env_val = os.environ.get("SRCRADAR_CONF")
     if env_val:
         return Path(env_val)
-    # import_scan_results.py 在 modules/main/pdtm/,上 3 层 = <repo>/
+    # import_scan_results.py lives in modules/main/pdtm/, three levels up = <repo>/
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parents[2]  # pdtm -> main -> <repo>
     return repo_root / "config" / "pdtm.conf"
@@ -69,8 +84,8 @@ def _find_pdtm_conf() -> "Path | None":
 
 HTTPX_BIN = _resolve_httpx_bin()
 HOSTNAME_RE = re.compile(r"^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$")
-MAX_HOSTS = 200            # 单次 scan-onesite 上限
-HTTPX_TIMEOUT = 120        # httpx subprocess 超时（秒）
+MAX_HOSTS = 200            # per-invocation scan-onesite limit
+HTTPX_TIMEOUT = 120        # httpx subprocess timeout in seconds
 
 
 def now() -> str:
@@ -78,11 +93,14 @@ def now() -> str:
 
 
 def _s(v: Any) -> Any:
-    """Bind-safe coerce: None→None; str/int/float 原样; dict/list/其它容器→str()。
+    """Bind-safe coercion: None stays None; str/int/float pass through;
+    dict/list/other containers become str().
 
-    httpx JSON 字段偶尔会出现 title=None / technologies=dict / status_code=int
-    之类,直接传给 sqlite3 binding 会抛 "Error binding parameter N - probably
-    unsupported type"。强转成 str 后 SQLite binding 不会炸,空容器→'' 也是合法 TEXT。
+    httpx JSON fields occasionally carry title=None / technologies=dict /
+    status_code=int; handing those straight to the sqlite3 binding raises
+    "Error binding parameter N - probably unsupported type". After coercing
+    to str the SQLite binding is safe, and an empty container becomes ''
+    which is valid TEXT.
     """
     if v is None:
         return None
@@ -92,23 +110,27 @@ def _s(v: Any) -> Any:
 
 
 def _normalize_tech(v: Any) -> Any:
-    """把 technologies 归一化成稳定的字符串形态。
+    """Normalise technologies into a stable string form.
 
-    httpx 的 tech 字段恒为 list[str]。原先它走通用的 _s() 强转, 而 _s() 对
-    list 一律 str(v), 于是 Python 的 list 字面量表示被当成字符串存进库:
+    The httpx tech field is always list[str]. It used to go through the
+    generic _s() coercion, and _s() applies str(v) to a list, so Python's
+    list literal representation ended up stored as a string:
         str(['Alibaba Cloud CDN'])  ->  "['Alibaba Cloud CDN']"
 
-    同一份技术栈, 取决于当次扫描走的是 httpx JSONL 主路径还是 raw text 兜底
-    路径, 落库形态就在 "['X']" / "X" / NULL 之间跳 —— STEP 1 的 technologies
-    快字段比较于是命中, 判成变更, 而 body 其实逐字节相同。
+    For one and the same technology stack, the stored form jumps between
+    "['X']" / "X" / NULL depending on whether the scan took the httpx JSONL
+    main path or the raw text fallback — the STEP 1 technologies fast-field
+    comparison then matches and reports a change, even though the body is
+    byte-for-byte identical.
 
-    格式沿用仓库内已有约定:
+    The format follows the convention already used elsewhere in the repo:
         list -> ",".join(str(t) for t in v)      # ["A","B"] -> "A,B"
-        str  -> 原样
+        str  -> unchanged
         None -> None
 
-    刻意不复用 _s(): _s 是通用的 bind-safe 强转, 被 title / content_type 等
-    共用, 在那里改行为会波及其他字段。
+    Deliberately not reusing _s(): _s is the generic bind-safe coercion
+    shared by title / content_type and others, so changing its behaviour
+    there would affect unrelated fields.
     """
     if v is None:
         return None
@@ -120,14 +142,14 @@ def _normalize_tech(v: Any) -> Any:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="scanner.sh 结果入库工具")
-    parser.add_argument("--business", required=True, help="业务名称")
-    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help="SQLite 数据库路径")
-    parser.add_argument("--scan-dir", default=str(DEFAULT_SCAN_DIR), help="scanner 输出目录")
-    parser.add_argument("--target-file", default="target.txt", help="可测资产文件")
-    parser.add_argument("--exclude-file", default="exclude.txt", help="非可测资产文件")
-    parser.add_argument("--wildcard-file", default="wildcard.txt", help="泛解析域文件,这些域在 scopes 表里 is_wildcard=1")
-    parser.add_argument("--dry-run", action="store_true", help="只解析和统计，不写数据库、不删除文件")
+    parser = argparse.ArgumentParser(description=_t("main.import_scan_results.description"))
+    parser.add_argument("--business", required=True, help=_t("main.import_scan_results.arg_business"))
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=_t("main.import_scan_results.arg_db"))
+    parser.add_argument("--scan-dir", default=str(DEFAULT_SCAN_DIR), help=_t("main.import_scan_results.arg_scan_dir"))
+    parser.add_argument("--target-file", default="target.txt", help=_t("main.import_scan_results.arg_measurable"))
+    parser.add_argument("--exclude-file", default="exclude.txt", help=_t("main.import_scan_results.arg_not_measurable"))
+    parser.add_argument("--wildcard-file", default="wildcard.txt", help=_t("main.import_scan_results.arg_wildcard"))
+    parser.add_argument("--dry-run", action="store_true", help=_t("main.import_scan_results.arg_dry_run"))
     return parser.parse_args()
 
 
@@ -140,7 +162,7 @@ def clean_line(line: str) -> str | None:
 
 def read_scope_file(path: Path) -> list[str]:
     if not path.exists():
-        raise FileNotFoundError(f"范围文件不存在: {path}")
+        raise FileNotFoundError(_t("main.import_scan_results.scope_file_missing", {"path": path}))
     result: list[str] = []
     seen: set[str] = set()
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -172,16 +194,19 @@ def parse_host_port(value: str, default_port: int | None = None) -> tuple[str, i
 
 
 def matches_scope(host: str, scope: str) -> bool:
-    """glob 匹配 (与 scan.sh ERE 路径同语义,见 target_glob.matches_glob)。"""
+    """Glob matching (same semantics as the ERE path in scan.sh, see
+    target_glob.matches_glob)."""
     from target_glob import matches_glob
     return matches_glob(host, scope)
 
 
 def split_excludes(excludes: list[str]) -> tuple[list[str], list[str]]:
-    """兼容旧调用:返回 (空列表, 清洗后的 exclude 列表)。
+    """Backwards-compatible call: returns (empty list, cleaned exclude list).
 
-    旧版分域名/关键词两组,新版全部按 glob 编译,无 keyword 分支 (B 决定)。
-    保留这个函数是为了不破坏其他引用;实际过滤走 matches_exclude()。
+    The old version had two groups (domains / keywords); the new version
+    compiles everything as globs and has no keyword branch (decision B).
+    The function is kept so that other callers do not break; the actual
+    filtering goes through matches_exclude().
     """
     cleaned = []
     for item in excludes:
@@ -193,7 +218,8 @@ def split_excludes(excludes: list[str]) -> tuple[list[str], list[str]]:
 
 
 def matches_exclude(host: str, excludes: list[str]) -> bool:
-    """glob 编译 + 锚定 re.search (走 target_glob,无 keyword 分支)。"""
+    """Glob compilation + anchored re.search (via target_glob, no keyword
+    branch)."""
     from target_glob import matches_exclude_glob
     return matches_exclude_glob(host, excludes)
 
@@ -269,15 +295,18 @@ def hamming_simhash(a: int, b: int) -> int:
 
 
 def _real_sub_from_input(raw_input: Any) -> str | None:
-    """从 httpx jsonl 的 `input` 字段取真实 subdomain。
+    """Extract the real subdomain from the `input` field of an httpx jsonl line.
 
-    阶段 8 的 input 格式是 "<sub>,<ip>:<port>" (scanner.sh 阶段 8 构造),
-    httpx 连的是 IP, 所以 jsonl 里的 `url` 只有 IP 字面量、不含 subdomain。
-    `input` 保留了构造时的原始字符串, 是唯一可靠的资产身份来源。
+    The stage 8 input format is "<sub>,<ip>:<port>" (built by stage 8 of
+    scanner.sh). httpx connects to the IP, so the `url` in the jsonl holds
+    only the IP literal and no subdomain. `input` keeps the original string
+    and is the only reliable source of the asset identity.
 
-    返回规范化后的 subdomain (小写、去尾部点), 无法解析时返回 None,
-    由调用方回退到 IP 反查路径。刻意不接受裸 IP 作为 real_sub —— 那种情况
-    说明 input 不是 stage 8 格式, 交给下游兜底更诚实。
+    Returns the normalised subdomain (lowercased, trailing dot removed),
+    or None when it cannot be parsed, in which case the caller falls back
+    to the IP reverse-lookup path. A bare IP is deliberately not accepted
+    as real_sub — that means the input is not in the stage 8 format, and
+    letting the downstream fallback handle it is the honest choice.
     """
     if not isinstance(raw_input, str):
         return None
@@ -287,7 +316,8 @@ def _real_sub_from_input(raw_input: Any) -> str | None:
     candidate = value.split(",", 1)[0].strip().lower().rstrip(".")
     if not candidate:
         return None
-    # 裸 IP 不是 subdomain(没有 Host 头的语义), 交给下游 IP 反查
+    # A bare IP is not a subdomain (it carries no Host header semantics),
+    # so it is left to the downstream IP reverse lookup.
     if _looks_like_ip(candidate):
         return None
     return candidate
@@ -301,7 +331,7 @@ def parse_json_web(path: Path) -> list[dict[str, Any]]:
         try:
             item = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"{path}:{number} 不是有效 JSONL: {exc}") from exc
+            raise ValueError(_t("main.import_scan_results.invalid_jsonl", {"path": path, "line": number, "error": exc})) from exc
         if not isinstance(item, dict):
             continue
         url = first_value(item, "url", "input")
@@ -313,32 +343,40 @@ def parse_json_web(path: Path) -> list[dict[str, Any]]:
                 "host": host,
                 "port": int(port),
                 "url": str(url),
-                # 2026-10-21: 真实 subdomain。阶段 8 的 input 格式是
-                # "<sub>,<ip>:<port>", httpx 连的是 IP, 所以上面的 `url` 只有
-                # IP、没有 sub; 而 `input` 保留了原始 "<sub>,<ip>:<port>"。
-                # 下游 load_web_records() 靠这个字段确定资产身份, 不再靠 IP 反查
-                # 猜域名 (见该函数 fanout 注释)。real_sub=None 时下游走兜底。
+                # 2026-10-21: the real subdomain. The stage 8 input format is
+                # "<sub>,<ip>:<port>". httpx connects to the IP, so the `url` above holds
+                # only the IP and no sub, while `input` keeps the original
+                # "<sub>,<ip>:<port>". The downstream load_web_records() uses this field
+                # to determine the asset identity instead of an IP reverse lookup to
+                # guess the domain (see the fanout comment on that function). When
+                # real_sub is None the downstream fallback runs.
                 "real_sub": _real_sub_from_input(item.get("input")),
                 "status_code": first_value(item, "status-code", "status_code", "statusCode"),
                 "content_length": first_value(item, "content-length", "content_length", "contentLength"),
                 "title": first_value(item, "title"),
-                # 归一化成稳定形态 (见 _normalize_tech): httpx 的 tech 是
-                # list[str], 直接强转会落成 Python 的 list 字面量表示,
-                # 形态逐日跳变 -> 快字段比较误判成变更。
+                # Normalised into a stable form (see _normalize_tech): the httpx tech
+                # is list[str], and a direct coercion lands Python's list literal
+                # representation in the database, so the form jumps day to day and the
+                # fast-field comparison misreads that as a change.
                 "technologies": _normalize_tech(first_value(item, "tech", "technologies")),
                 "response_hash": response_hash(item),
                 "body_simhash": body_simhash(item),
                 "raw_json": json.dumps(item, ensure_ascii=False, sort_keys=True),
-                # 2026-10-03: 提取 host_ip + a[] → ips 列(下游 _upsert_web_records 写入 DB)。
-                # httpx JSONL 顶层有 host_ip(string) 和 a(list[str]) 字段,
-                # 合并去重保留顺序。raw_json parse 是兜底路径(老数据 / httpx 字段改名)。
+                # 2026-10-03: extract host_ip + a[] into the ips column (the
+                # downstream _upsert_web_records writes it to the DB). The httpx JSONL
+                # top level carries host_ip (string) and a (list[str]), merged and
+                # deduplicated while keeping the order. Parsing raw_json is the fallback
+                # path (older data / renamed httpx fields).
                 "ips": _extract_ips_from_item(item),
                 "content_type": first_value(item, "content_type", "contentType") or "",
-                # PATCH-FINAL-URL-2026-10-28: httpx 跟随 -follow-redirects 后的
-                # 最终落点。2xx 响应里该字段不存在 -> 空串 (比较时自动跳过);
-                # 3xx 响应里是稳定的域名形态, 不随扫描阶段连 IP 还是连域名而变。
-                # 不能用 url 列代替: url 的形态逐日会翻转 (域名 <-> IP),
-                # 补进快字段会把"形态抖动"误判成变更。
+                # PATCH-FINAL-URL-2026-10-28: the final landing point after httpx
+                # follows -follow-redirects. The field is absent from a 2xx response ->
+                # empty string (skipped automatically during comparison); in a 3xx
+                # response it holds a stable domain form that does not change with
+                # whether the scan stage connects to the IP or to the domain. The url
+                # column cannot stand in for it: the url form flips day to day (domain
+                # <-> IP), so adding it to the fast fields would misread the form
+                # jitter as a change.
                 "final_url": first_value(item, "final_url") or "",
                 # inline algo_diff block in _upsert_web_records reads record["body"]
                 # to compare prev vs curr in the same UPSERT transaction; without
@@ -355,10 +393,12 @@ def parse_json_web(path: Path) -> list[dict[str, Any]]:
 
 
 def _extract_ips_from_item(item: dict) -> str:
-    """从 httpx JSONL item 顶层提取 host_ip + a[] 合并去重,JSON 数组字符串。
+    """Extract and merge host_ip + a[] from the top level of an httpx JSONL
+    item, as a JSON array string.
 
-    返回值固定为 '["ip1","ip2",...]' 或 '[]'。下游 _upsert_web_records 优先用
-    record['ips'];若为空则 fallback parse raw_json。"""
+    The return value is always '["ip1","ip2",...]' or '[]'. The downstream
+    _upsert_web_records prefers record['ips']; when it is empty it falls
+    back to parsing raw_json."""
     ips: list[str] = []
     host_ip = item.get("host_ip")
     if isinstance(host_ip, str) and host_ip:
@@ -481,36 +521,49 @@ def load_web_records(scan_dir: Path, ip_domains: dict[str, list[str]]) -> list[d
             continue
         raw.extend(parse_json_web(path) if path.suffix == ".json" else parse_text_web(path))
 
-    # 2026-10-21: 删掉 IP -> 多域名 fanout, key 去掉 response_hash。
+    # 2026-10-21: dropped the IP -> multi-domain fanout, and dropped
+    # response_hash from the key.
     #
-    # 为什么删 fanout:
-    #   阶段 8 每条 input 已经是一个域名一条探测 (scanner.sh 阶段 8 对该 IP 下
-    #   每个 sub 各生成一行 "<sub>,<ip>:<port>"), 每条结果的 Host 头不同、响应
-    #   可以完全不同。之前 _resolve_host() 把 host(IP) 反查成该 IP 下的全部域名,
-    #   再把同一条 record (含 body/status_code/content_length/raw_json) 无差别
-    #   复制给每个域名 —— 共享 CDN 入口的 IP 上有多个 vhost 时, 别的 Host 头的
-    #   响应就被挂到了本域名名下。实测: 一个 IP 上10 个域名, 其中一个的 3 个 port
-    #   拿到的都是另一个站点(跨 Host 跳转终点)的页面, 每天 content_length 抖动
-    #   ~千字节, diff 每天误报 changed。前提已验证: 每域名形态单一(混合 0/N),
-    #   说明每域名本来就有独立探测结果, 删掉复制不丢数据。
+    # Why the fanout was removed:
+    #   Stage 8 already produces one probe per domain per input (stage 8 of
+    #   scanner.sh emits one line "<sub>,<ip>:<port>" for every sub under that
+    #   IP), and each result carries a different Host header, so the responses
+    #   can be completely different. _resolve_host() used to reverse-lookup
+    #   the host (IP) into every domain under that IP and then copy the same
+    #   record (body/status_code/content_length/raw_json) to each of them
+    #   indiscriminately — when an IP behind a shared CDN entry point serves
+    #   several vhosts, responses meant for another Host header were filed
+    #   under this domain. Measured: one IP with 10 domains, where the 3 ports
+    #   of one of them all served the page of a different site (the redirect
+    #   landing point across Host headers); content_length then fluctuated by
+    #   roughly a kilobyte per day and diff reported changed every day. The
+    #   premise was verified: each domain has a single form (no mixing), which
+    #   shows every domain already had its own probe result, so removing the
+    #   copy loses no data.
     #
-    # 为什么 key 去掉 response_hash:
-    #   web_subdomains 的唯一键是 (business_id, subdomain, port), 不含 hash。
-    #   hash 在 key 里时, 同一资产在同一轮出现两个 hash 会产生两条 record,
-    #   两条都进 _upsert_web_records 打同一行, 谁最后写谁赢 —— 顺序即真相。
-    #   去掉后一资产一条 record, 裁决权交回数据库唯一键。
+    # Why response_hash was dropped from the key:
+    #   The unique key of web_subdomains is (business_id, subdomain, port) and
+    #   does not include the hash. With the hash in the key, an asset that
+    #   shows two hashes in one round produced two records, both of which were
+    #   written by _upsert_web_records to the same row, where whoever wrote
+    #   last won — order became the truth. Removing it leaves one record per
+    #   asset and hands the decision back to the database unique key.
     #
-    # hash 的角色不变: 仍然作为 payload 传给 _upsert_web_records, 由
-    # web_hashes 的 UNIQUE(business_id, response_hash) 内容寻址决定 hash_id 是
-    # 新增还是复用历史簇(hash 内容回退时复用旧簇, 现有代码的 ON CONFLICT +
-    # 二次 SELECT 已覆盖, 不需要在这里判断)。
+    # The role of the hash is unchanged: it is still passed to
+    # _upsert_web_records as part of the payload, and the
+    # UNIQUE(business_id, response_hash) content addressing on web_hashes
+    # decides whether hash_id is new or reuses a historical cluster (a
+    # cluster is reused when the hash content regresses; the existing
+    # ON CONFLICT plus the second SELECT already cover that, so nothing has
+    # to be decided here).
     records: dict[tuple[str, int], dict[str, Any]] = {}
     fallback_ip_count = 0
     for record in raw:
         hash_value = record.get("response_hash") or f"{record['status_code']}|{record['content_length']}"
         record["response_hash"] = hash_value
 
-        # 资产身份优先用 input 里的真实 subdomain; 拿不到才回退 IP 反查。
+        # The asset identity prefers the real subdomain from the input;
+        # the IP reverse lookup is only the fallback.
         domain = record.get("real_sub")
         if not domain:
             domains = _resolve_host(record["host"], ip_domains)
@@ -518,25 +571,30 @@ def load_web_records(scan_dir: Path, ip_domains: dict[str, list[str]]) -> list[d
             fallback_ip_count += 1
         record["domain"] = domain
 
-        # 不做跨域名复制。同一 (domain, port) 后到的覆盖先到的 —— 与
-        # web_subdomains 的 ON CONFLICT(business_id, subdomain, port) 语义一致。
+        # No cross-domain copying. For one (domain, port), a later record
+        # overwrites an earlier one, which matches the
+        # ON CONFLICT(business_id, subdomain, port) semantics of web_subdomains.
         records[(domain, record["port"])] = record
 
     if fallback_ip_count:
-        # 兜底路径的 record 响应字段来自 IP 反查, 可信度低于 input 路径。
-        # 只记计数, 不静默: 上游格式变了这里会显式暴露。
+        # The response fields of a fallback-path record come from the IP
+        # reverse lookup and are less trustworthy than the input path. Only
+        # the counts are recorded, never swallowed: a change in the upstream
+        # format shows up here explicitly.
         print(
-            "[import] WARN: %d/%d 条 web record 的 input 无真实 subdomain, "
-            "已回退 IP 反查确定资产身份"
-            % (fallback_ip_count, len(raw)),
+            _t("main.import_scan_results.warn_no_subdomain", {
+                "count": fallback_ip_count, "total": len(raw),
+            }),
             file=sys.stderr,
         )
     return list(records.values())
 
 
 def load_tcp_records(scan_dir: Path, ip_domains: dict[str, list[str]]) -> list[dict[str, Any]]:
-    # non_cdn_tcp_ports.txt 现在是 scanner 在 IP:端口 层面剔除 web 后的非web端口,
-    # 每行即 IP:端口。资产身份 = (ip, port),hosts 记录解析到该 IP 的域名。
+    # non_cdn_tcp_ports.txt now holds the non-web ports that scanner keeps
+    # after dropping the web ports at the IP:port level; each line is one
+    # IP:port. The asset identity is (ip, port), and hosts records the
+    # domains that resolve to that IP.
     path = scan_dir / "non_cdn_tcp_ports.txt"
     grouped: dict[tuple[str, int], dict[str, Any]] = {}
     if not path.is_file():
@@ -560,15 +618,19 @@ def load_tcp_records(scan_dir: Path, ip_domains: dict[str, list[str]]) -> list[d
 
 
 def create_tables(conn: sqlite3.Connection) -> None:
-    # tcp_assets 旧 schema(host 主键)迁移:资产身份改为 (business_id, ip, port)。
-    # 库内数据不重要,检测到旧列结构直接重建(无历史数据迁移)。
+    # tcp_assets old schema (host primary key) migration: the asset identity
+    # becomes (business_id, ip, port). The data in the database does not
+    # matter, so an old column layout is detected and the table is rebuilt
+    # without migrating history.
     tcp_cols = {row[1] for row in conn.execute("PRAGMA table_info(tcp_assets)").fetchall()}
     if tcp_cols and "ip" not in tcp_cols:
         conn.execute("DROP TABLE tcp_assets")
-    # web_subdomains 旧 schema(UNIQUE (hash_id, subdomain, port),无 business_id)迁移:
-    # 资产身份改为 (business_id, subdomain, port)。SQLite 不能直接 DROP UNIQUE,
-    # 所以整表重建,迁移时按 (business_id, subdomain, port) 去重,
-    # 保留每组中 is_active=1 / last_seen 最新 / id 最大的那行。
+    # web_subdomains old schema (UNIQUE (hash_id, subdomain, port), no
+    # business_id) migration: the asset identity becomes
+    # (business_id, subdomain, port). SQLite cannot DROP a UNIQUE constraint
+    # directly, so the whole table is rebuilt; during the migration rows are
+    # deduplicated by (business_id, subdomain, port), keeping the row with
+    # is_active=1, the newest last_seen and the largest id in each group.
     ws_cols = {row[1] for row in conn.execute("PRAGMA table_info(web_subdomains)").fetchall()}
     if ws_cols and "business_id" not in ws_cols:
         conn.executescript("""
@@ -613,9 +675,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_web_subdomains_hash_id ON web_subdomains(hash_id);
         CREATE INDEX idx_web_subdomains_subdomain ON web_subdomains(subdomain);
         """)
-    # web_subdomains 新增 ips 列(2026-10-04):import_scan_results.py:798-813
-    # 写入 httpx JSONL 提取的 host_ip + a[] 数组,schema.sql 已加,
-    # 老库需要 ALTER 升级。
+    # web_subdomains gains the ips column (2026-10-04):
+    # import_scan_results.py:798-813 writes the host_ip + a[] array extracted
+    # from the httpx JSONL. schema.sql already has it; older databases need
+    # an ALTER upgrade.
     if ws_cols and "ips" not in ws_cols:
         conn.execute("ALTER TABLE web_subdomains ADD COLUMN ips TEXT DEFAULT '[]'")
     conn.executescript("""
@@ -714,7 +777,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
         PRIMARY KEY (response_hash)
     );
     """)
-    # 旧库迁移:scopes 表加 is_wildcard 列 + permutation_state 表
+    # Old database migration: the scopes table gains the is_wildcard column and
+    # the permutation_state table is created.
     cols = {row[1] for row in conn.execute("PRAGMA table_info(scopes)").fetchall()}
     if "is_wildcard" not in cols:
         conn.execute("ALTER TABLE scopes ADD COLUMN is_wildcard INTEGER NOT NULL DEFAULT 0")
@@ -740,7 +804,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             WHERE status IN ('nxdomain', 'timeout');
         """)
 
-    # brute_runs (2026-09-15 新增):与 alterx_runs 同结构,补齐已有库
+    # brute_runs (added 2026-09-15): same structure as alterx_runs, added to
+    # existing databases.
     if "brute_runs" not in tables:
         conn.executescript("""
         CREATE TABLE brute_runs (
@@ -768,29 +833,37 @@ def upsert_scope(conn: sqlite3.Connection, business_id: int, scope_name: str, as
 def _upsert_web_records(conn: sqlite3.Connection, business_id: int,
                          fetched_at: str, web: list[dict[str, Any]]
                         ) -> tuple[dict[str, int], int, list[int]]:
-    """插入 / 刷新 web_hashes + web_subdomains 行；不触碰同业务其它 is_active=1 行。
+    """Insert / refresh the web_hashes + web_subdomains rows; other is_active=1
+    rows of the same business are left alone.
 
     Returns:
       (hash_ids, web_count, new_hash_ids)
-        hash_ids       — 这次扫到的所有 hash (response_hash -> hash_id)
-        web_count      — 写入 / 更新的 web_subdomains 行数
-        new_hash_ids   — 这次扫描**新增**的 web_hashes 行 id（首次出现）
+        hash_ids       — every hash seen in this scan (response_hash -> hash_id)
+        web_count      — the number of web_subdomains rows written / updated
+        new_hash_ids   — the web_hashes row ids **newly** added by this scan
+                         (first appearance)
 
-    由两类调用方使用：
-      1. persist() 内部（cron 全量路径）。persist() 自己负责先 UPDATE ... is_active=0 全清场。
-      2. cmd_scan_onesite（dashboard "加一行看看" 轻量路径）。调用方不做 deactivate。
+    Used by two kinds of caller:
+      1. inside persist() (the cron full path). persist() itself runs the
+         UPDATE ... is_active=0 sweep first.
+      2. cmd_scan_onesite (the lightweight "add one row and look" path from
+         the dashboard). The caller does not deactivate anything.
 
-    每条 record 需要的键：response_hash、host、port、domain（可缺，回退到 host）；
-    可选：url / status_code / content_length / title / technologies / raw_json。
-    response_hash 缺失的 record 会被静默丢弃（与 persist() 原行为一致）。
+    Keys each record needs: response_hash, host, port, domain (optional, falls
+    back to host); optional: url / status_code / content_length / title /
+    technologies / raw_json. A record without response_hash is silently
+    dropped (the same as the original persist() behaviour).
 
-    Caller 负责 commit。本函数不开启 / 提交事务。
+    The caller owns the commit. This function neither opens nor commits a
+    transaction.
 
-    跨项目依赖：
-      `new_hash_ids` 由 persist() 用作参数调
+    Cross-package dependency:
+      persist() passes `new_hash_ids` to
         ../daily/lib/score.py score-new --db <db> --ids <ids>
-      来给新 hash 设初始 score（cron-only）。cmd_scan_onesite() 不调（手动加的
-      不自动评分；运营人员可以在 dashboard 里手动设）。见 README §"Web Hash 评分"。
+      to give the new hashes an initial score (cron only). cmd_scan_onesite()
+      does not call it (a manually added hash is not scored automatically; an
+      operator can set the score by hand in the dashboard). See README
+      "Web Hash scoring".
     """
     hash_ids: dict[str, int] = {}
     seen_hash_counts: dict[int, set[tuple[str, int]]] = {}
@@ -802,8 +875,8 @@ def _upsert_web_records(conn: sqlite3.Connection, business_id: int,
             continue
         response_hash = str(value)
         subdomain = record.get("domain") or record["host"]
-        # 存在性预检：这是 INSERT vs UPDATE 唯一可靠的判别手段
-        # （SQLite 的 ON CONFLICT DO UPDATE 不暴露这个信号）
+        # Existence pre-check: the only reliable way to tell INSERT from UPDATE
+        # (SQLite ON CONFLICT DO UPDATE does not expose that signal)
         existing_hash = conn.execute(
             "SELECT id FROM web_hashes WHERE business_id=? AND response_hash=?",
             (business_id, response_hash),
@@ -885,9 +958,10 @@ def _upsert_web_records(conn: sqlite3.Connection, business_id: int,
             (business_id, subdomain, record["port"]),
         ).fetchone()
         first_seen = existing[0] if existing else fetched_at
-        # 2026-10-03: 写 ips 列(从 httpx JSONL 提取的 host_ip + a[] 数组)。
-        # 优先 record['ips'](parse_json_web 已经从 item 顶层提取),
-        # 若空则 fallback parse raw_json(老数据 / httpx 字段改名时的兜底)。
+        # 2026-10-03: write the ips column (the host_ip + a[] array extracted
+        # from the httpx JSONL). record['ips'] is preferred (parse_json_web
+        # already extracts it from the item top level); when it is empty it falls
+        # back to parsing raw_json (older data / renamed httpx fields).
         ips_value = record.get("ips") or "[]"
         if ips_value == "[]":
             raw = record.get("raw_json")
@@ -951,26 +1025,21 @@ def _upsert_web_records(conn: sqlite3.Connection, business_id: int,
         )
         # Near-duplicate downgrade (live-active path only):
         # If hash_id actually changed AND the previous row was active,
-        # 2026-10-07 refactor: trg_ws_au 已 no-op 化,不再 set change_type=2。
-#     复活位的初值由 Python 显式写 (commit 2)。
-        # Look up the simhash on both sides; if both are present and the
-        # hamming distance is within threshold, the body is "near-duplicate"
-        # (e.g. ad slot, timestamp jitter, CDN whitespace drift) so we
-        # downgrade change_type to 0 to suppress false-positive changes.
-        #
-        # DEPRECATED 2026-09-16: this whole simhash branch has been superseded
-        # by the algo_diff block immediately below. The branch is kept for
-        # now (a) so the existing simhash infrastructure (hash_simhash_map
-        # table + hamming helper) stays documented in source, and (b) as a
-        # fallback if algo_diff is ever disabled. The branch is currently a
-        # no-op — algo_diff owns the final change_type decision. See
+        # 2026-10-07 refactor: trg_ws_au was made a no-op and no longer sets
+        # change_type=2. The initial value of the reactivated bit is now written
+        # explicitly by Python (commit 2).
         # modules/main/daily/lib/algo_diff/README.md for the rationale.
-        # 2026-10-07 refactor: DEPRECATED simhash 近邻降级写 change_type=0 (commit 1 后续).
-        # E 已由 if False 早退,本注释仅为与 B 风格统一,便于 grep 发现。
-        # 原因: import 阶段不应写 change_type=0,按分工 "diff 写 0/2"。
-        # 原 simhash 降级逻辑 (回滚时把 if False 改成 if True: 即可):
-        #   - 取 prior_response_hash 与 new response_hash 的 body_simhash
-        #   - 若 hamming_simhash(...) <= SIMHASH_HAMMING_THRESHOLD 则写 change_type = 0
+        # 2026-10-07 refactor: DEPRECATED, the simhash neighbour downgrade
+        # writing change_type=0 (follow-up to commit 1). Case E already returns
+        # early through `if False`; this comment only exists to match the style
+        # of case B so that it can be found by grep. Reason: the import stage
+        # must not write change_type=0, per the division of labour "diff writes
+        # 0/2". The original simhash downgrade logic (to roll back, change
+        # `if False` to `if True`):
+        #   - take the body_simhash of prior_response_hash and of the new
+        #     response_hash
+        #   - if hamming_simhash(...) <= SIMHASH_HAMMING_THRESHOLD then write
+        #     change_type = 0
         if False and (prior_hash_id is not None
                 and prior_hash_id != hash_id
                 and prior_was_active):
@@ -1028,9 +1097,11 @@ def persist(conn: sqlite3.Connection, business: str, targets: list[str], exclude
 
     conn.execute("UPDATE web_subdomains SET is_active = 0 WHERE business_id = ?", (business_id,))
     conn.execute("UPDATE tcp_assets SET is_active = 0 WHERE business_id = ?", (business_id,))
-    # 2026-10-08: reset ct for this business。临时关闭 trigger + diff.py + algo_diff.write
-    # 路径之后, web_subdomains.change_type 唯一的 reset 入口。后续 diff 阶段
-    # (未开启时) 才从 baseline=0 开始累计 1/2/4/8。
+    # 2026-10-08: reset ct for this business. With the trigger plus the
+    # diff.py and algo_diff.write paths temporarily disabled, this is the
+    # only reset entry point for web_subdomains.change_type. The later diff
+    # stage (when enabled) accumulates 1/2/4/8 starting from a baseline of
+    # 0.
     _cur = conn.execute(
         "UPDATE web_subdomains SET change_type = 0 WHERE business_id = ?",
         (business_id,),
@@ -1054,10 +1125,12 @@ def persist(conn: sqlite3.Connection, business: str, targets: list[str], exclude
         )
         tcp_count += 1
 
-    # --- cron-only: 给新增的 hash 设初始 score ---
-    # 见 README §"Web Hash 评分"。失败时吞掉（best-effort）；import 本身已成功。
-    # Subprocess 调 ../daily/lib/score.py 是跨项目解耦：daily 包可以独立升级，
-    # 这里只关心"有没有给新 hash 打分"。
+    # --- cron-only: give a newly added hash an initial score ---
+    # See README "Web Hash scoring". Failures are swallowed (best-effort);
+    # the import itself has already succeeded. Calling ../daily/lib/score.py
+    # as a subprocess keeps the two packages decoupled: the daily package can
+    # be upgraded on its own, and this side only cares whether a new hash
+    # got scored.
     if _new_hash_ids:
         try:
             score_script = (Path(__file__).resolve().parent.parent
@@ -1090,17 +1163,21 @@ def main() -> int:
     tcp = load_tcp_records(scan_dir, ip_domains)
     missing_hash = sum(1 for item in web if not item.get("response_hash"))
 
-    print(f"业务: {args.business}")
-    print(f"可测范围: {len(targets)}，非可测范围: {len(excludes)}，泛解析域: {len(wildcards)}")
-    print(f"Web 记录: {len(web)}，TCP 记录: {len(tcp)}，缺少 hash 的 Web: {missing_hash}")
+    print(_t("main.import_scan_results.business", {"business": args.business}))
+    print(_t("main.import_scan_results.scope_counts", {
+        "targets": len(targets), "excludes": len(excludes), "wildcards": len(wildcards),
+    }))
+    print(_t("main.import_scan_results.record_counts", {
+        "web": len(web), "tcp": len(tcp), "missing_hash": missing_hash,
+    }))
     if not web and not tcp:
-        print("错误: 没有找到可入库的 Web 或 TCP 结果", file=sys.stderr)
+        print(_t("main.import_scan_results.no_results"), file=sys.stderr)
         return 1
     if missing_hash:
-        print("错误: 存在缺少 httpx response hash 的 Web 记录，拒绝提交", file=sys.stderr)
+        print(_t("main.import_scan_results.missing_hash"), file=sys.stderr)
         return 1
     if args.dry_run:
-        print("dry-run：未写入数据库，未删除扫描文件")
+        print(_t("main.import_scan_results.dry_run_note"))
         return 0
 
     db_path = Path(args.db).expanduser().resolve()
@@ -1112,38 +1189,39 @@ def main() -> int:
             web_count, tcp_count = persist(conn, args.business, targets, excludes, web, tcp, wildcards)
     except (sqlite3.Error, OSError, ValueError, KeyError) as exc:
         conn.rollback()
-        print(f"入库失败，扫描文件已保留: {exc}", file=sys.stderr)
+        print(_t("main.import_scan_results.store_failed", {"exc": exc}), file=sys.stderr)
         return 1
     finally:
         conn.close()
 
-    print(f"入库成功: Web {web_count} 条，TCP {tcp_count} 条")
+    print(_t("main.import_scan_results.store_ok", {"web_count": web_count, "tcp_count": tcp_count}))
     return 0
 
 
 # ---------------------------------------------------------------------------
-# scan-onesite 子命令（轻量模式）
+# the scan-onesite subcommand (lightweight mode)
 # ---------------------------------------------------------------------------
-# 不走 dnsx / cdnmatch / naabu 等前置阶段。直接 subprocess 跑 httpx，结果用
-# _upsert_web_records() 写两行表。**不** 触发 persist() 的 is_active=0 清场，
-# 调用方只用一次 BEGIN/COMMIT 把 web_records 落库，commit 退出即结束。
-# ---------------------------------------------------------------------------
+# It skips the dnsx / cdnmatch / naabu prerequisite stages and runs
+# httpx as a subprocess directly; the result is written to the two
+# tables by _upsert_web_records(). It deliberately does NOT trigger the
+# is_active=0 cleanup in persist(); the caller wraps the web_records
+# write in a single BEGIN/COMMIT and the process ends at the commit.
 
 def _parse_scan_onesite_args(argv: list[str]) -> argparse.Namespace:
-    """scan-onesite 子命令的 argparse。与 main() 的 parse_args() 不共享。"""
+    """The argparse setup for the scan-onesite subcommand. Not shared with the parse_args() in main()."""
     parser = argparse.ArgumentParser(
         prog="import_scan_results.py scan-onesite",
-        description="仅扫描增量域名并入库（同业务其它 is_active=1 行不动）",
+        description=_t("main.import_scan_results.onesite_desc"),
     )
-    parser.add_argument("--business", required=True, help="业务名")
+    parser.add_argument("--business", required=True, help=_t("main.import_scan_results.onesite_arg_business"))
     parser.add_argument("--hosts-file", required=True, type=Path,
-                        help="一行一个域名的输入文件，可写 # 注释")
-    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help="SQLite 数据库路径")
+                        help=_t("main.import_scan_results.onesite_arg_hosts"))
+    parser.add_argument("--db", default=os.environ.get("DB") or os.environ.get("RECON_DB") or str(DEFAULT_DB), help=_t("main.import_scan_results.onesite_arg_db"))
     return parser.parse_args(argv)
 
 
 def _read_hosts_file(path: Path) -> list[str]:
-    """读 hosts 文件：跳过空行 + # 注释；去重保序；strip 小写；去尾点。"""
+    """Read the hosts file: skip blank lines and # comments; deduplicate keeping the order; strip and lowercase; drop the trailing dot."""
     seen: set[str] = set()
     result: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -1158,17 +1236,19 @@ def _read_hosts_file(path: Path) -> list[str]:
 
 
 def _run_httpx(hosts: list[str]) -> list[dict[str, Any]]:
-    """同步跑 httpx → 解析 JSONL → 返回 web_records。
+    """Run httpx and parse the JSONL in one go, returning the web_records.
 
-    失败模式：FileNotFoundError / TimeoutExpired / 非零退出且空 stdout
-    均抛 RuntimeError，由调用方映射成 exit code。
+    Failure modes: FileNotFoundError / TimeoutExpired / a non-zero exit with
+    empty stdout all raise RuntimeError, which the caller maps onto an exit
+    code.
     """
     if not Path(HTTPX_BIN).exists():
-        raise RuntimeError(f"找不到 httpx：{HTTPX_BIN}")
+        raise RuntimeError(_t("main.import_scan_results.httpx_not_found", {"bin": HTTPX_BIN}))
 
     stdin_blob = ("\n".join(hosts) + "\n").encode("utf-8")
-    # 不带 -l:httpx 默认从 stdin 读 host 列表。scanner.sh 用 -l <file> + < /dev/null;
-    # 这里走"无临时文件"路线,完全靠 input= 喂 stdin。
+    # Without -l, httpx reads the host list from stdin by default.
+    # scanner.sh uses -l <file> plus < /dev/null; here the "no temporary
+    # file" route is taken and stdin is fed entirely through input=.
     cmd = [HTTPX_BIN,
            "-sc", "-cl", "-title", "-hash", "mmh3",
            "-random-agent", "-follow-redirects", "-max-redirects", "3",
@@ -1180,13 +1260,13 @@ def _run_httpx(hosts: list[str]) -> list[dict[str, Any]]:
             capture_output=True, timeout=HTTPX_TIMEOUT, check=False,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError(f"无法启动 httpx：{exc}") from exc
+        raise RuntimeError(_t("main.import_scan_results.httpx_start_failed", {"error": exc})) from exc
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"httpx 超时（{HTTPX_TIMEOUT}s）") from exc
+        raise RuntimeError(_t("main.import_scan_results.httpx_timeout", {"timeout": HTTPX_TIMEOUT})) from exc
 
     if proc.returncode != 0 and not proc.stdout:
         err = proc.stderr.decode("utf-8", "replace").strip() or f"exit={proc.returncode}"
-        raise RuntimeError(f"httpx 失败：{err[:300]}")
+        raise RuntimeError(_t("main.import_scan_results.httpx_failed", {"error": err[:300]}))
 
     tmp_path: Path | None = None
     try:
@@ -1196,7 +1276,7 @@ def _run_httpx(hosts: list[str]) -> list[dict[str, Any]]:
         try:
             return parse_json_web(tmp_path)
         except (ValueError, OSError) as exc:
-            raise RuntimeError(f"解析 httpx 输出失败：{exc}") from exc
+            raise RuntimeError(_t("main.import_scan_results.httpx_output_failed", {"error": exc})) from exc
     finally:
         if tmp_path is not None:
             try:
@@ -1206,45 +1286,50 @@ def _run_httpx(hosts: list[str]) -> list[dict[str, Any]]:
 
 
 def cmd_scan_onesite(args: argparse.Namespace) -> int:
-    """仅 httpx 扫描指定 hosts → web_hashes + web_subdomains；不动 is_active 其它行。"""
+    """Scan only the given hosts with httpx -> web_hashes + web_subdomains; the other is_active rows are left alone."""
     db_path = Path(args.db).expanduser().resolve()
     business = args.business
 
-    # 1) 读 + 校验 hosts
+    # 1) read and validate the hosts
     hosts_file = args.hosts_file.expanduser().resolve()
     if not hosts_file.exists():
-        sys.stderr.write(f"错误：找不到 hosts 文件：{hosts_file}\n")
+        sys.stderr.write(_t("main.import_scan_results.hosts_file_missing", {"file": hosts_file}) + "\n")
         return 2
     hosts = _read_hosts_file(hosts_file)
     if not hosts:
-        sys.stderr.write("错误：hosts 文件为空（全部是空行 / 注释）\n")
+        sys.stderr.write(_t("main.import_scan_results.hosts_file_empty") + "\n")
         return 2
     if len(hosts) > MAX_HOSTS:
-        sys.stderr.write(f"错误：域名数量 {len(hosts)} 超过上限 {MAX_HOSTS}\n")
+        sys.stderr.write(_t("main.import_scan_results.too_many_domains", {
+            "count": len(hosts), "max": MAX_HOSTS,
+        }) + "\n")
         return 2
     invalid = [h for h in hosts if not HOSTNAME_RE.match(h)]
     if invalid:
         sys.stderr.write(
-            f"错误：hostname 不合法：{', '.join(invalid[:5])}\n"
+            _t("main.import_scan_results.invalid_hostname", {"hosts": ", ".join(invalid[:5])}) + "\n"
         )
         return 2
 
-    # 2) 跑 httpx
+    # 2) run httpx
     try:
         web_records = _run_httpx(hosts)
     except RuntimeError as exc:
         sys.stderr.write(f"{exc}\n")
         return 3
 
-    # 3) 入库（PRAGMA + with conn: 包事务；不解锁/不刷 tcp_assets）
+    # 3) write to the database (PRAGMA plus `with conn:` wraps the
+    # transaction; no unlock and no refresh of tcp_assets)
     fetched_at = now()
     conn = sqlite3.connect(db_path)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         with conn:
             create_tables(conn)
-            # businesses 表平时由 ymicp 拥有 / 共享方维护;scan-onesite 是任意时刻入口,
-            # 兜底建一下(缺则建,否则什么都不做),避免改其它项目的 DDL。
+            # The businesses table is normally owned by ymicp and maintained by the
+            # shared side; scan-onesite is an entry point that may run at any time,
+            # so the table is created as a fallback (created when missing, otherwise
+            # nothing happens) to avoid changing another project's DDL.
             cols = {row[1] for row in conn.execute(
                 "PRAGMA table_info(businesses)").fetchall()}
             if "business_name" not in cols:
@@ -1266,22 +1351,25 @@ def cmd_scan_onesite(args: argparse.Namespace) -> int:
                     (business,),
                 ).fetchone()
             business_id = int(bid[0])
-            # scan-onesite: 不调 score.py（手动加的 hash 留给运营在 dashboard 手动设分）
+            # scan-onesite: does not call score.py (a manually added hash is left
+            # for the operator to score by hand in the dashboard)
             _upsert_web_records(conn, business_id, fetched_at, web_records)
     except sqlite3.Error as exc:
-        sys.stderr.write(f"错误：入库失败：{exc}\n")
+        sys.stderr.write(_t("main.import_scan_results.write_failed", {"error": exc}) + "\n")
         return 1
     finally:
         conn.close()
 
     sys.stdout.write(
-        f"[+] 扫描完成：{len(web_records)} 条写入 {business} (业务 id={business_id})\n"
+        _t("main.import_scan_results.scan_done", {
+            "count": len(web_records), "business": business, "business_id": business_id,
+        }) + "\n"
     )
     return 0
 
 
 def _dispatch() -> int:
-    """argv 首位为 'scan-onesite' 走轻量；其它（无参 / --business / --scan-dir）保留原 main() 行为。"""
+    """When the first argv element is 'scan-onesite' take the lightweight path; otherwise (no argument / --business / --scan-dir) keep the original main() behaviour."""
     if len(sys.argv) > 1 and sys.argv[1] == "scan-onesite":
         sub_args = _parse_scan_onesite_args(sys.argv[2:])
         return cmd_scan_onesite(sub_args)

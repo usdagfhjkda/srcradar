@@ -1,25 +1,30 @@
 """
-modules/public/health/lib/health_check.py — 5 项健康检查 + 报告渲染
+modules/public/health/lib/health_check.py — the 5 health checks + the report
+rendering
 
-检查项:
-    1. disk       df -P 解析,挑 ≥阈值 的挂载点
-    2. cpu        uptime load avg (1m/5m/15m) + top -bn1 瞬时占用
-    3. memory     /proc/meminfo 计算 (Total - Available) / Total
-    4. cron       crontab -l 解析,看每个任务日志 mtime
-    5. dashboard  pgrep 检测 python3 lib/dashboard.py
+The checks:
+    1. disk       the df -P parsing, it picks the mount points over the threshold
+    2. cpu        the uptime load avg (1m/5m/15m) + the instantaneous usage of
+                  top -bn1
+    3. memory     the /proc/meminfo computation (Total - Available) / Total
+    4. cron       the crontab -l parsing, it looks at the log mtime of every task
+    5. dashboard  pgrep detects python3 lib/dashboard.py
 
-每个 check 函数独立 try/except,失败也返回 Finding(severity=alert)
-而不抛出 → 单项异常不拖垮其他检查。
+Every check function has its own try/except and returns a
+Finding(severity=alert) on a failure
+instead of raising -> a single anomaly does not take the other checks down.
 
-用法:
+Usage:
     python3 health_check.py [--config <health.conf>] [--dryrun] [--run-id <id>] [--date-ph <ph>] [--out <path>]
-    --config  用指定 conf(默认 config/health.conf.example 的 DEFAULT 即可跑通)
-    --dryrun  只生成 health_report.md,不调 notify_send.sh
-    --run-id  自定义 run_id (默认时间戳)
-    --date-ph 自定义 date 占位符 (默认 %Y-%m-%d)
-    --out     自定义报告输出路径 (默认 logs/health_report.md)
+    --config  use the given conf (the DEFAULT of
+              config/health.conf.example is enough to run it)
+    --dryrun  only generate health_report.md, do not call notify_send.sh
+    --run-id  a custom run_id (the timestamp by default)
+    --date-ph a custom date placeholder (%Y-%m-%d by default)
+    --out     a custom report output path (logs/health_report.md by default)
 
-退出码:0=ok 1=参数 3=某 check 自身抛异常(已写 alert Finding)
+Exit codes: 0=ok 1=arguments 3=a check raised on its own (an alert Finding
+was written)
 """
 from __future__ import annotations
 
@@ -34,8 +39,16 @@ import sys
 import time
 from pathlib import Path
 from collections.abc import Iterable
+# The i18n lookup lives in modules/main/lib, which is not on sys.path at this
+# depth. Walk up to the repo root (the directory that holds "modules") and add
+# the lib directory to the path.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "modules").is_dir():
+        sys.path.insert(0, str(_p / "modules" / "main" / "lib"))
+        break
+from i18n import t
 
-# 本模块路径相关
+# the paths that are relative to this module
 SCRIPT_DIR = Path(__file__).resolve().parent
 HEALTH_DIR = SCRIPT_DIR.parent  # modules/public/health
 REPO_ROOT = HEALTH_DIR.parent.parent.parent  # srcradar/
@@ -44,7 +57,7 @@ DEFAULT_CONFIG = HEALTH_DIR / "config" / "health.conf"
 EXAMPLE_CONFIG = HEALTH_DIR / "config" / "health.conf.example"
 LOG_DIR = HEALTH_DIR / "logs"
 
-# 让 "from health_config import parse_config" / "from thresholds import ..." 可用
+# it makes "from health_config import parse_config" / "from thresholds import ..." available
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -59,8 +72,8 @@ from thresholds import merge_with_defaults  # noqa: E402
 class Finding:
     severity: str  # 'ok' | 'warn' | 'alert'
     check: str     # 'disk' | 'cpu' | 'memory' | 'cron' | 'dashboard'
-    message: str   # 简短一句话(进入邮件正文)
-    detail: str    # 详细数值 / 路径(只进附件)
+    message: str   # a short one-liner (it goes into the body of the mail)
+    detail: str    # the detailed numbers / paths (they only go into the attachment)
 
     def to_row(self) -> str:
         return f"| {self.severity.upper()} | {self.check} | {self.message} | {self.detail} |"
@@ -70,7 +83,7 @@ class Finding:
 
 
 def _safe_run(cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
-    """subprocess.run 包裹,统一 shell=False,失败不抛。"""
+    """A subprocess.run wrapper, it unifies shell=False and does not raise on a failure."""
     try:
         cp = subprocess.run(
             cmd,
@@ -89,7 +102,7 @@ def _nproc() -> int:
     rc, out, _ = _safe_run(["nproc"])
     if rc == 0 and out.strip().isdigit():
         return max(1, int(out.strip()))
-    # 兜底:读 /proc/cpuinfo
+    # the fallback: read /proc/cpuinfo
     try:
         return max(1, sum(1 for _ in Path("/proc/cpuinfo").open(encoding="utf-8", errors="replace") if _.startswith("processor")))
     except OSError:
@@ -100,7 +113,7 @@ def _nproc() -> int:
 
 
 def check_disk(thresholds: dict) -> list[Finding]:
-    """df -P 解析;阈值表见 thresholds.DISK_WARN_PCT / DISK_ALERT_PCT。"""
+    """The df -P parsing; the threshold table is in thresholds.DISK_WARN_PCT / DISK_ALERT_PCT."""
     findings: list[Finding] = []
     warn_pct = int(thresholds.get("DISK_WARN_PCT", 80))
     alert_pct = int(thresholds.get("DISK_ALERT_PCT", 90))
@@ -109,16 +122,16 @@ def check_disk(thresholds: dict) -> list[Finding]:
     if rc != 0 or not out:
         findings.append(Finding(
             severity="alert", check="disk",
-            message="df 命令执行失败",
+            message=t("public.health_check.disk.df_failed"),
             detail=f"rc={rc} stderr={err.strip()[:200]}",
         ))
         return findings
 
-    # df -P 输出:Filesystem 1024-blocks Used Available Capacity Mounted on
-    # 第 5 列是 '78%' 这种;挂载点可能含空格
+    # the df -P output: Filesystem 1024-blocks Used Available Capacity Mounted on
+    # the 5th column looks like '78%'; the mount point can contain spaces
     lines = out.splitlines()
     if len(lines) < 2:
-        findings.append(Finding("alert", "disk", "df 输出为空", out[:200]))
+        findings.append(Finding("alert", "disk", t("public.health_check.disk.df_empty"), out[:200]))
         return findings
 
     parsed: list[tuple[str, int, str]] = []  # (mountpoint, used_pct, raw_line)
@@ -131,15 +144,18 @@ def check_disk(thresholds: dict) -> list[Finding]:
         if not m:
             continue
         used = int(m.group(1))
-        mount = " ".join(parts[5:])  # 处理 'name=partlabel' 这类带 = 的挂载点
+        mount = " ".join(parts[5:])  # it handles the mount points with an = in them, such as "name=partlabel"
         parsed.append((mount, used, line))
 
     bad = [p for p in parsed if p[1] >= warn_pct]
     if not bad:
         findings.append(Finding(
             severity="ok", check="disk",
-            message=f"所有挂载点 < {warn_pct}%",
-            detail=f"共 {len(parsed)} 个挂载点,最大占用 {max((p[1] for p in parsed), default=0)}%",
+            message=t("public.health_check.disk.all_below", {"pct": warn_pct}),
+            detail=t(
+                "public.health_check.disk.all_below_detail",
+                {"count": len(parsed), "max": max((p[1] for p in parsed), default=0)},
+            ),
         ))
         return findings
 
@@ -147,7 +163,7 @@ def check_disk(thresholds: dict) -> list[Finding]:
         sev = "alert" if used >= alert_pct else "warn"
         findings.append(Finding(
             severity=sev, check="disk",
-            message=f"挂载点 {mount} 占用 {used}% (>{warn_pct}%)",
+            message=t("public.health_check.disk.mount_over_threshold", {"mount": mount, "used": used, "pct": warn_pct}),
             detail=raw.strip(),
         ))
     return findings
@@ -160,7 +176,7 @@ _CPU_PCT_RE = re.compile(r"([\d.]+)\s*id")  # idle value in top's %Cpu line
 
 
 def check_cpu(thresholds: dict) -> list[Finding]:
-    """uptime load avg (1m/5m/15m) + top -bn1 瞬时占用。"""
+    """The uptime load avg (1m/5m/15m) + the instantaneous usage of top -bn1."""
     findings: list[Finding] = []
     load5_per_nproc_limit = float(thresholds.get("CPU_LOAD5_PER_NPROC", 2.0))
     cpu_pct_alert = int(thresholds.get("CPU_PCT_ALERT", 95))
@@ -172,13 +188,17 @@ def check_cpu(thresholds: dict) -> list[Finding]:
     if rc != 0 or not out:
         findings.append(Finding(
             severity="alert", check="cpu",
-            message="uptime 命令执行失败",
+            message=t("public.health_check.cpu.uptime_failed"),
             detail=f"rc={rc} stderr={err.strip()[:200]}",
         ))
     else:
         m = re.search(r"load average:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)", out)
         if not m:
-            findings.append(Finding("alert", "cpu", "load average 解析失败", out.strip()[:200]))
+            findings.append(Finding(
+                "alert", "cpu",
+                t("public.health_check.cpu.loadavg_parse_failed"),
+                out.strip()[:200],
+            ))
         else:
             l1, l5, l15 = float(m.group(1)), float(m.group(2)), float(m.group(3))
             ratio5 = l5 / n
@@ -196,33 +216,41 @@ def check_cpu(thresholds: dict) -> list[Finding]:
                     detail=detail,
                 ))
 
-    # ---- 瞬时 CPU 占用(top -bn1)----
+    # ---- the instantaneous CPU usage (top -bn1) ----
     if not shutil.which("top"):
-        findings.append(Finding("alert", "cpu", "top 命令不存在", "瞬时 CPU 占用无法采集"))
+        findings.append(Finding(
+            "alert", "cpu",
+            t("public.health_check.cpu.top_missing"),
+            t("public.health_check.cpu.top_missing_detail"),
+        ))
         return findings
 
     rc, out, err = _safe_run(["top", "-bn1"])
     if rc != 0 or not out:
         findings.append(Finding(
             severity="alert", check="cpu",
-            message="top -bn1 执行失败",
+            message=t("public.health_check.cpu.top_failed"),
             detail=f"rc={rc} stderr={err.strip()[:200]}",
         ))
         return findings
 
-    # top -bn1 的 %Cpu 行: "%Cpu(s):  1.2 us,  0.5 sy,  0.0 ni, 98.0 id, ..."
+    # the %Cpu line of top -bn1: "%Cpu(s):  1.2 us,  0.5 sy,  0.0 ni, 98.0 id, ..."
     cpu_line = ""
     for line in out.splitlines():
         if line.startswith("%Cpu"):
             cpu_line = line
             break
     if not cpu_line:
-        findings.append(Finding("alert", "cpu", "%Cpu 行未找到", out.splitlines()[0][:200]))
+        findings.append(Finding(
+            "alert", "cpu",
+            t("public.health_check.cpu.pct_line_missing"),
+            out.splitlines()[0][:200],
+        ))
         return findings
 
     m = _CPU_PCT_RE.search(cpu_line)
     if not m:
-        findings.append(Finding("alert", "cpu", "idle 字段未找到", cpu_line[:200]))
+        findings.append(Finding("alert", "cpu", t("public.health_check.cpu.idle_field_missing"), cpu_line[:200]))
         return findings
 
     idle = float(m.group(1))
@@ -231,13 +259,13 @@ def check_cpu(thresholds: dict) -> list[Finding]:
     if used >= cpu_pct_alert:
         findings.append(Finding(
             severity="warn", check="cpu",
-            message=f"瞬时 CPU 占用 {used:.1f}% (>{cpu_pct_alert}%)",
+            message=t("public.health_check.cpu.usage_over_threshold", {"used": f"{used:.1f}", "pct": cpu_pct_alert}),
             detail=detail,
         ))
     else:
         findings.append(Finding(
             severity="ok", check="cpu",
-            message=f"瞬时 CPU 占用 {used:.1f}%",
+            message=t("public.health_check.cpu.usage", {"used": f"{used:.1f}"}),
             detail=detail,
         ))
     return findings
@@ -247,7 +275,7 @@ def check_cpu(thresholds: dict) -> list[Finding]:
 
 
 def check_memory(thresholds: dict) -> list[Finding]:
-    """/proc/meminfo 计算 (Total - Available) / Total。"""
+    """The /proc/meminfo computation (Total - Available) / Total."""
     findings: list[Finding] = []
     alert_pct = int(thresholds.get("MEM_ALERT_PCT", 90))
 
@@ -256,7 +284,7 @@ def check_memory(thresholds: dict) -> list[Finding]:
     except OSError as exc:
         findings.append(Finding(
             severity="alert", check="memory",
-            message="/proc/meminfo 读取失败",
+            message=t("public.health_check.memory.meminfo_read_failed"),
             detail=str(exc),
         ))
         return findings
@@ -272,7 +300,7 @@ def check_memory(thresholds: dict) -> list[Finding]:
     if total <= 0 or avail < 0:
         findings.append(Finding(
             severity="alert", check="memory",
-            message="MemTotal/MemAvailable 缺失",
+            message=t("public.health_check.memory.total_available_missing"),
             detail=f"keys={list(kv.keys())[:8]}",
         ))
         return findings
@@ -285,13 +313,13 @@ def check_memory(thresholds: dict) -> list[Finding]:
     if used_pct >= alert_pct:
         findings.append(Finding(
             severity="alert", check="memory",
-            message=f"内存使用 {used_pct:.1f}% (>={alert_pct}%)",
+            message=t("public.health_check.memory.usage_over_threshold", {"used": f"{used_pct:.1f}", "pct": alert_pct}),
             detail=detail,
         ))
     else:
         findings.append(Finding(
             severity="ok", check="memory",
-            message=f"内存使用 {used_pct:.1f}%",
+            message=t("public.health_check.memory.usage", {"used": f"{used_pct:.1f}"}),
             detail=detail,
         ))
     return findings
@@ -301,8 +329,10 @@ def check_memory(thresholds: dict) -> list[Finding]:
 
 
 def _redact_cmd(cmd: str) -> str:
-    """脱敏:从 cron 命令行里提取 basename,避免路径(含 the repo root's  等)
-    出现在 Finding 的 message 字段。完整路径只在加密附件 health_report.md 里。
+    """Redaction: it takes the basename out of the cron command line, so that a
+    path (with the repo root in it)
+    does not end up in the message field of a Finding. The full path is only in the
+    encrypted attachment health_report.md.
     """
     if not cmd:
         return "?"
@@ -311,24 +341,26 @@ def _redact_cmd(cmd: str) -> str:
 
 
 def _parse_crontab(text: str) -> list[dict]:
-    """简化版 crontab 解析 — 仅提取非空非注释行的 command 字段。
+    """A simplified crontab parsing — it only extracts the command field of the
+    lines that are neither empty nor a comment.
 
-    5 个时间字段 + 命令(命令可能含空格)。不严格处理 '&&' / 重定向,
-    只把 'm h dom mon dow' 后面的整段当作命令。
+    5 time fields + the command (the command can contain spaces). It does not
+    handle '&&' / the redirections strictly,
+    it just takes everything after 'm h dom mon dow' as the command.
     """
     out = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        # 跳过环境变量赋值 (KEY=VAL)
+        # the environment variable assignments (KEY=VAL) are skipped
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", line):
             continue
-        # 至少 5 个时间字段开头
+        # it has to start with at least 5 time fields
         parts = line.split(None, 5)
         if len(parts) < 6:
             continue
-        # 5 个时间字段开头必须是数字/*/,/-
+        # the 5 time fields have to start with a digit/*/,/-
         head_ok = True
         for tok in parts[:5]:
             if not re.match(r"^[\d\*\/,\-]+$", tok):
@@ -345,22 +377,23 @@ def _parse_crontab(text: str) -> list[dict]:
 
 
 def _extract_log_paths(cmd: str, repo_root: Path) -> list[Path]:
-    """从 cron 命令里尽量提日志文件路径(很粗略,启发式)。
+    """Extract the log file path from the cron command as far as possible (it is
+    very rough, a heuristic).
 
-    策略:
-        1. 形如 '>> <path>' '>>=<path>' '< <path>' 后跟的 token
-        2. 直接传 .log / .txt 路径
-        3. 解析后若有相对路径,以 repo_root 解析
+    The strategy:
+        1. the token after a '>> <path>' / '>>=<path>' / '< <path>'
+        2. a path that is passed directly and ends in .log / .txt
+        3. when the parsed path is relative it is resolved against repo_root
     """
     candidates: list[Path] = []
     tokens = shlex.split(cmd, posix=True) if cmd else []
     for i, tok in enumerate(tokens):
-        # 重定向: >> / >>= 后第一个 token
+        # the redirection: the first token after >> / >>= 
         if tok in (">>", ">>=", ">", "1>>", "2>>") and i + 1 < len(tokens):
             candidates.append(Path(tokens[i + 1]))
         if tok.startswith(">>") and len(tok) > 2:
             candidates.append(Path(tok[2:]))
-        # 直接是 *.log / *.txt
+        # it is directly a *.log / *.txt
         if tok.endswith((".log", ".txt")):
             candidates.append(Path(tok))
 
@@ -375,38 +408,38 @@ def _extract_log_paths(cmd: str, repo_root: Path) -> list[Path]:
 
 
 def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Path | None = None) -> list[Finding]:
-    """crontab -l 解析 + 预置日志列表 mtime 检测。"""
+    """The crontab -l parsing + the mtime detection of the preset log list."""
     findings: list[Finding] = []
     repo_root = repo_root or REPO_ROOT
 
     # ---- crontab -l ----
     rc, out, err = _safe_run(["crontab", "-l"])
     if rc != 0:
-        # 没有 crontab 是合法状态
+        # no crontab at all is a legal state
         if "no crontab" in err.lower() or not out.strip():
             findings.append(Finding(
                 severity="ok", check="cron",
-                message="当前用户无 crontab",
+                message=t("public.health_check.cron.no_crontab"),
                 detail=err.strip()[:200] or "(empty)",
             ))
         else:
             findings.append(Finding(
                 severity="warn", check="cron",
-                message="crontab -l 失败",
+                message=t("public.health_check.cron.list_failed"),
                 detail=f"rc={rc} stderr={err.strip()[:200]}",
             ))
     else:
         entries = _parse_crontab(out)
         if not entries:
-            findings.append(Finding("ok", "cron", "crontab 无任务", ""))
+            findings.append(Finding("ok", "cron", t("public.health_check.cron.no_tasks"), ""))
         else:
             findings.append(Finding(
                 severity="ok", check="cron",
-                message=f"crontab 解析到 {len(entries)} 条任务",
+                message=t("public.health_check.cron.task_count", {"count": len(entries)}),
                 detail="\n".join(f"{e['schedule']}  {_redact_cmd(e['command'])}" for e in entries),
             ))
 
-    # ---- 日志 mtime 检测 ----
+    # ---- the log mtime detection ----
     log_paths: list[Path] = []
     for raw in watched_logs:
         p = Path(raw)
@@ -417,12 +450,13 @@ def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Pat
     now = time.time()
     for p in log_paths:
         if not p.exists():
-            # 脱敏:message 只显示 basename(不含 the repo root's  等敏感根);
-            # 完整 path 仅出现在加密附件里
+            # redaction: the message only shows the basename (not the sensitive root
+            # with the repo root in it);
+            # the full path only appears in the encrypted attachment
             findings.append(Finding(
                 severity="warn", check="cron",
-                message=f"日志不存在: {p.name}",
-                detail=f"max_age_hours={max_age_hours} (path 脱敏)",
+                message=t("public.health_check.cron.log_missing", {"name": p.name}),
+                detail=t("public.health_check.cron.log_missing_detail", {"hours": max_age_hours}),
             ))
             continue
         try:
@@ -430,22 +464,25 @@ def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Pat
         except OSError as exc:
             findings.append(Finding(
                 severity="warn", check="cron",
-                message=f"日志 stat 失败: {p.name}",
+                message=t("public.health_check.cron.log_stat_failed", {"name": p.name}),
                 detail=str(exc),
             ))
             continue
         age_h = (now - st.st_mtime) / 3600.0
         if age_h > max_age_hours:
-            # message 已脱敏(只用 basename),detail 含完整 path(仅在加密附件里)
+            # the message is redacted (the basename only), the detail holds the full path (only in the encrypted attachment)
             findings.append(Finding(
                 severity="warn", check="cron",
-                message=f"日志 {p.name} 已 {age_h:.1f}h 未更新 (>{max_age_hours}h)",
+                message=t(
+                    "public.health_check.cron.log_stale",
+                    {"name": p.name, "age": f"{age_h:.1f}", "hours": max_age_hours},
+                ),
                 detail=f"mtime_age_hours={age_h:.2f} path={p}",
             ))
         else:
             findings.append(Finding(
                 severity="ok", check="cron",
-                message=f"日志 {p.name} 年龄 {age_h:.1f}h",
+                message=t("public.health_check.cron.log_age", {"name": p.name, "age": f"{age_h:.1f}"}),
                 detail=f"mtime_age_hours={age_h:.2f} path={p}",
             ))
     return findings
@@ -455,15 +492,17 @@ def check_cron(watched_logs: Iterable[str], max_age_hours: float, repo_root: Pat
 
 
 def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Finding]:
-    """pgrep 检测 python3 lib/dashboard.py + dashboard_watchdog.log mtime。"""
+    """pgrep detects python3 lib/dashboard.py + the mtime of dashboard_watchdog.log."""
     findings: list[Finding] = []
     repo_root = repo_root or REPO_ROOT
     max_age_hours = float(thresholds.get("CRON_MAX_AGE_HOURS", 25))
 
-    # ---- 进程检测 ----
-    # pgrep -f 会匹配自己的 argv(含 "python3 lib/dashboard.py"),导致假阳性。
-    # 直接扫 /proc/*/cmdline,只保留前 16 字节含 "python3" 且整 cmdline 末段
-    # 含 "lib/dashboard.py" 的进程。
+    # ---- the process detection ----
+    # pgrep -f matches its own argv (which holds "python3 lib/dashboard.py"),
+    # which gives a false positive.
+    # it scans /proc/*/cmdline directly, keeping only the processes whose first
+    # 16 bytes hold "python3" and whose last cmdline segment
+    # holds "lib/dashboard.py".
     pattern = "python3 lib/dashboard.py"
     pids: list[str] = []
     try:
@@ -482,13 +521,13 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
     if not pids:
         findings.append(Finding(
             severity="alert", check="dashboard",
-            message="dashboard 进程未运行",
+            message=t("public.health_check.dashboard.not_running"),
             detail=f"pattern={pattern!r} scanned=/proc/*/cmdline",
         ))
     else:
         findings.append(Finding(
             severity="ok", check="dashboard",
-            message=f"dashboard 运行中 (pid={','.join(pids)})",
+            message=t("public.health_check.dashboard.running", {"pid": ",".join(pids)}),
             detail=f"pattern={pattern!r} pids={pids}",
         ))
 
@@ -497,7 +536,7 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
     if not log_path.exists():
         findings.append(Finding(
             severity="warn", check="dashboard",
-            message=f"watchdog 日志不存在: {log_path.name}",
+            message=t("public.health_check.dashboard.watchdog_log_missing", {"name": log_path.name}),
             detail=f"path={log_path}",
         ))
     else:
@@ -506,7 +545,7 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
         except OSError as exc:
             findings.append(Finding(
                 severity="warn", check="dashboard",
-                message="watchdog 日志 stat 失败",
+                message=t("public.health_check.dashboard.watchdog_log_stat_failed"),
                 detail=str(exc),
             ))
         else:
@@ -514,14 +553,17 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
                 findings.append(Finding(
                     severity="alert",
                     check="dashboard",
-                    message=f"watchdog 日志已 {age_h:.1f}h 未更新 (>{max_age_hours}h)",
+                    message=t(
+                        "public.health_check.dashboard.watchdog_log_stale",
+                        {"age": f"{age_h:.1f}", "hours": max_age_hours},
+                    ),
                     detail=f"path={log_path} mtime_age_hours={age_h:.2f}",
                 ))
             else:
                 findings.append(Finding(
                     severity="ok",
                     check="dashboard",
-                    message=f"watchdog 日志年龄 {age_h:.1f}h",
+                    message=t("public.health_check.dashboard.watchdog_log_age", {"age": f"{age_h:.1f}"}),
                     detail=f"path={log_path} mtime_age_hours={age_h:.2f}",
                 ))
     return findings
@@ -531,7 +573,7 @@ def check_dashboard(thresholds: dict, repo_root: Path | None = None) -> list[Fin
 
 
 def run_all(thresholds: dict, repo_root: Path | None = None) -> list[Finding]:
-    """依次跑 5 个 check;每个 try/except 隔离,失败也返回 alert Finding。"""
+    """Run the 5 checks one after the other; every one is isolated by its own try/except, and a failure also returns an alert Finding."""
     findings: list[Finding] = []
     checks = [
         ("disk",      lambda: check_disk(thresholds)),
@@ -547,10 +589,10 @@ def run_all(thresholds: dict, repo_root: Path | None = None) -> list[Finding]:
     for name, fn in checks:
         try:
             sub = fn()
-        except Exception as exc:  # noqa: BLE001 - 故意吃掉所有异常
+        except Exception as exc:  # noqa: BLE001 - it swallows every exception on purpose
             sub = [Finding(
                 severity="alert", check=name,
-                message=f"{name} 检查自身抛异常",
+                message=t("public.health_check.runner.check_raised", {"name": name}),
                 detail=f"{type(exc).__name__}: {exc}",
             )]
         findings.extend(sub)
@@ -561,7 +603,7 @@ def run_all(thresholds: dict, repo_root: Path | None = None) -> list[Finding]:
 
 
 def render_report(findings: list[Finding], run_id: str, date_ph: str) -> str:
-    """渲染完整 health_report.md(附件内容);脱敏版另由 caller 写 body。"""
+    """Render the full health_report.md (the attachment content); the redacted version is written as the body by the caller."""
     now = dt.datetime.now(dt.timezone.utc).astimezone()
     n_alert = sum(1 for f in findings if f.severity == "alert")
     n_warn = sum(1 for f in findings if f.severity == "warn")
@@ -586,12 +628,14 @@ def render_report(findings: list[Finding], run_id: str, date_ph: str) -> str:
     lines.append("")
     lines.append("## Detailed findings")
     lines.append("")
-    # 不用 markdown 表格 + <details> 折叠(附件里不出现 HTML/markdown 标签);
-    # 改用 bullet list,每项 finding 一段,detail 跟在 message 后面换行。
+    # it does not use a markdown table + a <details> collapse (no HTML/markdown tag
+    # shows up in the attachment);
+    # it uses a bullet list instead, one paragraph per finding, with the detail on
+    # a new line after the message.
     for f in findings:
         lines.append(f"- **{f.severity.upper()}** [{f.check}] {f.message}")
         if f.detail:
-            # detail 内容可能多行,每行前加缩进使查看明确
+            # the detail can span several lines, each one is indented so that it reads clearly
             for d_line in f.detail.splitlines() or [f.detail]:
                 lines.append(f"    {d_line}")
     lines.append("")
@@ -603,9 +647,10 @@ def render_report(findings: list[Finding], run_id: str, date_ph: str) -> str:
 
 
 def render_body(findings: list[Finding], subject_prefix: str, date_ph: str) -> str:
-    """正文脱敏版 — 每异常一行 + 计数,不含详细数值/路径。
+    """The redacted version of the body — one line per anomaly + the counts, without
+    the detailed numbers / paths.
 
-    notify_send.sh 会在外面再 wrap GPG 加密附件。
+    notify_send.sh wraps the GPG encrypted attachment around it.
     """
     lines: list[str] = []
     lines.append(f"{subject_prefix} health {date_ph}")
@@ -633,19 +678,19 @@ def render_body(findings: list[Finding], subject_prefix: str, date_ph: str) -> s
 def _cli() -> int:
     p = argparse.ArgumentParser(
         prog="health_check.py",
-        description="5 项健康检查 + 报告渲染;--dryrun 不调 notify_send.sh",
+        description=t("public.health_check.cli_description"),
     )
     p.add_argument("--config", default=str(DEFAULT_CONFIG),
-                   help=f"conf 路径(默认 {DEFAULT_CONFIG},缺时用 DEFAULT_THRESHOLDS)")
-    p.add_argument("--dryrun", action="store_true", help="只生成报告,不调 notify")
+                   help=t("public.health_check.cli_config_help", {"DEFAULT_CONFIG": DEFAULT_CONFIG}))
+    p.add_argument("--dryrun", action="store_true", help=t("public.health_check.cli_dryrun_help"))
     p.add_argument("--run-id", default=time.strftime("%Y%m%d-%H%M%S"), help="run_id")
-    p.add_argument("--date-ph", default="%Y-%m-%d", help="date 占位符")
+    p.add_argument("--date-ph", default="%Y-%m-%d", help=t("public.health_check.cli_date_placeholder"))
     p.add_argument("--out", default=str(LOG_DIR / "health_report.md"),
-                   help=f"报告输出路径(默认 {LOG_DIR / 'health_report.md'})")
+                   help=t("public.health_check.cli.out_help", {"path": str(LOG_DIR / "health_report.md")}))
     p.add_argument("--notify-script", default=str(NOTIFY_SEND),
-                   help="notify_send.sh 路径(可改)")
+                   help=t("public.health_check.cli_notify_script_help"))
     p.add_argument("--repo-root", default=str(REPO_ROOT),
-                   help="项目根,影响 cron / dashboard 路径解析")
+                   help=t("public.health_check.cli_repo_root_help"))
     args = p.parse_args()
 
     cfg_path = Path(args.config)
@@ -653,9 +698,9 @@ def _cli() -> int:
     if cfg_path.is_file():
         user_dict = parse_config(cfg_path)
         if user_dict is None:
-            print(f"[health] WARN conf parse 失败,回退 DEFAULT: {cfg_path}", file=sys.stderr)
+            print(t("public.health_check.conf_parse_failed", {"cfg_path": cfg_path}), file=sys.stderr)
     else:
-        print(f"[health] INFO conf 不存在({cfg_path}),用 DEFAULT_THRESHOLDS", file=sys.stderr)
+        print(t("public.health_check.conf_missing", {"cfg_path": cfg_path}), file=sys.stderr)
 
     thresholds = merge_with_defaults(user_dict)
 
@@ -677,31 +722,32 @@ def _cli() -> int:
     print(f"[health] findings: alert={n_alert} warn={n_warn} ok={sum(1 for f in findings if f.severity == 'ok')}")
 
     if args.dryrun:
-        print("[health] --dryrun: 跳过 notify_send.sh")
+        print(t("public.health_check.dryrun_skips_notify"))
         return 0
 
     if n_alert == 0 and n_warn == 0:
-        print("[health] 全 OK,不调 notify_send.sh")
+        print(t("public.health_check.all_ok_no_notify"))
         return 0
 
     notify = Path(args.notify_script)
     if not notify.is_file():
-        print(f"[health] WARN notify_send.sh 缺失({notify});跳过推送", file=sys.stderr)
+        print(t("public.health_check.notify_script_missing", {"notify": notify}), file=sys.stderr)
         return 0
 
-    # 调用方式与 daily_monitor 完全一致:
+    # the way it is called is exactly the same as daily_monitor:
     #   bash notify_send.sh <report.md> <business_name> <run_id> <date_ph>
     cmd = ["bash", str(notify), str(out_path), "health", args.run_id, args.date_ph]
-    # health 模块自定义正文:用 lib/health_check.py 已生成的脱敏版 body.md(plain text),
-    # 跳过 notify_send.sh 锁死的 daily diff 模板(详见 notify_send.sh --text-file 参数)
+    # the health module has its own body: the redacted body.md that
+    # lib/health_check.py already generated (plain text),
+    # it skips the daily diff template that notify_send.sh locks in (see the --text-file parameter of notify_send.sh)
     body_md = out_path.parent / "health_report.body.md"
     if body_md.is_file():
         cmd[2:2] = ["--text-file", str(body_md)]
-    print(f"[health] 调 notify: {' '.join(shlex.quote(c) for c in cmd)}")
+    print(t("public.health_check.notify.calling", {"cmd": " ".join(shlex.quote(c) for c in cmd)}))
     rc, _, err = _safe_run(cmd, timeout=60)
     if rc != 0:
-        print(f"[health] WARN notify 失败 rc={rc}: {err.strip()[:300]}", file=sys.stderr)
-        # 通知失败不影响健康结论
+        print(t("public.health_check.notify.failed", {"rc": rc, "error": err.strip()[:300]}), file=sys.stderr)
+        # a failed notification does not affect the health verdict
         return 0
     return 0
 

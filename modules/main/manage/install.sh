@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 #
-# modules/main/manage/install.sh — 装 manage 模块(业务管理)
+# modules/main/manage/install.sh — install the manage module (business management)
 #
-# manage 模块组成:
-#   - add_business.sh  加业务(seed)
-#   - set_config.sh    业务 config 切换
-#   - seeds/           种子业务数据(预留 .gitkeep)
+# manage module contents:
+#   - add_business.sh  add a business (seed)
+#   - set_config.sh    switch the business config
+#   - seeds/           seed business data (reserved .gitkeep)
 #
-# 用法:
-#   bash install.sh                  # 默认:检查 + 创建 seeds/
-#   bash install.sh --check          # 只查依赖
+# Usage:
+#   bash install.sh                  # default: check + create seeds/
+#   bash install.sh --check          # only check the dependencies
 #   bash install.sh --uninstall
 #
-# 退出码:0/1/2/3/4 同 pdtm 模块
+# Exit codes: 0/1/2/3/4 same as the pdtm module
 
 set -euo pipefail
+# The runtime messages below go through t(), so the shell-side lookup has
+# to be available before anything is printed.
+# shellcheck source=modules/main/lib/i18n.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/modules/main/lib/i18n.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -27,23 +31,23 @@ usage() {
     sed -n "2,13p" "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 }
 
-# ---- 检查 ----
+# ---- check ----
 check_deps() {
     local rc=0
-    command -v bash >/dev/null 2>&1 || { err "缺 bash"; rc=2; }
-    command -v sqlite3 >/dev/null 2>&1 || { err "缺 sqlite3"; rc=2; }
-    [ -x "$SCRIPT_DIR/add_business.sh" ] || { err "add_business.sh 缺失/不可执行"; rc=3; }
-    [ -x "$SCRIPT_DIR/set_config.sh" ] || { err "set_config.sh 缺失/不可执行"; rc=3; }
+    command -v bash >/dev/null 2>&1 || { err "$(t main.manage_install.dep_bash_missing)"; rc=2; }
+    command -v sqlite3 >/dev/null 2>&1 || { err "$(t main.manage_install.dep_sqlite3_missing)"; rc=2; }
+    [ -x "$SCRIPT_DIR/add_business.sh" ] || { err "$(t main.manage_install.add_business_missing)"; rc=3; }
+    [ -x "$SCRIPT_DIR/set_config.sh" ] || { err "$(t main.manage_install.set_config_missing)"; rc=3; }
     return $rc
 }
 
-# ---- 准备 seeds 目录 ----
+# ---- prepare the seeds directory ----
 install() {
     mkdir -p "$SCRIPT_DIR/seeds"
     if [ ! -f "$SCRIPT_DIR/seeds/.gitkeep" ]; then
         : > "$SCRIPT_DIR/seeds/.gitkeep"
     fi
-    log "已准备 seeds/ 目录"
+    log "$(t main.manage_install.seeds_ready)"
     return 0
 }
 
@@ -57,13 +61,13 @@ verify() {
 
 # ---- uninstall ----
 uninstall() {
-    log "manage 模块无需反安装(seeds/ 与脚本保留)"
+    log "$(t main.manage_install.nothing_to_uninstall)"
     return 0
 }
 
 main() {
     case "${1:-}" in
-        --check) check_deps || exit $?; log "manage 模块依赖 OK"; exit 0 ;;
+        --check) check_deps || exit $?; log "$(t main.manage_install.deps_ok)"; exit 0 ;;
         --uninstall) uninstall ;;
         --yes|"")
             check_deps || exit $?
