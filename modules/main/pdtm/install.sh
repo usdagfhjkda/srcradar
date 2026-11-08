@@ -285,8 +285,11 @@ write_wordlists_config() {
     # the path that the operator wrote.
     local resolvers_file_val
     resolver_set="$resolver_set_val"
-    resolvers_file="$(sed -n 's/^[[:space:]]*resolvers_file[[:space:]]*=[[:space:]]*//p' \
-                         "$cfg" | head -1 | tr -d '"\''[:space:]')"
+    resolvers_file=""
+    if [ -f "$cfg" ]; then
+        resolvers_file="$(sed -n 's/^[[:space:]]*resolvers_file[[:space:]]*=[[:space:]]*//p' \
+                             "$cfg" | head -1 | tr -d '"\''[:space:]')"
+    fi
     resolvers_file_val="$(resolve_resolvers_file || true)"
     if [ -z "$resolvers_file_val" ]; then
         resolvers_file_val="$resolvers/global"

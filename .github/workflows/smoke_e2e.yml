@@ -86,33 +86,37 @@ jobs:
           ./srcradar manage install --yes
           ./srcradar algo_diff_cpp install --yes
 
-      - name: write pdtm.conf for CI (httpx_bin / dnsx_bin / resolvers_file)
-        # pdtm install.sh 只写 wordlists_dir; httpx_bin / dnsx_bin /
-        # resolvers_file 这 3 个 key 在部署侧另行配置, CI runner 拿不到,
-        # 所以这里直接写 pdtm.conf 指向 ~/.pdtm/go/bin/(PD 工具链 pdtm -duc
-        # 的安装位置). 不检测 binary 存在, 信任 install 步骤成功.
+      - name: write pdtm.conf for CI (httpx_bin / dnsx_bin)
+        # pdtm install.sh writes the wordlists_dir and the resolver_set
+        # fields; httpx_bin / dnsx_bin are configured on the deployment
+        # side and the CI runner does not have them, so they are written
+        # here to point at ~/.pdtm/go/bin/ (the place where pdtm -duc puts
+        # the tool chain). The binary is not checked, the install step
+        # above is trusted.
+        #
+        # The resolver list is not written here: the installer points the
+        # resolver_set field at the global set of the tree, and that set
+        # holds the public resolvers of the world, which is what the CI
+        # needs (the runner is not in China). A list of its own here would
+        # be ignored anyway, the resolver_set field wins.
         run: |
           set -euo pipefail
           PDTM_BIN_DIR="$HOME/.pdtm/go/bin"
-          STUB_RESOLVERS="$(mktemp)"
-          printf '8.8.8.8\n1.1.1.1\n' > "$STUB_RESOLVERS"
           PDTM_CONF="config/pdtm.conf"
           tmp="$(mktemp)"
           awk '
             /^dnsx_bin=/      { next }
             /^httpx_bin=/     { next }
-            /^resolvers_file=/ { next }
             { print }
           ' "$PDTM_CONF" > "$tmp"
           {
             echo "dnsx_bin=$PDTM_BIN_DIR/dnsx"
             echo "httpx_bin=$PDTM_BIN_DIR/httpx"
-            echo "resolvers_file=$STUB_RESOLVERS"
           } >> "$tmp"
           chmod 600 "$tmp"
           mv "$tmp" "$PDTM_CONF"
           echo "pdtm.conf updated:"
-          grep -E '^(dnsx_bin|httpx_bin|resolvers_file)=' "$PDTM_CONF"
+          grep -E '^(dnsx_bin|httpx_bin|resolver_set|resolvers_file)=' "$PDTM_CONF"
 
       - name: verify dispatcher
         run: ./srcradar --list | tee /tmp/dispatcher.txt
