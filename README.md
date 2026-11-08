@@ -83,7 +83,7 @@ cd srcradar
 ./check.sh
 
 # 3. install all the upstream dependencies (pdtm installs dnsx/httpx/subfinder/alterx/naabu/cdncheck
-#    -> cdnmatch -> the init-db on its own;
+#    -> the init-db on its own;
 #    main/{db,lib,manage,pdtm} are ticked by default, daily is not (it avoids the automatic registration of the cron)):
 ./install.sh                       # the interactive checklist (enter switches / 0 confirms / q quits)
 ./install.sh --skip-check          # the environment is known to be good, it skips check.sh and goes straight to the checklist
@@ -118,7 +118,7 @@ echo www.example.com > ~/scope/target.txt
 
 > **A new shell has to load the PATH**: `pdtm` and the tools of PD are installed into `~/go/bin/` and `~/.pdtm/go/bin/`, and they **do not** enter the PATH of the current shell on their own; a new shell has to `source ~/.bashrc` or `source ~/.zshrc` by hand (pick the one of your shell), or the script has to `export PATH="$PATH:$HOME/go/bin:$HOME/.pdtm/go/bin"` before `pdtm` / `dnsx` stop reporting that they are not found.
 
-> **Where it is installed**: pdtm is installed into `~/go/bin/`; the tool chain of PD (dnsx/httpx/subfinder/alterx/naabu/cdncheck) is managed by pdtm in `~/.pdtm/go/bin/`; cdnmatch is in `pdtm/bin/`; the empty database `db/recon.sqlite3` is created at the end of install.sh. See the comment at the top of [`install.sh`](install.sh).
+> **Where it is installed**: pdtm is installed into `~/go/bin/`; the tool chain of PD (dnsx/httpx/subfinder/alterx/naabu/cdncheck) is managed by pdtm in `~/.pdtm/go/bin/`; the empty database `db/recon.sqlite3` is created at the end of install.sh. See the comment at the top of [`install.sh`](install.sh).
 
 > **The requirements of the run**: the active scan of srcradar depends on the external tools that install.sh installs (`httpx`, `dnsx`, `naabu`, `subfinder`, `alterx`, `cdncheck`). These tools do not come with the repository, `./check.sh` + `./install.sh` have to run first. See the thanks to the upstream.
 
@@ -225,34 +225,31 @@ srcradar daily dashboard --host 0.0.0.0
 - The scope of a business is the only input of the mapping, the other modules do not widen it
 - `daily/` only reads the database and takes a snapshot, it never touches a table of a business
 
-> **The stdin of the tools of ProjectDiscovery has to be closed**: any call of `dnsx` / `httpx` / `naabu` / `subfinder` / `cdncheck` has to get `< /dev/null`, when the script that calls it is run from the outside by `bash script.sh`. Those tools close the stdin in a best-effort way, but it was measured that they park for good in a sub shell, and the pipeline hangs until the end of the time. `cdncheck` still needs it as a fallback, even though `pdtm/scanner.sh` goes through the offline path of `./bin/cdnmatch` and does not call the cdncheck binary any more.
+> **The stdin of the tools of ProjectDiscovery has to be closed**: any call of `dnsx` / `httpx` / `naabu` / `subfinder` / `cdncheck` has to get `< /dev/null`, when the script that calls it is run from the outside by `bash script.sh`. Those tools close the stdin in a best-effort way, but it was measured that they park for good in a sub shell, and the pipeline hangs until the end of the time. `cdncheck` still needs it as a fallback, even though the CDN judgement of the pdtm module runs offline and does not call the cdncheck binary any more.
 
 ---
 
 ## The modules
 
+The tree is made of modules. The ones under `modules/main` are the
+backbone, they are installed by default and they run on their own. The
+ones under `modules/public` are the optional plugins, they are deployed
+and enabled by the operator. The last two live in a repository of their
+own.
+
 | The module | The role | The details |
 |---|---|---|
-| `pdtm/` | the orchestration of the 4 stages of the active mapping | [README](./modules/main/pdtm/README.md) |
-| `pipeline.sh` | the orchestration of the top + the cleaning on its own | the mutual exclusion of `flock`, the scene of a failure can be kept on purpose |
-| `scan.sh` | the derivation of the subdomains + the two ways of the exact search / of the glob | without a `*` it goes through the fast path straight to dnsx, with a `*` it goes through subfinder → alterx → permutation |
-| `scanner.sh` | the resolution of the DNS + the CDN judgement + the scan of the ports | `cdnmatch` judges it offline and it takes the place of the blocking call of the old cdncheck; `httpx` / `dnsx` get `< /dev/null` so that they do not hang on the stdin |
-| `cdnmatch/` | the Go wrapper (optional): the classification of the CDN / of the WAF / of the cloud | the match of the ranges offline, it has to be built |
-| the external dependencies | `httpx` / `dnsx` / `naabu` / `subfinder` / `alterx` and the like | the user installs them into the PATH (see the daily operation), srcradar only calls them |
-| `bin/` | the directory of the build artefacts (cdnmatch is optional) | it does not come with the repository, the user builds it |
-| `target_glob.py` | `target.txt` → ERE + the extraction of the base | `(^&#124;\.)` is compliant with the POSIX ERE (the silent 0 match of the original PCRE is fixed) |
-| `import_scan_results.py` | `scan_results/` → the database | the deduplication by `response_hash` |
-| `daily/` | the cron + the diff of the snapshots + the dashboard | [README](./modules/main/daily/README.md) |
-| `daily_monitor.sh` | the entry point of the cron + the orchestration of the several stages + the filter by the config | the mutual exclusion of `flock`; every business is filtered by `recon_business_config` |
-| `lib/snapshot.py` | the full snapshot of the 6 tables into JSON | it derives the `host_ip_map` that fills the IP column of the dashboard back |
-| `lib/diff.py` | the comparison of the snapshots → the incremental report | added/reactivated/deactivated/changed/deleted |
-| `lib/dashboard.py` | the read only web of 127.0.0.1, 4 tabs | Task Status/Site Details/Port Services/Risk Level |
-| `i18n/` | the language of the user-visible output (the zh and en tables) | [README](./modules/main/i18n/README.md) |
-| `manage/set_lang.sh` | shows / changes the language of the user-visible output | the installer never overwrites an existing `config/lang.conf`, so this is the deliberate switch |
-| `manage/set_resolvers.sh` | shows / changes the DNS resolver set that is in effect | `cn` / `global` / `auto`; the `auto` mode follows the language |
-| `lib/resolve_resolvers.sh` | the resolver list that is in effect | the environment, then the `resolver_set` field of the config, then the `resolvers_file` field, then the global set |
-| `pdtm/resolvers/` | the resolver lists, one file per set (`cn` / `global`) | the order is the latency, the fast one first |
-| `db/recon.sqlite3` | the shared data, every module writes to it | WAL + a busy_timeout of 5s, the concurrent reads are allowed |
+| `modules/main/pdtm` | **the active mapping**: the orchestration of the 4 stages (the wildcard resolution → the enumeration and the derivation of the subdomains → the judgement of the CDN + the scan of the ports + the probe of the web → the import into the SQLite) | the tool chain of ProjectDiscovery, it is called, not forked; [README](./modules/main/pdtm/README.md) |
+| `modules/main/lib` | **the shared helpers**: the parser of `config/*.conf`, the forwarder of the language lookup, the resolver of the DNS resolver list | every module of the tree reaches it through the same short path |
+| `modules/main/daily` | **the daily operation**: the cron, the snapshot of the tables, the diff of the snapshots and the local dashboard | the dashboard binds 127.0.0.1 only, its 4 tabs are Task Status / Site Details / Port Services / Risk Level; [README](./modules/main/daily/README.md) |
+| `modules/main/manage` | **the entry of the businesses**: the registration of a business, the switches of a business, the seeds, the language and the resolver set | the scripts of the operator; [README](./modules/main/manage/README.md) |
+| `modules/main/db` | **the shared data**: the creation of the SQLite and the incremental migrations of the schema | `db/recon.sqlite3`, the mode WAL + a busy_timeout of 5s |
+| `modules/main/i18n` | **the language of the output**: the message tables of the user-visible output and the gate that keeps them consistent | the zh and the en tables, the check of the placeholders and of the bodies; [README](./modules/main/i18n/README.md) |
+| `modules/public/katana` | **the plugin of the URL assets**: the scan at the granularity of the URL | optional, self deployed; [README](./modules/public/katana/README.md) |
+| `modules/public/health` | **the plugin of the operation**: the health checks of the disk / of the CPU / of the memory / of the cron / of the dashboard | optional, it pushes through the plugin of the notification; [README](./modules/public/health/README.md) |
+| `modules/public/notify` | **the plugin of the push**: the encrypted report of the day, sent to the mailbox of the operator | optional, the body is encrypted with GPG; [README](./modules/public/notify/README.md) |
+| `srcradar-algo-diff-cpp` | **the judgement of a change**: the C++ core that decides, for every asset, whether it changed since the day before | a repository of its own, the tree calls its binary, the sources are not shared |
+| `srcradar-mcp-server` | **the adapter for the agents**: it exposes the commands of the tree over the MCP protocol, so a local agent calls them over HTTP instead of opening a session on the host | a repository of its own, it holds no data of the businesses, it only forwards the calls |
 
 ---
 
@@ -394,7 +391,7 @@ The executable capacity of this project rests on the following upstream projects
 |---|---|---|---|
 | **[projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)** | the active probe of the web | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
 | **[projectdiscovery/dnsx](https://github.com/projectdiscovery/dnsx)** | the batch resolution of the DNS | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
-| **projectdiscovery/cdncheck** (it is imported by [`modules/main/pdtm/cdnmatch`](./modules/main/pdtm/cdnmatch/), the source is not modified) | the offline classification of the CDN / of the WAF | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
+| **projectdiscovery/cdncheck** (it is imported by the CDN judgement of the pdtm module, the source is not modified) | the offline classification of the CDN / of the WAF | **MIT** | © 2021-2025 ProjectDiscovery, Inc. |
 
 ### The management of the packages and the external dependencies (the set of the tools that pdtm installs + the tools that are recommended)
 
