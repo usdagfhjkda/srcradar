@@ -1060,7 +1060,7 @@ def _pick_body_charset(data: bytes, declared: str) -> str:
 def _sniff_body_mime(data: bytes) -> str:
     """When the stored content_type is empty, guess a MIME from the bytes."""
     head = data[:512].lstrip().lower()
-    if head.startswith(b'<!doctype') or head.startswith(b'<html'):
+    if head.startswith((b'<!doctype', b'<html')):
         return 'text/html'
     if head.startswith(b'<?xml'):
         return 'application/xml'

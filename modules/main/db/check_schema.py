@@ -35,7 +35,6 @@ TRANSIENT_TABLES = {"web_subdomains_new"}
 # under the A1 protocol "adding a column via ALTER TABLE" shows up in the source files, while schema.sql merges them into the CREATE TABLE DDL.
 # the known ALTER columns are listed here — during the comparison schema.sql is allowed to be "ahead".
 ACCEPTED_ALTER_COLS = {
-    "businesses":     {"change_type"},
     "companies":      {"change_type"},
     "mapp_records":   {"change_type"},
     "scopes":         {"change_type"},
