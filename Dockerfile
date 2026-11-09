@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
 # ============================================================================
-# srcradar — multi-stage Docker build (full component set, Chinese, CN DNS)
+# srcradar — multi-stage Docker build (the full component set)
+#
+# One Dockerfile builds every variant; the build args below select the
+# language, the DNS resolver set and the modules that differ.
 #
 # Stage 1 (builder): golang:1.25 image that builds the PD toolchain +
 #                    cdnmatch + the algo_diff_cpp core (C++) +
@@ -12,7 +15,28 @@
 #   srcradar:1.0.0_zh   — the Chinese build of the 1.0.0 release
 #
 # Build:
-#   docker build -t srcradar:1.0.0_zh --build-arg SRCRADAR_VERSION=1.0.0 .
+#   # the Chinese variant
+#   docker build -t srcradar:1.0.0_zh \
+#       --build-arg SRCRADAR_VERSION=1.0.0 \
+#       --build-arg SRCDAR_LANG=zh \
+#       --build-arg SRCDAR_RESOLVER=cn \
+#       --build-arg SRCDAR_WITH_DBALIGN=1 \
+#       --build-arg SRCDAR_WITH_YMICP=1 .
+#
+#   # the English variant
+#   docker build -t srcradar:1.0.0 \
+#       --build-arg SRCRADAR_VERSION=1.0.0 \
+#       --build-arg SRCDAR_LANG=en \
+#       --build-arg SRCDAR_RESOLVER=global \
+#       --build-arg SRCDAR_WITH_DBALIGN=0 \
+#       --build-arg SRCDAR_WITH_YMICP=0 .
+#
+# The variant is selected by the build args below, so one Dockerfile builds
+# every variant:
+#   SRCDAR_LANG          en | zh
+#   SRCDAR_RESOLVER      global | cn
+#   SRCDAR_WITH_DBALIGN  1 = the db_align module and its ENScan mirror
+#   SRCDAR_WITH_YMICP    1 = the ymicp client (its server is not shipped)
 #
 # The image is published as a tarball:
 #   docker save -o srcradar-1.0.0_zh.tar srcradar:1.0.0_zh
@@ -47,9 +71,26 @@
 # ============================================================================
 
 # ----------------------------------------------------------------------------
+# The variant of the image. Declared before the first FROM, so the builder and
+# the runtime share ONE value: a stage level ARG would otherwise default to a
+# different value in each stage (the builder would skip the build while the
+# runtime still tried to copy the result).
+# ----------------------------------------------------------------------------
+ARG SRCDAR_LANG=zh
+ARG SRCDAR_RESOLVER=cn
+ARG SRCDAR_WITH_DBALIGN=1
+ARG SRCDAR_WITH_YMICP=1
+
+# ----------------------------------------------------------------------------
 # Stage 1: builder
 # ----------------------------------------------------------------------------
 FROM golang:1.25 AS builder
+
+# import the variant args into this stage
+ARG SRCDAR_LANG
+ARG SRCDAR_RESOLVER
+ARG SRCDAR_WITH_DBALIGN
+ARG SRCDAR_WITH_YMICP
 
 # 锁的是 srcradar release tag -> image 内 pdtm 版本(image 本身不可变即锁)
 ARG PDTM_VERSION=v0.1.5
@@ -141,9 +182,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # The module of the tree, built from its own source. The binary lands at
 # modules/public/db_align/bin/db_align: that is the path run_one_business.sh
 # calls ("$RECON_ROOT/public/db_align/bin/db_align").
+# SRCDAR_WITH_DBALIGN=0 leaves it out (the English build).
 COPY modules/public/db_align /build/db_align-src
 WORKDIR /build/db_align-src
-RUN go build -o /out/db_align ./cmd/run
+RUN if [ "${SRCDAR_WITH_DBALIGN}" = "1" ]; then \
+        go build -o /out/db_align ./cmd/run; \
+    else \
+        echo "db_align is not part of this variant"; \
+    fi
 
 # ---- 4.6) ENScan(cloned from the archival mirror,Apache-2.0)----
 # Source: usdagfhjkda/wgpsec-ENScan_GO, an archival mirror of the
@@ -159,18 +205,22 @@ RUN go build -o /out/db_align ./cmd/run
 # run_one_business.sh passes to db_align ("-enscan $RECON_ROOT/ENScan_GO/ENScan").
 ARG ENSCAN_GO_REPO=https://github.com/usdagfhjkda/wgpsec-ENScan_GO.git
 ARG ENSCAN_GO_TAG=wgpsec-v1.4.0-fork1
-RUN git clone --branch "${ENSCAN_GO_TAG}" "${ENSCAN_GO_REPO}" /tmp/ENScan_GO && \
-    cd /tmp/ENScan_GO && \
-    go build -o /out/ENScan . && \
-    # the Apache-2.0 license of the mirror has to travel with the binary
-    mkdir -p /out-license && \
-    cp LICENSE /out-license/ENScan_GO-LICENSE && \
-    rm -rf /tmp/ENScan_GO
+RUN if [ "${SRCDAR_WITH_DBALIGN}" = "1" ]; then \
+        git clone --branch "${ENSCAN_GO_TAG}" "${ENSCAN_GO_REPO}" /tmp/ENScan_GO && \
+        cd /tmp/ENScan_GO && \
+        go build -o /out/ENScan . && \
+        # the Apache-2.0 license of the mirror has to travel with the binary
+        mkdir -p /out-license && \
+        cp LICENSE /out-license/ENScan_GO-LICENSE && \
+        rm -rf /tmp/ENScan_GO; \
+    else \
+        echo "ENScan is not part of this variant"; \
+    fi
 
 # ---- 5) 收集 builder 产物(pdtm 拉的 PD 工具 + 自建 binary)----
 # pdtm -ia 把所有 PD 工具装到 $(go env GOPATH)/bin 或 ~/.pdtm/go/bin
 # 兼容两种路径:go install 默认到 /go/bin;pdtm -ia 默认到 /root/.pdtm/go/bin
-RUN mkdir -p /out-bin && \
+RUN mkdir -p /out /out-bin /out-license && \
     cp /out/cdnmatch /out-bin/ && \
     # pdtm 装的 PD 工具 — 兼容 GOPATH/bin 和 ~/.pdtm/go/bin
     for d in /go/bin /root/go/bin /root/.pdtm/go/bin; do \
@@ -189,6 +239,12 @@ RUN mkdir -p /out-bin && \
 FROM ubuntu:22.04 AS runtime
 
 ARG SRCRADAR_VERSION=1.0.0
+# import the variant args into this stage (they are declared before the first
+# FROM, so both stages see the same value)
+ARG SRCDAR_LANG
+ARG SRCDAR_RESOLVER
+ARG SRCDAR_WITH_DBALIGN
+ARG SRCDAR_WITH_YMICP
 # mcp-server 是独立仓,构建期 clone 进镜像。
 # 这个 ARG 必须声明在 runtime 阶段:一个 ARG 只对它自己所在的 stage
 # 和该 stage 的子 stage 可见,声明在 builder 里的 ARG 在 runtime 的
@@ -196,7 +252,7 @@ ARG SRCRADAR_VERSION=1.0.0
 ARG MCP_SERVER_REPO=https://github.com/usdagfhjkda/srcradar-mcp-server.git
 ENV SRCDAR_VERSION=${SRCRADAR_VERSION} \
     TZ=Asia/Shanghai \
-    SRCDAR_LANG=zh \
+    SRCDAR_LANG=${SRCDAR_LANG} \
     PATH=/opt/srcradar/bin:/opt/srcradar:/usr/local/bin:/usr/bin:/bin
 
 # ---- 1) 系统包 + 时区 ----
@@ -244,7 +300,14 @@ COPY modules           /opt/srcradar/modules
 # private 目录本来就被 .dockerignore 排除(config/* 里的 modules/private/*),
 # 这里再删一次是双保险(它只有 .gitkeep)。
 RUN rm -rf /opt/srcradar/modules/private \
+    && if [ "${SRCDAR_WITH_YMICP}" != "1" ]; then \
+        # the module is not part of this variant: it must not be in the image
+        rm -rf /opt/srcradar/modules/public/ymicp && \
+        echo "ymicp is not part of this variant"; \
+    fi \
     && echo "=== the modules in the image ===" && ls /opt/srcradar/modules/main /opt/srcradar/modules/public
+# (db_align is removed by the step 3.1.2 when the variant does not carry it;
+#  the private tree never ships.)
 
 # ---- 3.1.1) the runtime leftovers of the pdtm module ----
 # The pdtm module writes its runtime files (alive.txt / alterx.txt /
@@ -271,14 +334,26 @@ RUN rm -f /opt/srcradar/modules/main/pdtm/alive.txt \
 #       -db "$DB" -enscan "$RECON_ROOT/ENScan_GO/ENScan"
 # 所以两个二进制必须落在这两个位置(不是 /opt/srcradar/bin/)。
 # /out 只有 /out-bin 被拷进 runtime,所以这两个要单独拷。
-RUN mkdir -p /opt/srcradar/modules/public/db_align/bin \
-             /opt/srcradar/modules/public/ENScan_GO
-COPY --from=builder /out/db_align  /opt/srcradar/modules/public/db_align/bin/db_align
-COPY --from=builder /out/ENScan   /opt/srcradar/modules/public/ENScan_GO/ENScan
-RUN chmod +x /opt/srcradar/modules/public/db_align/bin/db_align \
-             /opt/srcradar/modules/public/ENScan_GO/ENScan && \
-    echo "=== db_align and ENScan ===" && \
-    ls -l /opt/srcradar/modules/public/db_align/bin/ /opt/srcradar/modules/public/ENScan_GO/
+# The runtime stage has no /out: only the builder has it. A conditional COPY
+# is not possible (the file is absent in the variant that does not build it),
+# so the builder output is mounted read only and the step below picks what
+# the variant wants. The mount leaves no layer behind.
+RUN --mount=from=builder,source=/out,target=/out,ro \
+    if [ "${SRCDAR_WITH_DBALIGN}" = "1" ]; then \
+        mkdir -p /opt/srcradar/modules/public/db_align/bin \
+                     /opt/srcradar/modules/public/ENScan_GO && \
+        cp /out/db_align /opt/srcradar/modules/public/db_align/bin/db_align && \
+        cp /out/ENScan  /opt/srcradar/modules/public/ENScan_GO/ENScan && \
+        chmod +x /opt/srcradar/modules/public/db_align/bin/db_align \
+                 /opt/srcradar/modules/public/ENScan_GO/ENScan && \
+        echo "=== db_align and ENScan ===" && \
+        ls -l /opt/srcradar/modules/public/db_align/bin/ /opt/srcradar/modules/public/ENScan_GO/; \
+    else \
+        # the module is not part of this variant: it must not be in the image
+        rm -rf /opt/srcradar/modules/public/db_align \
+                 /opt/srcradar/modules/public/ENScan_GO && \
+        echo "db_align is not part of this variant"; \
+    fi
 
 # ---- 3.2) algo_diff_cpp: 独立仓,主仓没有它的源码目录 ----
 # daily_monitor.sh 按固定路径找它:
@@ -309,8 +384,9 @@ RUN git clone --depth 1 "${MCP_SERVER_REPO}" /tmp/srcradar-mcp-server \
 # resolvers/cn 随仓分发在 modules/main/pdtm/resolvers/cn;
 # 这里在构建期固化,让容器里的默认值就是 cn,不依赖运行时交互。
 RUN mkdir -p /opt/srcradar/config && \
-    printf 'resolver_set=cn\nresolvers_file=%s\n' \
-        "/opt/srcradar/modules/main/pdtm/resolvers/cn" \
+    printf 'resolver_set=%s\nresolvers_file=%s\n' \
+        "${SRCDAR_RESOLVER}" \
+        "/opt/srcradar/modules/main/pdtm/resolvers/${SRCDAR_RESOLVER}" \
         > /opt/srcradar/config/pdtm.conf && \
     echo "=== pdtm.conf ===" && cat /opt/srcradar/config/pdtm.conf
 
@@ -318,7 +394,7 @@ RUN mkdir -p /opt/srcradar/config && \
 # i18n 的优先级是 SRCDAR_LANG env > config/lang.conf > en。
 # ENV SRCDAR_LANG=zh 已经在上面设了;这里再写一份 lang.conf,
 # 让没有继承 env 的子进程(例如 cron 起的任务)也拿到 zh。
-RUN printf 'lang=zh\n' > /opt/srcradar/config/lang.conf && \
+RUN printf 'lang=%s\n' "${SRCDAR_LANG}" > /opt/srcradar/config/lang.conf && \
     echo "=== lang.conf ===" && cat /opt/srcradar/config/lang.conf
 
 # ---- wordlists (build 时 COPY,运行时直接用,不再拉取)----
@@ -333,8 +409,16 @@ RUN mkdir -p /usr/share/doc/srcradar/licenses && \
          -o /usr/share/doc/srcradar/licenses/GPL-3.0.txt
 
 # ---- ENScan 的许可证(Apache-2.0,来自构建时 clone 的 mirror)----
-COPY --from=builder /out-license/ENScan_GO-LICENSE \
-     /usr/share/doc/srcradar/licenses/ENScan_GO-LICENSE
+# The file only exists in the variant that builds ENScan, so it is mounted
+# and copied conditionally.
+RUN --mount=from=builder,source=/out-license,target=/out-license,ro \
+    if [ -f /out-license/ENScan_GO-LICENSE ]; then \
+        cp /out-license/ENScan_GO-LICENSE \
+           /usr/share/doc/srcradar/licenses/ENScan_GO-LICENSE && \
+        echo "the ENScan license is in the image"; \
+    else \
+        echo "this variant does not carry ENScan"; \
+    fi
 
 # ---- 6) entrypoint + 元数据 ----
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh

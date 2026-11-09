@@ -47,6 +47,11 @@ services:
       args:
         SRCRADAR_VERSION: 1.0.0
         PDTM_VERSION: v0.1.5       # pdtm 包管理器版本(锁);pdtm 拉的 PD 工具 = build 时 latest,被 image 冻结
+        # 变体开关(默认值 = 中文版):改这几个值就能构建另一个变体
+        SRCDAR_LANG: zh            # en | zh
+        SRCDAR_RESOLVER: cn        # global | cn
+        SRCDAR_WITH_DBALIGN: "1"   # 1 = 带 db_align 与 ENScan
+        SRCDAR_WITH_YMICP: "1"     # 1 = 带 ymicp 客户端(服务端不含)
     image: srcradar:1.0.0_zh
     container_name: srcradar
     restart: unless-stopped

@@ -2,21 +2,22 @@
 # ============================================================================
 # docker/healthcheck.sh — container liveness probe
 #
-# Used by Dockerfile HEALTHCHECK. Reports container is "up" if:
-#   - cron process is alive (if installed) OR dashboard port is bound
-#   - /opt/srcradar/bin/ has all expected binaries
-#   - DB file exists at /opt/srcradar/db/recon.sqlite3
+# Used by Dockerfile HEALTHCHECK. Reports the container is "up" if:
+#   - the DB file exists next to the db module
+#   - the srcradar-built binaries are present where the code expects them
+#   - the PD toolchain holds at least the 4 core tools
+#   - the cron daemon or the dashboard is alive
 #
 # Exit 0 = healthy, Exit 1 = unhealthy.
 # ============================================================================
 
 set -euo pipefail
 
-DATA=/opt/srcradar/db
-BIN=/opt/srcradar/bin
-# shellcheck disable=SC2034
-EXPECTED_BINS=(pdtm dnsx httpx subfinder alterx naabu cdncheck cdnmatch db_align)
-# (EXPECTED_BINS above is kept only for backward-compatible documentation; the real checks are the REQUIRED_BINS / PD_CORE lists below)
+SRC=/opt/srcradar
+# The DB sits next to the db module: that is where the entrypoint creates it
+# and where the dashboard and the MCP daemon look for it.
+DATA="$SRC/modules/main/db"
+BIN="$SRC/bin"
 
 # 1) DB exists
 if [ ! -f "$DATA/recon.sqlite3" ]; then
@@ -24,14 +25,26 @@ if [ ! -f "$DATA/recon.sqlite3" ]; then
     exit 1
 fi
 
-# 2) the srcradar-built binaries must all be present (the number of PD tools pulled by pdtm varies, so it is not hardcoded)
-REQUIRED_BINS=(cdnmatch db_align)
-for b in "${REQUIRED_BINS[@]}"; do
-    if [ ! -x "$BIN/$b" ]; then
-        echo "unhealthy: missing required binary $BIN/$b" >&2
+# 2) the srcradar-built binaries must all be present (the number of PD tools
+#    pulled by pdtm varies, so it is not hardcoded).
+#    The paths are the ones the callers use, not a central bin directory:
+#    the scanner calls ./bin/cdnmatch inside the pdtm module, and
+#    run_one_business.sh calls modules/public/db_align/bin/db_align.
+for b in "$BIN/cdnmatch" \
+         "$SRC/modules/public/algo_diff_cpp/bin/algo_diff_cpp"; do
+    if [ ! -x "$b" ]; then
+        echo "unhealthy: missing required binary $b" >&2
         exit 1
     fi
 done
+
+# db_align is part of the Chinese build only; it is checked where it lives
+# when it is there, and its absence is not a failure.
+DBALIGN="$SRC/modules/public/db_align/bin/db_align"
+if [ -e "$DBALIGN" ] && [ ! -x "$DBALIGN" ]; then
+    echo "unhealthy: db_align is present but not executable: $DBALIGN" >&2
+    exit 1
+fi
 
 # 3) the PD toolchain must have at least the 4 core ones (dnsx/httpx/subfinder/naabu, the rest are optional)
 # soft check: one missing is a warning, two or more missing is unhealthy
@@ -45,9 +58,9 @@ if [ "$MISSING" -ge 2 ]; then
     exit 1
 fi
 
-# 3) at least one of: cron running OR dashboard listening
+# 4) at least one of: cron running OR dashboard listening
 if pgrep -x cron >/dev/null 2>&1 || pgrep -x crond >/dev/null 2>&1; then
     exit 0
 fi
-# dashboard may not be running by default; skip strict check
+# the dashboard may not be running by default; skip the strict check
 exit 0
