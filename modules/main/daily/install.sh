@@ -66,6 +66,38 @@ register_cron() {
     return 0
 }
 
+# ---- register the dashboard watchdog ----
+# The watchdog restarts the dashboard if it dies. It runs every 5 minutes.
+# The marker keeps the line idempotent: re-running the install replaces it
+# instead of piling up copies.
+register_watchdog() {
+    local watchdog="${SCRIPT_DIR}/bin/dashboard_watchdog.sh"
+    if [ ! -x "$watchdog" ]; then
+        warn "$(t main.daily_install.watchdog_script_missing)"
+        return 0
+    fi
+    if ! command -v crontab >/dev/null 2>&1; then
+        warn "$(t main.daily_install.no_crontab)"
+        return 0
+    fi
+    local marker="# srcradar dashboard watchdog managed by install.sh"
+    local line="*/5 * * * * $watchdog >> ${SCRIPT_DIR}/logs/dashboard_watchdog.log 2>&1"
+    local tmp
+    tmp="$(mktemp)"
+    {
+        crontab -l 2>/dev/null | grep -v -F "$marker" | grep -v -F "$line" || true
+        echo "$marker"
+        echo "$line"
+    } > "$tmp"
+    if crontab "$tmp"; then
+        log "$(t main.daily_install.watchdog_registered)"
+    else
+        warn "$(t main.daily_install.watchdog_not_registered)"
+    fi
+    rm -f "$tmp"
+    return 0
+}
+
 # ---- verify ----
 verify() {
     [ -x "$SCRIPT_DIR/daily_monitor.sh" ] && printf "  OK daily_monitor.sh\n" || { err "$(t main.daily_install.monitor_missing)"; return 1; }
@@ -79,7 +111,11 @@ verify() {
 uninstall() {
     if command -v crontab >/dev/null 2>&1; then
         log "$(t main.daily_install.removing_cron)"
-        crontab -l 2>/dev/null | grep -v "daily/daily_monitor.sh" | crontab - 2>/dev/null || true
+        crontab -l 2>/dev/null \
+            | grep -v "daily/daily_monitor.sh" \
+            | grep -v -F "# srcradar dashboard watchdog managed by install.sh" \
+            | grep -v -F "dashboard_watchdog.sh" \
+            | crontab - 2>/dev/null || true
     fi
     log "$(t main.daily_install.cron_cleaned)"
     return 0
@@ -98,6 +134,7 @@ main() {
             check_deps || exit $?
             install || exit $?
             register_cron || exit $?
+            register_watchdog || exit $?
             verify || exit $?
             ;;
         -h|--help) usage; exit 0 ;;

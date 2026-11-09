@@ -9,9 +9,20 @@
 #   docker compose exec srcradar srcradar daily daily_monitor
 #   docker compose down                     # stop (data volume preserved)
 #
+# The image is published as a tarball:
+#   docker load -i srcradar-1.0.0.tar
+#   docker compose up -d
+#
 # Persistence:
-#   - srcradar-data: /data (recon.sqlite3 + reports + snapshots + logs)
-#   - srcradar-config: /opt/srcradar/config (user-managed business configs)
+#   - srcradar-data: /data (the legacy DB + the user data)
+#   - srcradar-config: /opt/srcradar/config (the user configs)
+#
+# Network:
+#   The dashboard and the MCP daemon bind 0.0.0.0 inside the container (the
+#   docker proxy forwards to the container address). The host side of both
+#   mappings is 127.0.0.1, so only the host itself can reach them.
+#   The service sits on its own bridge network, so the other containers of
+#   the host cannot reach it either.
 # ============================================================================
 
 services:
@@ -20,34 +31,47 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        SRCRADAR_VERSION: 0.1.0
+        SRCRADAR_VERSION: 1.0.0
         PDTM_VERSION: v0.1.5       # pdtm 包管理器版本(锁);pdtm 拉的 PD 工具 = build 时 latest,被 image 冻结
-    image: ghcr.io/wgpsec/srcradar:0.1.0
+    image: ghcr.io/wgpsec/srcradar:1.0.0
     container_name: srcradar
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      # TODO(Q3): ENScan cookie injection. Pick ONE:
-      #   (a) Mount a host directory (recommended for persistent sessions)
-      #       volumes: [ "~/.enscan:/data/enscan:ro" ]
-      #   (b) Pass a single cookie file via env (for CI / ephemeral runs)
-      #       ENSCAN_COOKIE_FILE: /run/secrets/enscan_cookie
+      # The language of every user-visible output (the CLI, the dashboard,
+      # the daily report and the notification email).
+      SRCDAR_LANG: en
+      # The dashboard and the MCP daemon; 0.0.0.0 inside the container, the
+      # host side of the mapping is 127.0.0.1 (see the ports section).
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PORT: "8765"
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8764"
     volumes:
       - srcradar-data:/data
       - srcradar-config:/opt/srcradar/config
-      # Optional: ENScan cookie (uncomment to use)
-      # - ${HOME}/.enscan:/data/enscan:ro
+      # Optional: ENScan cookie (db_align is excluded from this image, so
+      # the ENScan stages are not available here).
       # Optional: host naabu SYN mode requires NET_RAW; or use CONNECT mode
       #   cap_add:
-      #     - NET_RAW
+      #     - NET_RAW                  # uncomment if you want naabu SYN mode
     # cap_add:
     #   - NET_RAW                  # uncomment if you want naabu SYN mode
     ports:
       # Dashboard: bind to localhost only; expose via SSH tunnel if remote
       - "127.0.0.1:8765:8765"
+      # MCP daemon: bind to localhost only (the daemon trusts the loopback)
+      - "127.0.0.1:8764:8764"
+    networks:
+      - srcradar-net
     # Default command prints help; override per-run:
     #   docker compose exec srcradar srcradar pdtm scan -b ExampleCo
     command: ["srcradar", "--list"]
+
+networks:
+  srcradar-net:
+    name: srcradar-net
+    driver: bridge
 
 volumes:
   srcradar-data:

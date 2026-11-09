@@ -3,31 +3,49 @@
 # docker/entrypoint.sh — container startup
 #
 # Responsibilities (in order):
-#   1. init-db at $SRC/db/recon.sqlite3 if missing; migrate legacy
-#      /data/recon.sqlite3 from old srcradar-data volume if found
-#   2. start cron service (so daily 03:00 CST schedule fires)
-#   3. exec the user-provided CMD (default: srcradar --help)
+#   1. init-db at $SRC/modules/main/db/recon.sqlite3 if missing; migrate
+#      legacy /data/recon.sqlite3 from the old srcradar-data volume if found
+#   2. start the dashboard (0.0.0.0:8765) and the MCP daemon (0.0.0.0:8764)
+#   3. register the dashboard watchdog in the crontab (every 5 minutes)
+#   4. start cron service (so daily 03:00 CST schedule fires)
+#   5. exec the user-provided CMD (default: srcradar --help)
 #
-# The DB path is fixed at /opt/srcradar/db/recon.sqlite3 (the user needs no env vars).
-# /data only carries the enscan cookie (TODO Q3); it no longer holds the DB.
+# The DB path is fixed at /opt/srcradar/modules/main/db/recon.sqlite3
+# (the user needs no env vars). It sits next to the db module because that
+# is where the dashboard and the MCP daemon look for it.
+# /data only carries the legacy DB (the srcradar-data volume).
 #
-# TODO(Q3): ENScan cookie handling
-#   - First preference: /data/enscan/ directory mounted by user (persistent)
-#   - Fallback: ENV ENSCAN_COOKIE_FILE points to a single cookie file
-#   - If neither present: db_align will fail on first -type enscan run; log
-#     warning, do NOT fail entrypoint (so container stays usable for pdtm only)
+# The language and the DNS resolver set are fixed at build time:
+#   SRCDAR_LANG=en       (ENV, set in the Dockerfile)
+#   resolver_set=global  (config/pdtm.conf, written in the Dockerfile)
 #
-# TODO(Q4): cron inside container
-#   - service cron start is the conventional choice; survives container restart
-#   - We do NOT switch to while-loop to preserve install_cron.sh semantics
+# The dashboard and the MCP daemon bind 0.0.0.0 INSIDE the container: the
+# docker proxy forwards to the container address, so a loopback bind would
+# refuse the forwarded traffic. The host side is what stays private: the
+# compose file maps both ports to 127.0.0.1, so only the host can reach them.
+#
+# Note on the MCP daemon: its own install.sh hardcodes a loopback bind and
+# starts it without a --host, so it is not used here. The daemon is started
+# directly with --host, which the daemon supports.
 # ============================================================================
 
 set -euo pipefail
 
 DATA=/data
 SRC=/opt/srcradar
-DB="$SRC/db/recon.sqlite3"
-mkdir -p "$SRC/db"
+# The DB lives next to the db module, not at the root of the tree:
+#   - the dashboard resolves it as <daily>/../../db/recon.sqlite3
+#     (modules/main/daily/lib/dashboard.py -> parents[2]/db)
+#   - the MCP daemon resolves it as <its dir>/../../main/db/recon.sqlite3
+#     (modules/public/srcradar-mcp-server/daemon.py)
+# Both point at modules/main/db/recon.sqlite3, so that is where it goes.
+DB_DIR="$SRC/modules/main/db"
+DB="$DB_DIR/recon.sqlite3"
+DASHBOARD_PORT="${DASHBOARD_PORT:-8765}"
+DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"
+MCP_PORT="${MCP_PORT:-8764}"
+MCP_HOST="${MCP_HOST:-0.0.0.0}"
+mkdir -p "$DB_DIR"
 
 log()  { printf '[entrypoint] %s\n' "$*"; }
 warn() { printf '[entrypoint][warn] %s\n' "$*" >&2; }
@@ -58,17 +76,17 @@ fi
 # New image writes DB to /opt/srcradar/db/recon.sqlite3 (fixed).
 # One-shot cp migration preserves legacy user data; /data/recon.sqlite3
 # is not read after migration.
-if [ -f /data/recon.sqlite3 ] && [ ! -f "$DB" ]; then
-    log "migrating legacy /data/recon.sqlite3 -> $DB"
-    cp -a /data/recon.sqlite3 "$DB"
-elif [ -f /data/recon.sqlite3 ] && [ -f "$DB" ]; then
-    warn "both /data/recon.sqlite3 (legacy) and $DB (image) exist; using $DB. To import legacy data: cp /data/recon.sqlite3 $DB.bak && inspect manually"
+if [ -f "$DATA/recon.sqlite3" ] && [ ! -f "$DB" ]; then
+    log "migrating legacy $DATA/recon.sqlite3 -> $DB"
+    cp -a "$DATA/recon.sqlite3" "$DB"
+elif [ -f "$DATA/recon.sqlite3" ] && [ -f "$DB" ]; then
+    warn "both $DATA/recon.sqlite3 (legacy) and $DB (image) exist; using $DB. To import legacy data: cp $DATA/recon.sqlite3 $DB.bak && inspect manually"
 fi
 
 # ---- 1) init-db ----
 if [ ! -f "$DB" ]; then
     log "init-db (no DB at $DB)"
-    if ! (cd "$SRC/modules/main/db" && bash install.sh --path "$DB"); then
+    if ! (cd "$DB_DIR" && bash install.sh --path "$DB"); then
         err "init-db failed; abort"
         exit 1
     fi
@@ -77,7 +95,123 @@ else
     log "DB exists: $DB (skip init)"
 fi
 
-# ---- 2) cron service (TODO(Q4)) ----
+# ---- 2) the dashboard (0.0.0.0:8765) ----
+# The dashboard reads the DB and renders the pages of the active language
+# (SRCDAR_LANG=en here). It binds 0.0.0.0 so the docker proxy can reach
+# it; the host side is mapped to 127.0.0.1 by the compose file.
+DAILY_DIR="$SRC/modules/main/daily"
+start_dashboard() {
+    mkdir -p "$DAILY_DIR/logs"
+    if pgrep -f 'python3 lib/dashboard.py' >/dev/null 2>&1; then
+        log "dashboard already running"
+        return 0
+    fi
+    log "starting the dashboard on ${DASHBOARD_HOST}:${DASHBOARD_PORT}"
+    cd "$DAILY_DIR" || return 1
+    setsid nohup python3 lib/dashboard.py \
+        --host "$DASHBOARD_HOST" --port "$DASHBOARD_PORT" \
+        >> logs/dashboard.log 2>&1 < /dev/null &
+    disown
+    local i=0
+    while [ "$i" -lt 30 ]; do
+        if curl -sf "http://127.0.0.1:${DASHBOARD_PORT}/health" >/dev/null 2>&1; then
+            log "dashboard is up on ${DASHBOARD_HOST}:${DASHBOARD_PORT}"
+            return 0
+        fi
+        i=$((i+1))
+        sleep 0.3
+    done
+    warn "the dashboard did not answer /health in 9s; see $DAILY_DIR/logs/dashboard.log"
+    return 0
+}
+start_dashboard
+
+# ---- 3) the MCP daemon (0.0.0.0:8764) ----
+# The daemon is a stdlib-only python process. It forwards the MCP calls to
+# the srcradar subcommands of this same tree.
+MCP_DIR="$SRC/modules/public/srcradar-mcp-server"
+start_mcp() {
+    if [ ! -f "$MCP_DIR/daemon.py" ]; then
+        warn "the MCP server is not in the image ($MCP_DIR/daemon.py); skipping"
+        return 0
+    fi
+    mkdir -p "$MCP_DIR/logs"
+    if pgrep -f 'daemon.py --http' >/dev/null 2>&1; then
+        log "the MCP daemon is already running"
+        return 0
+    fi
+    log "starting the MCP daemon on ${MCP_HOST}:${MCP_PORT}"
+    cd "$MCP_DIR" || return 1
+    setsid nohup python3 daemon.py --http --host "$MCP_HOST" --port "$MCP_PORT" \
+        >> logs/server.log 2>&1 < /dev/null &
+    disown
+    local i=0
+    while [ "$i" -lt 30 ]; do
+        if curl -sf "http://127.0.0.1:${MCP_PORT}/health" >/dev/null 2>&1; then
+            log "the MCP daemon is up on ${MCP_HOST}:${MCP_PORT}"
+            return 0
+        fi
+        i=$((i+1))
+        sleep 0.3
+    done
+    warn "the MCP daemon did not answer /health in 9s; see $MCP_DIR/logs/server.log"
+    return 0
+}
+start_mcp
+
+# ---- 4) the daily module: its cron job ----
+# The daily module registers the 03:00 job through its own install_cron.sh,
+# but that script builds a cron line for an interactive host:
+#   /bin/zsh -c 'source ~/.zshrc; exec ...'
+# The image has no zsh and no ~/.zshrc, so that line would fail every night.
+# The image registers the line itself, with bash and an explicit PATH:
+# the PD tools live in /opt/srcradar/bin (and in ~/.pdtm/go/bin), and the
+# non-interactive cron shell has neither of them.
+DAILY_DIR="$SRC/modules/main/daily"
+CRON_MARKER="# daily_monitor.sh managed by the docker entrypoint"
+CRON_LINE="0 3 * * * /usr/bin/flock -n $DAILY_DIR/.lock /bin/bash -c 'export PATH=/opt/srcradar/bin:$HOME/.pdtm/go/bin:$PATH; exec $DAILY_DIR/daily_monitor.sh -type pdtm,icp' >> $DAILY_DIR/logs/cron.log 2>&1"
+if command -v crontab >/dev/null 2>&1; then
+    mkdir -p "$DAILY_DIR/logs"
+    # the cron shell has a minimal PATH: the PD tools live in /opt/srcradar/bin
+    # and in ~/.pdtm/go/bin, so the PATH is written into the cron line itself
+    CRON_TMP="$(mktemp)"
+    {
+        crontab -l 2>/dev/null | grep -v -F "$CRON_MARKER" | grep -v -F "$CRON_LINE" || true
+        # the daily_monitor.sh line of install_cron.sh (the zsh one) is replaced
+        crontab -l 2>/dev/null | grep -v -F "# daily_monitor.sh managed by $DAILY_DIR/install_cron.sh" \
+            | grep -v -F "daily_monitor.sh -type pdtm,icp" || true
+        echo "$CRON_MARKER"
+        echo "$CRON_LINE"
+    } > "$CRON_TMP"
+    if crontab "$CRON_TMP"; then
+        log "the daily job is registered in the crontab (03:00, TZ=$TZ)"
+    else
+        warn "the daily job could not be registered in the crontab"
+    fi
+    rm -f "$CRON_TMP"
+else
+    warn "there is no crontab, the daily job is not registered"
+fi
+
+# ---- 5) the dashboard watchdog in the crontab ----
+# The watchdog restarts the dashboard if it dies. It runs every 5 minutes.
+# The marker keeps the line idempotent: re-running the entrypoint replaces
+# it instead of piling up copies.
+WATCHDOG="$DAILY_DIR/bin/dashboard_watchdog.sh"
+if [ -x "$WATCHDOG" ] && command -v crontab >/dev/null 2>&1; then
+    WATCHDOG_MARKER="# srcradar dashboard watchdog managed by the entrypoint"
+    WATCHDOG_LINE="*/5 * * * * $WATCHDOG >> $DAILY_DIR/logs/dashboard_watchdog.log 2>&1"
+    {
+        crontab -l 2>/dev/null | grep -v -F "$WATCHDOG_MARKER" | grep -v -F "$WATCHDOG_LINE" || true
+        echo "$WATCHDOG_MARKER"
+        echo "$WATCHDOG_LINE"
+    } | crontab -
+    log "the dashboard watchdog is registered in the crontab (every 5 minutes)"
+else
+    warn "the dashboard watchdog is not registered (script or crontab missing)"
+fi
+
+# ---- 6) cron service (TODO(Q4)) ----
 # detection order: service command → direct /usr/sbin/cron → /etc/init.d/cron
 # ubuntu:22.04 slim has no service by default, but the cron daemon itself is installed at /usr/sbin/cron
 if command -v service >/dev/null 2>&1; then
@@ -103,15 +237,6 @@ else
     warn "no cron implementation found; daily 03:00 schedule will not fire"
 fi
 
-# ---- 3) ENScan cookie hint (TODO(Q3)) ----
-if [ -d "$DATA/enscan" ]; then
-    log "ENScan cookie dir mounted: $DATA/enscan"
-elif [ -n "${ENSCAN_COOKIE_FILE:-}" ] && [ -f "$ENSCAN_COOKIE_FILE" ]; then
-    log "ENScan cookie file: $ENSCAN_COOKIE_FILE"
-else
-    warn "no ENScan cookie source; db_align -type enscan will fail until provided"
-fi
-
-# ---- 4) exec user CMD ----
+# ---- 7) exec user CMD ----
 log "exec: $*"
 exec "$@"

@@ -13,8 +13,10 @@
 .gitignore
 
 # ---- vendored upstream ----
-# db_align 的 vendor(已 .gitignore,这里再 exclude 防 COPY 进 image)
-modules/public/db_align/ENScan_GO/
+# db_align 与 ymicp 不属于本次发布范围:整个模块目录排除,构建上下文里
+# 就没有它们(Dockerfile 里也会再删一次,双保险)。
+modules/public/db_align/
+modules/public/ymicp/
 # pdtm 的 vendor: cdncheck(本仓 in-tree,go.mod replace 指向 ../cdncheck)
 modules/main/pdtm/cdncheck/
 
@@ -45,6 +47,7 @@ modules/main/daily/.lock
 modules/main/daily/logs/
 modules/public/db_align/logs/
 modules/public/db_align/.claude/
+modules/public/ymicp/logs/
 
 # ---- Python caches ----
 __pycache__/
@@ -77,6 +80,10 @@ __pycache__/
 modules/private/*
 !modules/private/.gitkeep
 
+# ---- the standalone repos (cloned inside the image, not in the context) ----
+modules/public/srcradar-mcp-server/
+modules/public/algo_diff_cpp/
+
 # ---- local config (user-specific; mount at runtime) ----
 config/*
 !config/.gitkeep
@@ -91,6 +98,7 @@ config/*
 !LICENSE
 !NOTICE
 !TERMS_ADDENDUM.md
+!TERMS_ADDENDUM_zh.md
 assets/
 
 # ---- CI files (not needed in image) ----
