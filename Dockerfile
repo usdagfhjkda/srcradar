@@ -215,6 +215,25 @@ RUN rm -rf /opt/srcradar/modules/public/db_align \
              /opt/srcradar/modules/private \
     && echo "=== the modules in the image ===" && ls /opt/srcradar/modules/main /opt/srcradar/modules/public
 
+# ---- 3.1.1) the runtime leftovers of the pdtm module ----
+# The pdtm module writes its runtime files (alive.txt / alterx.txt /
+# dnsx_output.txt) into its own directory and refuses to run when it finds
+# them there: they are the leftovers of a previous run, and the scanner
+# would take the subdomains of another business as its input.
+# The build context is filtered by .dockerignore, but the tree can still
+# hold such a file, so they are removed from the image as well.
+RUN rm -f /opt/srcradar/modules/main/pdtm/alive.txt \
+          /opt/srcradar/modules/main/pdtm/alterx.txt \
+          /opt/srcradar/modules/main/pdtm/dnsx_output.txt \
+          /opt/srcradar/modules/main/pdtm/target.txt \
+          /opt/srcradar/modules/main/pdtm/exclude.txt \
+          /opt/srcradar/modules/main/pdtm/wildcard.txt \
+          /opt/srcradar/modules/main/pdtm/no_wildcard.txt \
+    && rm -rf /opt/srcradar/modules/main/pdtm/scan_results \
+               /opt/srcradar/modules/main/pdtm/scan_outputs \
+    && echo "=== the runtime leftovers of pdtm are gone ===" \
+    && ls /opt/srcradar/modules/main/pdtm/ | grep -E '^(alive|alterx|dnsx_output|target|exclude|wildcard|no_wildcard)\.txt$' || echo "  (none left)"
+
 # ---- 3.2) algo_diff_cpp: 独立仓,主仓没有它的源码目录 ----
 # daily_monitor.sh 按固定路径找它:
 #   ALGO_DIFF_CPP_BIN="$RECON_ROOT/public/algo_diff_cpp/bin/algo_diff_cpp"
