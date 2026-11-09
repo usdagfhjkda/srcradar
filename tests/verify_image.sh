@@ -22,7 +22,9 @@
 # ============================================================================
 set -uo pipefail
 
-IMAGE="${1:-srcradar:1.0.0}"
+IMAGE="${1:-srcradar:1.0.0_zh}"
+LANG_EXPECTED="${2:-zh}"
+RESOLVER_EXPECTED="${3:-cn}"
 PASS=0
 FAIL=0
 
@@ -35,13 +37,24 @@ run "1/2 the module set"
 MODS="$(docker run --rm --entrypoint ls "$IMAGE" /opt/srcradar/modules/public 2>&1)"
 printf '%s\n' "$MODS" | sed 's/^/    /'
 
-for m in db_align ymicp; do
-    if printf '%s\n' "$MODS" | grep -qx "$m"; then
-        bad "the excluded module $m IS in the image"
-    else
-        ok "the excluded module $m is not in the image"
-    fi
-done
+# the excluded module of the English build; the Chinese build ships db_align
+if [ "$RESOLVER_EXPECTED" = "cn" ]; then
+    for m in db_align ymicp; do
+        if printf '%s\n' "$MODS" | grep -qx "$m"; then
+            ok "the module $m is in the image"
+        else
+            bad "the module $m is MISSING from the image"
+        fi
+    done
+else
+    for m in db_align ymicp; do
+        if printf '%s\n' "$MODS" | grep -qx "$m"; then
+            bad "the excluded module $m IS in the image"
+        else
+            ok "the excluded module $m is not in the image"
+        fi
+    done
+fi
 if [ -d "$(docker run --rm --entrypoint ls "$IMAGE" /opt/srcradar/modules/private 2>/dev/null || true)" ]; then
     :
 fi
@@ -70,20 +83,20 @@ done
 run "3 the language"
 LANG_ENV="$(docker run --rm --entrypoint printenv "$IMAGE" SRCDAR_LANG 2>&1)"
 printf '    SRCDAR_LANG=%s\n' "$LANG_ENV"
-if [ "$LANG_ENV" = "en" ]; then ok "the language is en"; else bad "the language is $LANG_ENV"; fi
+if [ "$LANG_ENV" = "$LANG_EXPECTED" ]; then ok "the language is $LANG_EXPECTED"; else bad "the language is $LANG_ENV"; fi
 LANG_CONF="$(docker run --rm --entrypoint cat "$IMAGE" /opt/srcradar/config/lang.conf 2>&1)"
 printf '    lang.conf: %s\n' "$LANG_CONF"
-if printf '%s' "$LANG_CONF" | grep -q '^lang=en'; then ok "lang.conf says en"; else bad "lang.conf says: $LANG_CONF"; fi
+if printf '%s' "$LANG_CONF" | grep -q "^lang=$LANG_EXPECTED"; then ok "lang.conf says $LANG_EXPECTED"; else bad "lang.conf says: $LANG_CONF"; fi
 
 # ---- 4: the DNS resolver set ----
 run "4 the DNS resolver set"
 PDTM_CONF="$(docker run --rm --entrypoint cat "$IMAGE" /opt/srcradar/config/pdtm.conf 2>&1)"
 printf '%s\n' "$PDTM_CONF" | sed 's/^/    /'
-if printf '%s' "$PDTM_CONF" | grep -q '^resolver_set=global'; then ok "resolver_set is global"; else bad "resolver_set is not global"; fi
-if docker run --rm --entrypoint test "$IMAGE" -s /opt/srcradar/modules/main/pdtm/resolvers/global 2>/dev/null; then
-    ok "the global resolver list is in the image"
+if printf '%s' "$PDTM_CONF" | grep -q "^resolver_set=$RESOLVER_EXPECTED"; then ok "resolver_set is $RESOLVER_EXPECTED"; else bad "resolver_set is not $RESOLVER_EXPECTED"; fi
+if docker run --rm --entrypoint test "$IMAGE" -s "/opt/srcradar/modules/main/pdtm/resolvers/$RESOLVER_EXPECTED" 2>/dev/null; then
+    ok "the $RESOLVER_EXPECTED resolver list is in the image"
 else
-    bad "the global resolver list is MISSING from the image"
+    bad "the $RESOLVER_EXPECTED resolver list is MISSING from the image"
 fi
 
 # ---- 8: the algo_diff_cpp binary ----
@@ -92,6 +105,31 @@ if docker run --rm --entrypoint test "$IMAGE" -x /opt/srcradar/modules/public/al
     ok "algo_diff_cpp is at the path daily_monitor.sh expects"
 else
     bad "algo_diff_cpp is MISSING at modules/public/algo_diff_cpp/bin/algo_diff_cpp"
+fi
+
+# ---- 8b: db_align and ENScan (the Chinese build) ----
+if [ "$RESOLVER_EXPECTED" = "cn" ]; then
+    run "8b db_align and ENScan"
+    if docker run --rm --entrypoint test "$IMAGE" -x /opt/srcradar/modules/public/db_align/bin/db_align 2>/dev/null; then
+        ok "db_align is at the path run_one_business.sh expects"
+    else
+        bad "db_align is MISSING at modules/public/db_align/bin/db_align"
+    fi
+    if docker run --rm --entrypoint test "$IMAGE" -x /opt/srcradar/modules/public/ENScan_GO/ENScan 2>/dev/null; then
+        ok "ENScan is at the path run_one_business.sh expects"
+    else
+        bad "ENScan is MISSING at modules/public/ENScan_GO/ENScan"
+    fi
+    if docker run --rm --entrypoint test "$IMAGE" -f /usr/share/doc/srcradar/licenses/ENScan_GO-LICENSE 2>/dev/null; then
+        ok "the ENScan license travels with the image"
+    else
+        bad "the ENScan license is MISSING from the image"
+    fi
+    if docker run --rm --entrypoint test "$IMAGE" -f /opt/srcradar/modules/public/ymicp/icp_mapp_query.py 2>/dev/null; then
+        ok "the ymicp client is in the image"
+    else
+        bad "the ymicp client is MISSING from the image"
+    fi
 fi
 
 # ---- 5/6/7: the runtime (a real container) ----

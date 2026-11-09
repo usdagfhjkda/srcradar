@@ -75,8 +75,8 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="stdin 公司名 → ymicp /query/mapp → SQLite"
     )
-    p.add_argument("--base", default="http://127.0.0.1:16181",
-                   help="ymicp base URL（默认 http://127.0.0.1:16181）")
+    p.add_argument("--base", default=os.environ.get("YMICP_BASE", "http://127.0.0.1:16181"),
+                   help="ymicp base URL（默认 http://127.0.0.1:16181，也可环境变量 YMICP_BASE）")
     p.add_argument("--user", default=os.environ.get("YMICP_USER", "admin"),
                    help="Basic Auth 用户名（也可环境变量 YMICP_USER）")
     p.add_argument("--pass", dest="password",

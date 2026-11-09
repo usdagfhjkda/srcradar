@@ -10,7 +10,7 @@
 #   docker compose down                     # stop (data volume preserved)
 #
 # The image is published as a tarball:
-#   docker load -i srcradar-1.0.0.tar
+#   docker load -i srcradar-1.0.0_zh.tar
 #   docker compose up -d
 #
 # Persistence:
@@ -23,6 +23,20 @@
 #   mappings is 127.0.0.1, so only the host itself can reach them.
 #   The service sits on its own bridge network, so the other containers of
 #   the host cannot reach it either.
+#
+# The ymicp server:
+#   The ymicp module ships the client only. Its server is the third party
+#   image yiminger/ymicp, which carries no open source license, so it is not
+#   redistributed in the srcradar image. Deploy it on your own:
+#
+#     docker compose -f modules/public/ymicp/docker-compose.yml up -d
+#
+#   Then point the client at it. If the server runs in the srcradar-net
+#   network, use its service name; if it runs on the host, use
+#   host.docker.internal (Linux needs the extra_hosts entry below).
+#
+#     YMICP_BASE: http://ymicp:16181
+#
 # ============================================================================
 
 services:
@@ -33,20 +47,24 @@ services:
       args:
         SRCRADAR_VERSION: 1.0.0
         PDTM_VERSION: v0.1.5       # pdtm 包管理器版本(锁);pdtm 拉的 PD 工具 = build 时 latest,被 image 冻结
-    image: ghcr.io/wgpsec/srcradar:1.0.0
+    image: srcradar:1.0.0_zh
     container_name: srcradar
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
       # The language of every user-visible output (the CLI, the dashboard,
       # the daily report and the notification email).
-      SRCDAR_LANG: en
+      SRCDAR_LANG: zh
       # The dashboard and the MCP daemon; 0.0.0.0 inside the container, the
       # host side of the mapping is 127.0.0.1 (see the ports section).
       DASHBOARD_HOST: 0.0.0.0
       DASHBOARD_PORT: "8765"
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8764"
+      # Where the operator deployed the ymicp server (the third party image
+      # yiminger/ymicp is not redistributed in this image). The default of
+      # the client is http://127.0.0.1:16181, which is the container itself.
+      YMICP_BASE: "http://ymicp:16181"
     volumes:
       - srcradar-data:/data
       - srcradar-config:/opt/srcradar/config
@@ -64,6 +82,9 @@ services:
       - "127.0.0.1:8764:8764"
     networks:
       - srcradar-net
+    # lets the container reach a ymicp server that runs on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Default command prints help; override per-run:
     #   docker compose exec srcradar srcradar pdtm scan -b ExampleCo
     command: ["srcradar", "--list"]

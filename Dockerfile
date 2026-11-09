@@ -1,43 +1,48 @@
 # syntax=docker/dockerfile:1.7
 # ============================================================================
-# srcradar — multi-stage Docker build (full component set, English, global DNS)
+# srcradar — multi-stage Docker build (full component set, Chinese, CN DNS)
 #
 # Stage 1 (builder): golang:1.25 image that builds the PD toolchain +
-#                    cdnmatch + the algo_diff_cpp core (C++).
-#                    db_align and ENScan_GO are NOT built here: both modules
-#                    are excluded from this image.
+#                    cdnmatch + the algo_diff_cpp core (C++) +
+#                    db_align + the ENScan_GO mirror.
 # Stage 2 (runtime): ubuntu:22.04 slim with bash + python3 + sqlite3 + cron,
 #                    receives only the binaries + srcradar source.
 #
-# Image tags (CHANGELOG):
-#   ghcr.io/wgpsec/srcradar:1.0.0    — pinned srcradar release
-#   ghcr.io/wgpsec/srcradar:latest   — rebuilt on git tag push (CI)
+# Image tags:
+#   srcradar:1.0.0_zh   — the Chinese build of the 1.0.0 release
 #
 # Build:
-#   docker build -t srcradar:dev .
-#   docker build -t srcradar:1.0.0 --build-arg SRCRADAR_VERSION=1.0.0 .
+#   docker build -t srcradar:1.0.0_zh --build-arg SRCRADAR_VERSION=1.0.0 .
 #
 # The image is published as a tarball:
-#   docker save -o srcradar-1.0.0.tar srcradar:1.0.0
+#   docker save -o srcradar-1.0.0_zh.tar srcradar:1.0.0_zh
 #
 # Component set (the full set, minus the excluded ones):
 #   included: modules/main/{pdtm,daily,db,manage,i18n,lib}
-#             modules/public/{katana,health,notify}
+#             modules/public/{katana,health,notify,db_align,ymicp}
 #             srcradar-algo-diff-cpp (standalone repo, built from source)
 #             srcradar-mcp-server     (standalone repo, python daemon)
-#   excluded: modules/public/db_align, modules/public/ymicp,
-#             modules/private/*        (and the private tree it belongs to)
+#   excluded: modules/private/*        (and the private tree it belongs to)
+#
+# The ymicp module holds the client only. Its server is the third party
+# image yiminger/ymicp, which carries no open source license: it is not
+# redistributed here, the operator deploys it on its own
+# (modules/public/ymicp/docker-compose.yml is the reference compose file).
+# The client reads its base URL from YMICP_BASE (default 127.0.0.1:16181),
+# so it has to point at wherever the operator deployed the server.
 #
 # Runtime defaults (see docker/entrypoint.sh):
-#   SRCDAR_LANG=en          the language of every user-visible output
-#   resolver_set=global     the DNS resolver set of pdtm.conf
+#   SRCDAR_LANG=zh          the language of every user-visible output
+#   resolver_set=cn         the DNS resolver set of pdtm.conf
 #   dashboard   0.0.0.0:8765 (mapped to 127.0.0.1:8765 on the host)
 #   mcp-server  0.0.0.0:8764 (mapped to 127.0.0.1:8764 on the host)
 #
 # Q1-Q4 defaults (TODO markers; CHANGELOG next bump may revise):
 #   Q1: PD tool version — pinned via PD_VERSION ARG below; bump manually
 #   Q2: algo_diff_cpp vendor — the pins live in its own install.sh
-#   Q3: ENScan cookie   — N/A: db_align is excluded from this image
+#   Q3: ENScan cookie   — the operator provides it (a mounted file or a
+#                         mounted /data/enscan directory); the enscan stage
+#                         fails without it, the other stages do not
 #   Q4: cron            — entrypoint starts service cron; daily 03:00 CST
 # ============================================================================
 
@@ -96,7 +101,7 @@ RUN mkdir -p /out-bin /tmp/urlfinder && \
 # v1.3.0 是最后一个要求 go 1.25.0 的 tag,与本仓 in-tree vendor 一致。
 # 升 golang 基线时要一起复核这个 pin。
 ARG CDNCHECK_VERSION=v1.3.0
-COPY modules/main/pdtm/cdnmatch ./cdnmatch-src
+COPY modules/main/pdtm/cdnmatch /build/cdnmatch-src
 RUN git clone --depth 1 --branch "${CDNCHECK_VERSION}" \
         https://github.com/projectdiscovery/cdncheck.git /tmp/cdncheck
 WORKDIR /build/cdnmatch-src
@@ -132,6 +137,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chmod +x /out-bin/algo_diff_cpp \
     && rm -rf /tmp/algo_diff_cpp
 
+# ---- 4.5) db_align(Go orchestrator; modernc.org/sqlite 纯 Go,无 CGO)----
+# The module of the tree, built from its own source. The binary lands at
+# modules/public/db_align/bin/db_align: that is the path run_one_business.sh
+# calls ("$RECON_ROOT/public/db_align/bin/db_align").
+COPY modules/public/db_align /build/db_align-src
+WORKDIR /build/db_align-src
+RUN go build -o /out/db_align ./cmd/run
+
+# ---- 4.6) ENScan(cloned from the archival mirror,Apache-2.0)----
+# Source: usdagfhjkda/wgpsec-ENScan_GO, an archival mirror of the
+# deleted upstream wgpsec/ENScan_GO. We pin the tag wgpsec-v1.4.0-fork1
+# instead of a branch or SHA so that future upstream-archive revisions
+# require an explicit Dockerfile bump, mirroring how PDTM_VERSION is pinned.
+#
+# The mirror carries the srcradar-specific changes (the qimai module and
+# the interface fix), so it is used as it is; the modifications are
+# documented in docker/MODIFICATIONS.txt.
+#
+# The binary lands at modules/public/ENScan_GO/ENScan: that is the path
+# run_one_business.sh passes to db_align ("-enscan $RECON_ROOT/ENScan_GO/ENScan").
+ARG ENSCAN_GO_REPO=https://github.com/usdagfhjkda/wgpsec-ENScan_GO.git
+ARG ENSCAN_GO_TAG=wgpsec-v1.4.0-fork1
+RUN git clone --branch "${ENSCAN_GO_TAG}" "${ENSCAN_GO_REPO}" /tmp/ENScan_GO && \
+    cd /tmp/ENScan_GO && \
+    go build -o /out/ENScan . && \
+    # the Apache-2.0 license of the mirror has to travel with the binary
+    mkdir -p /out-license && \
+    cp LICENSE /out-license/ENScan_GO-LICENSE && \
+    rm -rf /tmp/ENScan_GO
+
 # ---- 5) 收集 builder 产物(pdtm 拉的 PD 工具 + 自建 binary)----
 # pdtm -ia 把所有 PD 工具装到 $(go env GOPATH)/bin 或 ~/.pdtm/go/bin
 # 兼容两种路径:go install 默认到 /go/bin;pdtm -ia 默认到 /root/.pdtm/go/bin
@@ -161,7 +196,7 @@ ARG SRCRADAR_VERSION=1.0.0
 ARG MCP_SERVER_REPO=https://github.com/usdagfhjkda/srcradar-mcp-server.git
 ENV SRCDAR_VERSION=${SRCRADAR_VERSION} \
     TZ=Asia/Shanghai \
-    SRCDAR_LANG=en \
+    SRCDAR_LANG=zh \
     PATH=/opt/srcradar/bin:/opt/srcradar:/usr/local/bin:/usr/bin:/bin
 
 # ---- 1) 系统包 + 时区 ----
@@ -206,13 +241,9 @@ COPY VERSION           /opt/srcradar/VERSION
 COPY modules           /opt/srcradar/modules
 
 # ---- 3.1) 排除的模块不进镜像 ----
-# db_align / ymicp 不属于本次发布范围:把它们的目录整个删掉,
-# 避免 COPY modules 把它们带进镜像。
 # private 目录本来就被 .dockerignore 排除(config/* 里的 modules/private/*),
 # 这里再删一次是双保险(它只有 .gitkeep)。
-RUN rm -rf /opt/srcradar/modules/public/db_align \
-             /opt/srcradar/modules/public/ymicp \
-             /opt/srcradar/modules/private \
+RUN rm -rf /opt/srcradar/modules/private \
     && echo "=== the modules in the image ===" && ls /opt/srcradar/modules/main /opt/srcradar/modules/public
 
 # ---- 3.1.1) the runtime leftovers of the pdtm module ----
@@ -233,6 +264,21 @@ RUN rm -f /opt/srcradar/modules/main/pdtm/alive.txt \
                /opt/srcradar/modules/main/pdtm/scan_outputs \
     && echo "=== the runtime leftovers of pdtm are gone ===" \
     && ls /opt/srcradar/modules/main/pdtm/ | grep -E '^(alive|alterx|dnsx_output|target|exclude|wildcard|no_wildcard)\.txt$' || echo "  (none left)"
+
+# ---- 3.1.2) db_align 与 ENScan: 放到代码期望的路径 ----
+# run_one_business.sh 调的是:
+#   "$RECON_ROOT/public/db_align/bin/db_align" -n "$BIZ" -all -scope -delay 2 \
+#       -db "$DB" -enscan "$RECON_ROOT/ENScan_GO/ENScan"
+# 所以两个二进制必须落在这两个位置(不是 /opt/srcradar/bin/)。
+# /out 只有 /out-bin 被拷进 runtime,所以这两个要单独拷。
+RUN mkdir -p /opt/srcradar/modules/public/db_align/bin \
+             /opt/srcradar/modules/public/ENScan_GO
+COPY --from=builder /out/db_align  /opt/srcradar/modules/public/db_align/bin/db_align
+COPY --from=builder /out/ENScan   /opt/srcradar/modules/public/ENScan_GO/ENScan
+RUN chmod +x /opt/srcradar/modules/public/db_align/bin/db_align \
+             /opt/srcradar/modules/public/ENScan_GO/ENScan && \
+    echo "=== db_align and ENScan ===" && \
+    ls -l /opt/srcradar/modules/public/db_align/bin/ /opt/srcradar/modules/public/ENScan_GO/
 
 # ---- 3.2) algo_diff_cpp: 独立仓,主仓没有它的源码目录 ----
 # daily_monitor.sh 按固定路径找它:
@@ -258,21 +304,21 @@ RUN git clone --depth 1 "${MCP_SERVER_REPO}" /tmp/srcradar-mcp-server \
     && echo "=== mcp-server in the image ===" \
     && ls /opt/srcradar/modules/public/srcradar-mcp-server
 
-# ---- 4) DNS resolver set: global ----
+# ---- 4) DNS resolver set: cn ----
 # pdtm.conf 的 resolver_set 决定用哪套 resolver。
-# resolvers/global 随仓分发在 modules/main/pdtm/resolvers/global;
-# 这里在构建期固化,让容器里的默认值就是 global,不依赖运行时交互。
+# resolvers/cn 随仓分发在 modules/main/pdtm/resolvers/cn;
+# 这里在构建期固化,让容器里的默认值就是 cn,不依赖运行时交互。
 RUN mkdir -p /opt/srcradar/config && \
-    printf 'resolver_set=global\nresolvers_file=%s\n' \
-        "/opt/srcradar/modules/main/pdtm/resolvers/global" \
+    printf 'resolver_set=cn\nresolvers_file=%s\n' \
+        "/opt/srcradar/modules/main/pdtm/resolvers/cn" \
         > /opt/srcradar/config/pdtm.conf && \
     echo "=== pdtm.conf ===" && cat /opt/srcradar/config/pdtm.conf
 
-# ---- 5) 语言: en ----
+# ---- 5) 语言: zh ----
 # i18n 的优先级是 SRCDAR_LANG env > config/lang.conf > en。
-# ENV SRCDAR_LANG=en 已经在上面设了;这里再写一份 lang.conf,
-# 让没有继承 env 的子进程(例如 cron 起的任务)也拿到 en。
-RUN printf 'lang=en\n' > /opt/srcradar/config/lang.conf && \
+# ENV SRCDAR_LANG=zh 已经在上面设了;这里再写一份 lang.conf,
+# 让没有继承 env 的子进程(例如 cron 起的任务)也拿到 zh。
+RUN printf 'lang=zh\n' > /opt/srcradar/config/lang.conf && \
     echo "=== lang.conf ===" && cat /opt/srcradar/config/lang.conf
 
 # ---- wordlists (build 时 COPY,运行时直接用,不再拉取)----
@@ -285,6 +331,10 @@ COPY docker/wordlists/ /opt/srcradar/wordlists/
 RUN mkdir -p /usr/share/doc/srcradar/licenses && \
     curl -fsSL https://www.gnu.org/licenses/gpl-3.0.txt \
          -o /usr/share/doc/srcradar/licenses/GPL-3.0.txt
+
+# ---- ENScan 的许可证(Apache-2.0,来自构建时 clone 的 mirror)----
+COPY --from=builder /out-license/ENScan_GO-LICENSE \
+     /usr/share/doc/srcradar/licenses/ENScan_GO-LICENSE
 
 # ---- 6) entrypoint + 元数据 ----
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -13,10 +13,8 @@
 .gitignore
 
 # ---- vendored upstream ----
-# db_align 与 ymicp 不属于本次发布范围:整个模块目录排除,构建上下文里
-# 就没有它们(Dockerfile 里也会再删一次,双保险)。
-modules/public/db_align/
-modules/public/ymicp/
+# db_align 的 ENScan_GO vendor:构建期由 Dockerfile clone,不入 context。
+modules/public/db_align/ENScan_GO/
 # pdtm 的 vendor: cdncheck(本仓 in-tree,go.mod replace 指向 ../cdncheck)
 modules/main/pdtm/cdncheck/
 
@@ -60,7 +58,9 @@ modules/main/daily/.lock
 modules/main/daily/logs/
 modules/public/db_align/logs/
 modules/public/db_align/.claude/
+modules/public/db_align/bin/
 modules/public/ymicp/logs/
+modules/public/ymicp/__pycache__/
 
 # ---- Python caches ----
 __pycache__/
