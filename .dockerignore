@@ -1,124 +1,162 @@
 # ============================================================================
-# .dockerignore — keep the build context small
+# .dockerignore — what the build context of the image may NOT contain
 #
-# srcradar build context = current repo root (Dockerfile expects modules/ at
-# root, srcradar dispatcher, etc.). We exclude:
-#   - everything gitignored (.gitignore is source of truth for vendor/build)
-#   - Python caches
-#   - local data, logs, configs
+# .gitignore is the source of truth for "what is not source code". This file
+# mirrors EVERY rule of it, plus the rules that only make sense for a build
+# context. A rule that is added to .gitignore belongs here as well.
+#
+# WHY THE "**/" PREFIX (the reason this file exists next to .gitignore):
+#   - a gitignore pattern without a slash matches at EVERY depth: "logs/"
+#     matches modules/main/daily/logs/ as well
+#   - a dockerignore pattern is matched against the path relative to the
+#     context root, so "logs/" matches the top level ONLY
+# A rule that was copied over unchanged therefore stops working one directory
+# down. The Dockerfile copies the whole tree with "COPY modules", so the
+# .dockerignore is the only gate for everything under modules/: that is how
+# the runtime leftovers of the working tree (the health logs of the build
+# host, the __pycache__ with the absolute build path of the host inside it)
+# ended up in the image. Every rule that gitignore matches at any depth
+# carries the "**/" prefix here.
+#
+# The rule set is checked by tests/verify_image.sh.
 # ============================================================================
 
-# ---- git (rebuild context has no need) ----
-.git
+# ---------------------------------------------------------------------------
+# 1. only for the build context
+# ---------------------------------------------------------------------------
+.git/
 .gitignore
+.github/
+assets/
 
-# ---- vendored upstream ----
-# db_align 的 ENScan_GO vendor:构建期由 Dockerfile clone,不入 context。
-modules/public/db_align/ENScan_GO/
-# pdtm 的 vendor: cdncheck(本仓 in-tree,go.mod replace 指向 ../cdncheck)
-modules/main/pdtm/cdncheck/
-
-# ---- srcradar 自己 vendor 的上游源码(.vendor/ 不进 git 但需要进 image)----
-# 不排除 .vendor/ 本身(Dockerfile step 4 COPY 它)
-# 但要剥掉 .vendor/ 内的 .claude/ 和 .git/ (如果有)
-.vendor/**/.claude/
-.vendor/**/.git/
-.vendor/**/code.bak.*
-
-# ---- build artifacts ----
-modules/main/pdtm/bin/
-modules/public/db_align/bin/
-modules/main/pdtm/cdnmatch/cdncheck
-**/*.test
-**/*.out
-
-# ---- runtime data (generated, not source) ----
-modules/main/db/*.sqlite3*
-modules/main/db/recon.sqlite3*
-scan_results/
-scan_outputs/
-logs/
-*.log
-# The runtime files of the pdtm module. They are gitignored, so they sit in
-# the source tree as leftovers of a previous run; the build context copies
-# them and the image then refuses to run ("leftover runtime files of a
-# previous run were detected in the pdtm CWD").
-modules/main/pdtm/alive.txt
-modules/main/pdtm/alterx.txt
-modules/main/pdtm/dnsx_output.txt
-modules/main/pdtm/scan_results/
-modules/main/pdtm/scan_outputs/
-modules/main/pdtm/target.txt
-modules/main/pdtm/exclude.txt
-modules/main/pdtm/wildcard.txt
-modules/main/pdtm/no_wildcard.txt
-modules/main/daily/reports/
-modules/main/daily/snapshots/2*.json
-modules/main/daily/.lock
-modules/main/daily/logs/
-modules/public/db_align/logs/
-modules/public/db_align/.claude/
-modules/public/db_align/bin/
-modules/public/ymicp/logs/
-modules/public/ymicp/__pycache__/
-
-# ---- Python caches ----
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# ---- editor / IDE ----
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# ---- temp / backup ----
-*.bak
-*.orig
-*.rej
-*.tmp
-.tmp/
-
-# ---- Hermes / Claude agent workspace (NEVER ship into image) ----
-.hermes/
-
-# ---- private modules (per .gitignore: future internal only) ----
-modules/private/*
-!modules/private/.gitkeep
-
-# ---- the standalone repos (cloned inside the image, not in the context) ----
-modules/public/srcradar-mcp-server/
-modules/public/algo_diff_cpp/
-
-# ---- local config (user-specific; mount at runtime) ----
-config/*
-!config/.gitkeep
-*.local.yaml
-*.local.yml
-.env
-.env.*
-
-# ---- docs / extras (not needed in image; image is executable, not docs) ----
+# the docs of the repository root (the image ships the terms, not the rest)
 *.md
 !README.md
 !LICENSE
 !NOTICE
 !TERMS_ADDENDUM.md
 !TERMS_ADDENDUM_zh.md
-assets/
 
-# ---- CI files (not needed in image) ----
-.github/
+# the build files themselves (entrypoint.sh / healthcheck.sh / MODIFICATIONS.txt
+# are copied into the image on purpose)
+Dockerfile
+docker-compose.yml
 
-# ---- the docker files themselves (avoid self-reference in build context) ----
-# 但 entrypoint.sh / healthcheck.sh / MODIFICATIONS.txt 必须 COPY 进 image
-# 所以只排除顶层 Dockerfile 和 docker-compose.yml
-# Dockerfile:不 COPY(我们用 builder /out-bin + COPY modules/,不需要 Dockerfile)
-# docker-compose.yml:用户外部编排,不入 image
+# ---------------------------------------------------------------------------
+# 2. the mirror of .gitignore
+# ---------------------------------------------------------------------------
+
+# ---- 2.1 the vendored upstream forks ----
+modules/public/db_align/ENScan_GO/
+modules/main/pdtm/cdncheck/
+
+# ---- 2.2 the runtime products ----
+# the SQLite database (it holds the business data)
+modules/main/db/*.sqlite3
+modules/main/db/*.sqlite3-journal
+modules/main/db/*.sqlite3-wal
+modules/main/db/*.sqlite3-shm
+modules/main/db/recon.sqlite3*
+
+# the credentials and the runtime caches
+**/cookie.log
+**/.env
+**/.env.*
+**/*.local.yaml
+**/*.local.yml
+
+# the scan output / logs / snapshots
+**/scan_results/
+**/scan_outputs/
+**/logs/
+
+# ---- 2.3 the runtime products of the pdtm module ----
+modules/main/pdtm/alive.txt
+modules/main/pdtm/alterx.txt
+modules/main/pdtm/dnsx_output.txt
+modules/main/pdtm/exclude.txt
+modules/main/pdtm/target.txt
+modules/main/pdtm/no_wildcard.txt
+modules/main/pdtm/wildcard.txt
+modules/main/pdtm/targets.regex
+modules/main/pdtm/excludes.regex
+modules/main/pdtm/.lock
+modules/main/pdtm/scan_results/
+modules/main/pdtm/scan_outputs/
+modules/main/daily/reports/
+modules/main/daily/snapshots/2*.json
+modules/main/daily/.lock
+modules/main/daily/logs/
+modules/public/db_align/logs/
+modules/public/db_align/.claude/
+modules/public/ymicp/logs/
+
+# the logs, wherever they are
+**/*.log
+
+# ---- 2.4 the build products ----
+**/*.test
+**/*.out
+**/*.exe
+modules/main/pdtm/bin/
+modules/public/db_align/bin/
+modules/public/db_align/ENScan_GO/ENScan
+modules/main/pdtm/cdnmatch/cdncheck
+
+# ---- 2.5 the Python caches ----
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# ---- 2.6 the editors / IDEs ----
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/*~
+**/.DS_Store
+
+# ---- 2.7 the temporary / backup files ----
+**/*.bak
+**/*.orig
+**/*.rej
+**/*.tmp
+**/.tmp/
+
+# ---- 2.8 the agent workspace (never ship) ----
+**/.hermes/
+
+# ---- 2.9 the private module directory ----
+modules/private/*
+!modules/private/.gitkeep
+
+# ---- 2.10 the upstream dependencies ----
+# .vendor/ itself stays in the context: the Dockerfile copies it
+.vendor/**/.claude/
+.vendor/**/.git/
+.vendor/**/code.bak.*
+
+# ---- 2.11 the standalone repos (cloned inside the image) ----
+modules/public/srcradar-mcp-server/
+modules/public/algo_diff_cpp/
+modules/public/srcradar-algo-diff-cpp/
+
+# ---- 2.12 the internal deployment script (not for OSS) ----
+**/install-internal.sh
+
+# ---- 2.13 the local configuration (the operator fills it in) ----
+config/*
+!config/.gitkeep
+modules/public/katana/config/katana.conf
+modules/public/notify/config/notify.conf
+modules/public/notify/config/notify.conf.bak
+modules/public/health/config/health.conf
+modules/public/health/.lock
+modules/public/http/config/http.conf
+
+# ---- 2.14 the CI fixture backups ----
+tests/fixtures/.ci-originals/
