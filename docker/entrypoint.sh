@@ -47,6 +47,19 @@ MCP_PORT="${MCP_PORT:-8764}"
 MCP_HOST="${MCP_HOST:-0.0.0.0}"
 mkdir -p "$DB_DIR"
 
+# ---- /tmp must exist and be world writable ----
+# The pipeline builds its scratch files with mktemp, and mktemp fails
+# with "No such file or directory" when /tmp is gone. The base image
+# ships /tmp, but a container can lose it (a manual cleanup of the
+# scratch space, a volume mounted over it, a tool that wipes it), and
+# then every scan dies on the first mktemp. Recreating it here costs
+# nothing and makes the image self healing on restart.
+if [ ! -d /tmp ]; then
+    warn "/tmp is missing, it is recreated (1777)"
+    mkdir -p /tmp
+fi
+chmod 1777 /tmp
+
 log()  { printf '[entrypoint] %s\n' "$*"; }
 warn() { printf '[entrypoint][warn] %s\n' "$*" >&2; }
 err()  { printf '[entrypoint][err]  %s\n' "$*" >&2; }
