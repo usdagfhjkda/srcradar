@@ -104,25 +104,24 @@ jobs:
       - name: the variant axes
         run: |
           set -euo pipefail
+          # the variables are plain shell variables here: a value written
+          # to $GITHUB_ENV only reaches the NEXT step, so a same step
+          # read of ${SUFFIX} would fail under set -u.
           case "${{ matrix.variant }}" in
-            en)
-              echo "LANG=en"         >> "$GITHUB_ENV"
-              echo "RESOLVER=global" >> "$GITHUB_ENV"
-              echo "WITH_DBALIGN=0"  >> "$GITHUB_ENV"
-              echo "WITH_YMICP=0"    >> "$GITHUB_ENV"
-              echo "SUFFIX="        >> "$GITHUB_ENV"
-              ;;
-            zh)
-              echo "LANG=zh"         >> "$GITHUB_ENV"
-              echo "RESOLVER=cn"     >> "$GITHUB_ENV"
-              echo "WITH_DBALIGN=1"  >> "$GITHUB_ENV"
-              echo "WITH_YMICP=1"    >> "$GITHUB_ENV"
-              echo "SUFFIX=_zh"      >> "$GITHUB_ENV"
-              ;;
+            en) LANG=en; RESOLVER=global; WITH_DBALIGN=0; WITH_YMICP=0; SUFFIX="" ;;
+            zh) LANG=zh; RESOLVER=cn;     WITH_DBALIGN=1; WITH_YMICP=1; SUFFIX=_zh ;;
             *) echo "unknown variant"; exit 1 ;;
           esac
-          echo "VERSION=${{ needs.plan.outputs.version }}" >> "$GITHUB_ENV"
-          echo "TAG=srcradar:${{ needs.plan.outputs.version }}${SUFFIX}" >> "$GITHUB_ENV"
+          {
+            echo "LANG=${LANG}"
+            echo "RESOLVER=${RESOLVER}"
+            echo "WITH_DBALIGN=${WITH_DBALIGN}"
+            echo "WITH_YMICP=${WITH_YMICP}"
+            echo "SUFFIX=${SUFFIX}"
+            echo "VERSION=${{ needs.plan.outputs.version }}"
+            echo "TAG=srcradar:${{ needs.plan.outputs.version }}${SUFFIX}"
+          } >> "$GITHUB_ENV"
+          echo "variant=${{ matrix.variant }} lang=${LANG} resolver=${RESOLVER} suffix=${SUFFIX}"
 
       - name: set up Docker Buildx
         uses: docker/setup-buildx-action@v3

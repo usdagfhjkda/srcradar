@@ -47,6 +47,10 @@ MCP_PORT="${MCP_PORT:-8764}"
 MCP_HOST="${MCP_HOST:-0.0.0.0}"
 mkdir -p "$DB_DIR"
 
+log()  { printf '[entrypoint] %s\n' "$*"; }
+warn() { printf '[entrypoint][warn] %s\n' "$*" >&2; }
+err()  { printf '[entrypoint][err]  %s\n' "$*" >&2; }
+
 # ---- /tmp must exist and be world writable ----
 # The pipeline builds its scratch files with mktemp, and mktemp fails
 # with "No such file or directory" when /tmp is gone. The base image
@@ -59,10 +63,6 @@ if [ ! -d /tmp ]; then
     mkdir -p /tmp
 fi
 chmod 1777 /tmp
-
-log()  { printf '[entrypoint] %s\n' "$*"; }
-warn() { printf '[entrypoint][warn] %s\n' "$*" >&2; }
-err()  { printf '[entrypoint][err]  %s\n' "$*" >&2; }
 
 # ---- 0.5) symlink PD tools into $HOME/.pdtm/go/bin (legacy default) ----
 # scanner.sh / scan.sh hardcode $HOME/.pdtm/go/bin/<tool> paths.

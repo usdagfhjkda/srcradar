@@ -157,6 +157,8 @@ RUN git clone --depth 1 https://github.com/blechschmidt/massdns.git /tmp/massdns
     cd /tmp/massdns && make && \
     cp bin/massdns /out-bin/massdns && \
     chmod +x /out-bin/massdns && \
+    mkdir -p /out-license && \
+    cp LICENSE /out-license/GPL-3.0.txt && \
     rm -rf /tmp/massdns
 
 # ---- 4) algo_diff_cpp(C++ 核心,独立仓)----
@@ -442,9 +444,13 @@ COPY docker/wordlists/ /opt/srcradar/wordlists/
 
 # ---- 第三方二进制的许可证全文 (GPL-3.0 section 6)----
 # massdns 是镜像里唯一由 GPL-3.0 源码构建的二进制,许可证须随其分发。
-RUN mkdir -p /usr/share/doc/srcradar/licenses && \
-    curl -fsSL https://www.gnu.org/licenses/gpl-3.0.txt \
-         -o /usr/share/doc/srcradar/licenses/GPL-3.0.txt
+RUN --mount=from=builder,source=/out-license,target=/out-license,ro \
+    if [ ! -f /out-license/GPL-3.0.txt ]; then \
+        echo "the GPL-3.0 license of massdns is missing"; exit 1; \
+    fi; \
+    mkdir -p /usr/share/doc/srcradar/licenses && \
+    cp /out-license/GPL-3.0.txt /usr/share/doc/srcradar/licenses/GPL-3.0.txt && \
+    echo "the GPL-3.0 license of massdns is in the image"
 
 # ---- ENScan 的许可证(Apache-2.0,来自构建时 clone 的 mirror)----
 # The file only exists in the variant that builds ENScan, so it is mounted
