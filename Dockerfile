@@ -161,22 +161,13 @@ RUN git clone --depth 1 https://github.com/blechschmidt/massdns.git /tmp/massdns
 
 # ---- 4) algo_diff_cpp(C++ 核心,独立仓)----
 # 它是 srcradar 的独立仓,主仓的 modules/public/ 下没有它的目录。
-# 构建需要 g++/cmake/make + libsqlite3-dev/zlib1g-dev,还要拉两个 vendor
-# (rapidfuzz v3.3.2 / simdjson v3.9.5,pin 在它自己的 install.sh 里)。
-# 编译产物是 bin/algo_diff_cpp,runtime 直接用这个二进制。
-# libsimdjson-dev 是 algo_diff_cpp 的 check_deps 检查的包,但它自己的
-# apt_install 列表里没有(上游脚本的疏漏),所以这里预先装好,
-# 免得 install.sh 在 check_deps 上失败。
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake libsqlite3-dev zlib1g-dev libsimdjson-dev \
-        git ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && git clone --depth 1 "${ALGO_DIFF_CPP_REPO}" /tmp/algo_diff_cpp \
-    && cd /tmp/algo_diff_cpp \
-    && bash install.sh --yes \
-    && cp bin/algo_diff_cpp /out-bin/algo_diff_cpp \
-    && chmod +x /out-bin/algo_diff_cpp \
-    && rm -rf /tmp/algo_diff_cpp
+#
+# It is compiled in the cxx-builder stage below, not here: the binary is
+# linked against the C library of the machine that builds it, and this
+# stage is Debian 13 (glibc 2.41, libstdc++ 3.4.32) while the runtime is
+# Ubuntu 22.04 (glibc 2.35, libstdc++ 3.4.30). A binary built here dies
+# in the image with "version `GLIBC_2.38' not found" and the judgement of
+# a change never runs (every change_type stays 0).
 
 # ---- 4.5) db_align(Go orchestrator; modernc.org/sqlite 纯 Go,无 CGO)----
 # The module of the tree, built from its own source. The binary lands at
@@ -234,6 +225,29 @@ RUN mkdir -p /out /out-bin /out-license && \
     echo "=== /out-bin count ===" && ls /out-bin/ | wc -l
 
 # ----------------------------------------------------------------------------
+# Stage 1b: the C++ core, compiled against the runtime's C library
+# ----------------------------------------------------------------------------
+FROM ubuntu:22.04 AS cxx-builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG ALGO_DIFF_CPP_REPO=https://github.com/usdagfhjkda/srcradar-algo-diff-cpp.git
+# libsimdjson-dev is a package the check_deps of algo_diff_cpp checks but
+# its own apt_install list does not install (an upstream slip), so it is
+# installed here to keep the check_deps of the module happy.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake libsqlite3-dev zlib1g-dev libsimdjson-dev \
+        git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /out-bin \
+    && git clone --depth 1 "${ALGO_DIFF_CPP_REPO}" /tmp/algo_diff_cpp \
+    && cd /tmp/algo_diff_cpp \
+    && bash install.sh --yes \
+    && cp bin/algo_diff_cpp /out-bin/algo_diff_cpp \
+    && chmod +x /out-bin/algo_diff_cpp \
+    && mkdir -p /out-lib && cp lib/algo_diff_reverify.py /out-lib/ \
+    && rm -rf /tmp/algo_diff_cpp
+
+# ----------------------------------------------------------------------------
 # Stage 2: runtime
 # ----------------------------------------------------------------------------
 FROM ubuntu:22.04 AS runtime
@@ -275,13 +289,20 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone &
         curl \
         git \
     && rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /opt/srcradar/{bin,modules,logs,reports,snapshots,scan_results,config} && \
+    mkdir -p /opt/srcradar/bin /opt/srcradar/modules /opt/srcradar/logs \
+             /opt/srcradar/reports /opt/srcradar/snapshots \
+             /opt/srcradar/scan_results /opt/srcradar/config && \
     mkdir -p /data && \
     chmod 755 /opt/srcradar /data
 
 # ---- 2) 拷贝 builder 产物(pdtm -ia 拉的 PD 工具 + 自建 binary)----
 # 遍历 /out-bin 全部拷贝;不再硬编码文件名,适应 pdtm 升级时新增工具
 COPY --from=builder /out-bin/ /opt/srcradar/bin/
+
+# the C++ core comes from the cxx-builder: it is linked against the C
+# library of the runtime, not of the golang builder
+COPY --from=cxx-builder /out-bin/algo_diff_cpp /opt/srcradar/bin/algo_diff_cpp
+COPY --from=cxx-builder /out-lib /opt/srcradar/algo_diff_cpp_lib
 
 # ---- 3) 拷贝 srcradar 源码 ----
 COPY srcradar          /opt/srcradar/srcradar
@@ -360,10 +381,19 @@ RUN --mount=from=builder,source=/out,target=/out,ro \
 #   ALGO_DIFF_CPP_BIN="$RECON_ROOT/public/algo_diff_cpp/bin/algo_diff_cpp"
 # 所以二进制必须落在 modules/public/algo_diff_cpp/bin/ 下,名字也不能改。
 # /opt/srcradar/bin/algo_diff_cpp 是同一份文件的副本,方便直接调用。
+# The core spawns the python helper ../lib/algo_diff_reverify.py, resolved
+# from <module>/bin/ to <module>/lib/. The image has to carry that helper
+# (and the wrapper next to it), not only the binary: without it the reverify
+# stages die and every change_type stays at its intermediate value.
 RUN mkdir -p /opt/srcradar/modules/public/algo_diff_cpp/bin \
-    && cp /opt/srcradar/bin/algo_diff_cpp /opt/srcradar/modules/public/algo_diff_cpp/bin/algo_diff_cpp \
-    && chmod +x /opt/srcradar/modules/public/algo_diff_cpp/bin/algo_diff_cpp \
-    && ls -l /opt/srcradar/modules/public/algo_diff_cpp/bin/
+             /opt/srcradar/modules/public/algo_diff_cpp/lib && \
+    cp /opt/srcradar/bin/algo_diff_cpp /opt/srcradar/modules/public/algo_diff_cpp/bin/algo_diff_cpp && \
+    chmod +x /opt/srcradar/modules/public/algo_diff_cpp/bin/algo_diff_cpp && \
+    cp /opt/srcradar/algo_diff_cpp_lib/algo_diff_reverify.py \
+       /opt/srcradar/modules/public/algo_diff_cpp/lib/ && \
+    chmod +x /opt/srcradar/modules/public/algo_diff_cpp/lib/algo_diff_reverify.py && \
+    echo "=== the algo_diff_cpp module in the image ===" && \
+    ls -l /opt/srcradar/modules/public/algo_diff_cpp/bin/ /opt/srcradar/modules/public/algo_diff_cpp/lib/
 
 # ---- 3.3) mcp-server: 独立仓,构建期 clone ----
 # 它是 stdlib-only 的 python daemon(daemon.py / whitelist.json / tools_schema.py),
@@ -383,10 +413,18 @@ RUN git clone --depth 1 "${MCP_SERVER_REPO}" /tmp/srcradar-mcp-server \
 # pdtm.conf 的 resolver_set 决定用哪套 resolver。
 # resolvers/cn 随仓分发在 modules/main/pdtm/resolvers/cn;
 # 这里在构建期固化,让容器里的默认值就是 cn,不依赖运行时交互。
+# The paths of the PD tools are written too: the judgement core spawns the
+# reverify helper, and the helper needs httpx (it probes the hosts that
+# changed). Without httpx_bin in the conf the helper stops with
+# "httpx_bin 缺失或不可执行" and the change_type stays at its intermediate
+# value. The entrypoint symlinks the tools into $HOME/.pdtm/go/bin, which
+# is where the tools of the image live.
 RUN mkdir -p /opt/srcradar/config && \
-    printf 'resolver_set=%s\nresolvers_file=%s\n' \
+    printf 'resolver_set=%s\nresolvers_file=%s\ndnsx_bin=%s\nhttpx_bin=%s\n' \
         "${SRCDAR_RESOLVER}" \
         "/opt/srcradar/modules/main/pdtm/resolvers/${SRCDAR_RESOLVER}" \
+        "/root/.pdtm/go/bin/dnsx" \
+        "/root/.pdtm/go/bin/httpx" \
         > /opt/srcradar/config/pdtm.conf && \
     echo "=== pdtm.conf ===" && cat /opt/srcradar/config/pdtm.conf
 
