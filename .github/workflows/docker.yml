@@ -1,15 +1,18 @@
 name: docker
 
 on:
-  # The image is built by hand only. The build of every push and of every
-  # pull request costs a lot of CI time (two architectures, a multi stage
-  # build that compiles the whole tool chain), and the image only matters
-  # at a release.
+  # The image is published when a version is released (a tag push) and on
+  # demand. The build of every push and of every pull request costs a lot
+  # of CI time (two architectures, a multi stage build that compiles the
+  # whole tool chain), and the image only matters at a release.
   #
-  # A manual run on a tag publishes the semver tag, a manual run on a
-  # branch publishes the dev-<date>-<sha> tag and the latest one. The
-  # login and the push are guarded by `github.event_name !=
-  # 'pull_request'`, so a manual run still pushes.
+  # The tag names the variant of the build:
+  #   v1.0.0     -> English  (en, global resolver, no db_align, no ymicp)
+  #   v1.0.0_zh  -> Chinese  (zh, cn resolver, with db_align and ymicp)
+  # A manual run on a branch publishes the dev-<date>-<sha> tag.
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:        # manual trigger
 
 env:
@@ -29,15 +32,40 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract version from tag
+      # The version and the variant of the build. A tag names its variant;
+      # the suffix _zh is the Chinese one. The build args are what the
+      # Dockerfile selects the variant with, so they have to travel with
+      # the version: without them the published image would carry the
+      # defaults of the Dockerfile (the Chinese ones).
+      - name: Extract the version and the variant
         id: version
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
             VERSION="dev-$(date +%Y%m%d)-${GITHUB_SHA::7}"
           fi
+          case "$VERSION" in
+            *_zh)
+              LANG=zh; RESOLVER=cn; WITH_DBALIGN=1; WITH_YMICP=1
+              ;;
+            *)
+              LANG=en; RESOLVER=global; WITH_DBALIGN=0; WITH_YMICP=0
+              ;;
+          esac
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "LANG=${LANG}" >> "$GITHUB_OUTPUT"
+          echo "RESOLVER=${RESOLVER}" >> "$GITHUB_OUTPUT"
+          echo "WITH_DBALIGN=${WITH_DBALIGN}" >> "$GITHUB_OUTPUT"
+          echo "WITH_YMICP=${WITH_YMICP}" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=${VERSION}"
+            echo "language=${LANG}"
+            echo "resolver=${RESOLVER}"
+            echo "db_align=${WITH_DBALIGN}"
+            echo "ymicp=${WITH_YMICP}"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -60,6 +88,10 @@ jobs:
           build-args: |
             SRCRADAR_VERSION=${{ steps.version.outputs.VERSION }}
             PDTM_VERSION=v0.1.5
+            SRCDAR_LANG=${{ steps.version.outputs.LANG }}
+            SRCDAR_RESOLVER=${{ steps.version.outputs.RESOLVER }}
+            SRCDAR_WITH_DBALIGN=${{ steps.version.outputs.WITH_DBALIGN }}
+            SRCDAR_WITH_YMICP=${{ steps.version.outputs.WITH_YMICP }}
           labels: |
             org.opencontainers.image.title=srcradar
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -71,7 +103,7 @@ jobs:
         run: |
           docker image inspect "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}" \
             --format='size={{.Size}}' | tee /tmp/size.txt
-          SIZE=$(cut -d= -f2 /tmp/size.txt)
+          SIZE=$(cut -d= /tmp/size.txt | tail -1)
           echo "Image size: $SIZE bytes"
           # warn if > 400MB (sanity; not a hard fail)
           if [ "$SIZE" -gt 419430400 ]; then

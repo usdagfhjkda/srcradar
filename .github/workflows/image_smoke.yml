@@ -3,11 +3,16 @@ name: image_smoke
 # Build the image and run the smoke matrix against it.
 #
 # The build compiles the whole toolchain (Go, C++, the vendored mirrors),
-# so it is expensive: it runs on demand, not on every push. The release
-# tarballs come out of this workflow as artifacts.
+# so it is expensive. It runs when a version is released (a tag push) and
+# on demand:
+#
+#   - a tag push builds exactly the variant the tag names:
+#       v1.0.0     -> English  (en, global resolver, no db_align, no ymicp)
+#       v1.0.0_zh  -> Chinese  (zh, cn resolver, with db_align and ymicp)
+#   - a manual run picks the variant(s) itself.
 #
 # What it does:
-#   1. builds the variant(s) the run asks for
+#   1. builds the variant(s)
 #   2. runs tests/verify_image.sh against each image: the component set,
 #      the language, the resolver set, the extra binaries and their paths
 #   3. runs tests/run_smoke_in_image.sh: the 11-port x 3-round matrix of
@@ -21,6 +26,9 @@ name: image_smoke
 # and the contract checks must pass.
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       variant:
@@ -43,42 +51,78 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  SRCRADAR_VERSION: 1.0.0
-
 jobs:
+  # ---------------------------------------------------------------------------
+  # plan: what to build.
+  # A tag names its variant; a manual run picks it.
+  # ---------------------------------------------------------------------------
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - name: the variants to build
+        id: plan
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+            case "$VERSION" in
+              *_zh) VARIANTS='["zh"]' ;;
+              *)    VARIANTS='["en"]' ;;
+            esac
+            echo "the tag ${TAG} names the version ${VERSION}"
+          else
+            VERSION="1.0.0"
+            case "${{ inputs.variant }}" in
+              en)   VARIANTS='["en"]' ;;
+              zh)   VARIANTS='["zh"]' ;;
+              *)    VARIANTS='["en","zh"]' ;;
+            esac
+            echo "the manual run asks for ${{ inputs.variant }}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"variant\":${VARIANTS}}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # image: build, check, smoke, save.
+  # ---------------------------------------------------------------------------
   image:
-    name: image (${{ inputs.variant }})
+    name: image (${{ matrix.variant }})
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      matrix:
-        variant:
-          - ${{ inputs.variant == 'both' && 'en' || inputs.variant }}
-          - ${{ inputs.variant == 'both' && 'zh' || inputs.variant }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
       - name: the variant axes
         run: |
+          set -euo pipefail
           case "${{ matrix.variant }}" in
             en)
-              echo "LANG=en"        >> "$GITHUB_ENV"
+              echo "LANG=en"         >> "$GITHUB_ENV"
               echo "RESOLVER=global" >> "$GITHUB_ENV"
               echo "WITH_DBALIGN=0"  >> "$GITHUB_ENV"
               echo "WITH_YMICP=0"    >> "$GITHUB_ENV"
+              echo "SUFFIX="        >> "$GITHUB_ENV"
               ;;
             zh)
-              echo "LANG=zh"        >> "$GITHUB_ENV"
-              echo "RESOLVER=cn"    >> "$GITHUB_ENV"
+              echo "LANG=zh"         >> "$GITHUB_ENV"
+              echo "RESOLVER=cn"     >> "$GITHUB_ENV"
               echo "WITH_DBALIGN=1"  >> "$GITHUB_ENV"
               echo "WITH_YMICP=1"    >> "$GITHUB_ENV"
+              echo "SUFFIX=_zh"      >> "$GITHUB_ENV"
               ;;
             *) echo "unknown variant"; exit 1 ;;
           esac
-          echo "TAG=srcradar:${SRCRADAR_VERSION}_${LANG}"
-          echo "TAG=srcradar:${SRCRADAR_VERSION}_${LANG}" >> "$GITHUB_ENV"
+          echo "VERSION=${{ needs.plan.outputs.version }}" >> "$GITHUB_ENV"
+          echo "TAG=srcradar:${{ needs.plan.outputs.version }}${SUFFIX}" >> "$GITHUB_ENV"
 
       - name: set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -92,7 +136,7 @@ jobs:
           load: true
           tags: ${{ env.TAG }}
           build-args: |
-            SRCRADAR_VERSION=${{ env.SRCRADAR_VERSION }}
+            SRCRADAR_VERSION=${{ needs.plan.outputs.version }}
             SRCDAR_LANG=${{ env.LANG }}
             SRCDAR_RESOLVER=${{ env.RESOLVER }}
             SRCDAR_WITH_DBALIGN=${{ env.WITH_DBALIGN }}
@@ -105,22 +149,23 @@ jobs:
 
       - name: the smoke matrix and the liveness checks
         env:
-          SOAK_SECONDS: ${{ inputs.soak_seconds }}
+          SOAK_SECONDS: ${{ inputs.soak_seconds || '90' }}
         run: bash tests/run_smoke_in_image.sh "${{ env.TAG }}" "${{ env.LANG }}" "${{ env.RESOLVER }}"
 
       - name: the tarball
         run: |
-          docker save "${{ env.TAG }}" -o "srcradar-${SRCRADAR_VERSION}_${LANG}.tar"
-          sha256sum "srcradar-${SRCRADAR_VERSION}_${LANG}.tar" \
-            > "srcradar-${SRCRADAR_VERSION}_${LANG}.tar.sha256"
-          cat "srcradar-${SRCRADAR_VERSION}_${LANG}.tar.sha256"
-          ls -lh "srcradar-${SRCRADAR_VERSION}_${LANG}.tar"
+          set -euo pipefail
+          NAME="srcradar-${{ needs.plan.outputs.version }}${SUFFIX}.tar"
+          docker save "${{ env.TAG }}" -o "$NAME"
+          sha256sum "$NAME" > "$NAME.sha256"
+          cat "$NAME.sha256"
+          ls -lh "$NAME"
 
       - name: upload the tarball
         uses: actions/upload-artifact@v4
         with:
-          name: srcradar-${{ env.SRCRADAR_VERSION }}_${{ env.LANG }}
+          name: srcradar-${{ needs.plan.outputs.version }}${{ env.SUFFIX }}
           path: |
-            srcradar-${{ env.SRCRADAR_VERSION }}_${{ env.LANG }}.tar
-            srcradar-${{ env.SRCRADAR_VERSION }}_${{ env.LANG }}.tar.sha256
+            srcradar-${{ needs.plan.outputs.version }}${{ env.SUFFIX }}.tar
+            srcradar-${{ needs.plan.outputs.version }}${{ env.SUFFIX }}.tar.sha256
           retention-days: 30
