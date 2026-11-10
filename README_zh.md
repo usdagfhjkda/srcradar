@@ -89,9 +89,10 @@ cd srcradar
 #    DB 路径优先级(由 ./srcradar 顶部统一处理):
 #      1) CLI --db / $RECON_DB env
 #      2) config/db.conf 的 recon_db_path(./install.sh 末尾自动生成)
-#      3) /opt/srcradar/db/recon.sqlite3(docker image 内固定)
+#      3) /opt/srcradar/db/recon.sqlite3(旧版镜像的位置)
 #      4) /data/recon.sqlite3(兼容老 mount)
-#      5) 模块默认(<repo>/modules/main/db/recon.sqlite3)
+#      5) 模块默认(<repo>/modules/main/db/recon.sqlite3) - 1.0.0 镜像走的是这条:
+#         DB 就住在 db 模块旁边
 
 # 4. (可选) 如需 enscan 插件,详见 [db_align/README.md](./modules/public/db_align/README.md) §安装
 #    (标 LOCKED tag,需人工授权;运行时半自动介入 — cookie 失效自愈 / 缓存清理,
@@ -147,21 +148,25 @@ echo www.scanme.sh > ~/scope/target.txt
 
 ## Docker 启动
 
-> 单容器把 srcradar 全栈跑起来:DB 持久化到 named volume,业务 scope 从 bind-mount 目录喂入,dashboard 默认仅 loopback 暴露(下文给一条 `--host 0.0.0.0` 的命令用于同主机访问)。
+> 单容器把 srcradar 全栈跑起来:DB 持久化到 named volume,业务 scope 从 bind-mount 目录喂入,dashboard 和 MCP daemon 默认仅 loopback 暴露。
 
 ```bash
-# 1. 加载本地镜像(从 srcradar-0.1.0.tar)
-sudo docker load -i ~/srcradar-0.1.0.tar
+# 1. 加载本地镜像(从 srcradar-1.0.0_zh.tar)
+sudo docker load -i ~/srcradar-1.0.0_zh.tar
 
 # 2. 启动容器
-#    -v ~/scope:/scope             target.txt / exclude.txt 输入目录
-#    -v srcradar-db:/opt/srcradar/db   DB 持久化(named volume,容器删了 DB 还在)
-#    -p 127.0.0.1:8765:8765        dashboard 仅本机可访问(防公网暴露)
+#    -v ~/scope:/scope                           target.txt / exclude.txt 输入目录
+#    -v srcradar-db:/opt/srcradar/modules/main/db   DB 持久化(named volume,容器删了 DB 还在)
+#    --tmpfs /tmp:rw,mode=1777                  流水线临时目录(mktemp),随容器销毁
+#    -p 127.0.0.1:8765:8765                      dashboard 仅本机可访问(防公网暴露)
+#    -p 127.0.0.1:8764:8764                      MCP daemon 仅本机可访问
 sudo docker run -d --name srcradar \
   -v ~/scope:/scope \
-  -v srcradar-db:/opt/srcradar/db \
+  -v srcradar-db:/opt/srcradar/modules/main/db \
+  --tmpfs /tmp:rw,mode=1777 \
   -p 127.0.0.1:8765:8765 \
-  srcradar:0.1.0
+  -p 127.0.0.1:8764:8764 \
+  srcradar:1.0.0_zh
 
 # 3. 进容器交互 shell
 sudo docker exec -it srcradar /bin/bash
@@ -176,13 +181,16 @@ srcradar manage add_business -n test -i /scope
 # 6. 跑该业务的 pdtm 流水线(dnsx + scanner.sh + import)
 srcradar daily run_one_business test
 
-# 7. 起 dashboard(同主机访问用 --host 0.0.0.0;仅自己访问可省)
-srcradar daily dashboard --host 0.0.0.0
+# 7. 检查服务(镜像的 entrypoint 已经把它们拉起来了)
+curl http://127.0.0.1:8765/health    # dashboard
+curl http://127.0.0.1:8764/health    # MCP daemon
 ```
 
 > **端口暴露面**:`-p 127.0.0.1:8765:8765` 仅绑定 loopback,公网与内网其他机器都访问不到;要看 dashboard,从同主机 `curl http://127.0.0.1:8765/` 即可,或从远端走 SSH 隧道 (`ssh -L 8765:127.0.0.1:8765 user@<srcradar-host>`)。
 >
-> **DB 持久化**:`srcradar-db` 是 docker named volume,容器被 `docker rm` 后下次 `docker run -v srcradar-db:/opt/srcradar/db` 还能挂回同名 volume,业务数据不丢。需要看 DB 内容:`sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`。
+> **DB 持久化**:`srcradar-db` 是 docker named volume,挂在 `/opt/srcradar/modules/main/db`(DB 就住在 db 模块旁边,因为 dashboard 和 MCP daemon 都从那儿读)。首次启动时 Docker 会把镜像里该目录的内容(schema 和迁移脚本)预置进空卷,所以 `init-db` 仍能找到 schema;之后 DB 文件就在卷里,`docker rm` 之后数据不丢。需要看 DB 内容:`sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/modules/main/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`。
+>
+> **dashboard 和 MCP daemon 已经在跑了**:镜像的 entrypoint 会在容器内把 dashboard 起在 `0.0.0.0:8765`、MCP daemon 起在 `0.0.0.0:8764`,并注册 daily 定时任务和 dashboard watchdog。不要再手动起第二份(会报 "address already in use")。两个端口在宿主机侧都绑 `127.0.0.1`,只有本机能访问。
 >
 > **target.txt 一次性消费**:`add_business` 成功后会自动清理 `/scope/target.txt`(README 已知问题 §14);下次再喂 scope 直接重写 `/scope/target.txt` 重跑 `add_business` 即可。
 

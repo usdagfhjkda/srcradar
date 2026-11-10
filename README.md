@@ -91,9 +91,10 @@ cd srcradar
 #    The priority of the path of the DB (it is handled at the top of ./srcradar):
 #      1) CLI --db / $RECON_DB env
 #      2) the recon_db_path of config/db.conf (it is generated at the end of ./install.sh)
-#      3) /opt/srcradar/db/recon.sqlite3 (it is fixed inside the docker image)
+#      3) /opt/srcradar/db/recon.sqlite3 (the legacy spot of the older images)
 #      4) /data/recon.sqlite3 (it is compatible with the old mount)
-#      5) the default of the modules (<repo>/modules/main/db/recon.sqlite3)
+#      5) the default of the modules (<repo>/modules/main/db/recon.sqlite3) - this
+#         is the one the 1.0.0 image uses: the DB sits next to the db module
 
 # once it is installed, look at what the dispatcher can do (it lists every pair of module/script, it is the cheat sheet of the usual ones)
 ./srcradar --list
@@ -142,20 +143,24 @@ The order of the resolution of the modules is `modules/private` → `modules/mai
 
 ## The startup with Docker
 
-> A single container runs the whole stack of srcradar: the database is persisted in a named volume, the scopes of the businesses are fed from a bind mount directory, and the dashboard is exposed on the loopback only by default (a command with `--host 0.0.0.0` is given below for an access from the same host).
+> A single container runs the whole stack of srcradar: the database is persisted in a named volume, the scopes of the businesses are fed from a bind mount directory, and the dashboard and the MCP daemon are exposed on the loopback only.
 
 ```bash
-# 1. load the local image (from srcradar-1.0.0.tar)
-sudo docker load -i ~/srcradar-1.0.0.tar
+# 1. load the local image (from srcradar-1.0.0_en.tar)
+sudo docker load -i ~/srcradar-1.0.0_en.tar
 
 # 2. start the container
-#    -v ~/scope:/scope             the input directory of target.txt / exclude.txt
-#    -v srcradar-db:/opt/srcradar/db   the persistence of the DB (a named volume, the DB stays when the container is removed)
-#    -p 127.0.0.1:8765:8765        the dashboard is only reachable from this machine (it avoids an exposure to the public network)
+#    -v ~/scope:/scope                           the input directory of target.txt / exclude.txt
+#    -v srcradar-db:/opt/srcradar/modules/main/db   the persistence of the DB (a named volume, the DB stays when the container is removed)
+#    --tmpfs /tmp:rw,mode=1777                  the scratch space of the pipeline (mktemp), wiped with the container
+#    -p 127.0.0.1:8765:8765                      the dashboard is only reachable from this machine (it avoids an exposure to the public network)
+#    -p 127.0.0.1:8764:8764                      the MCP daemon is only reachable from this machine
 sudo docker run -d --name srcradar \
   -v ~/scope:/scope \
-  -v srcradar-db:/opt/srcradar/db \
+  -v srcradar-db:/opt/srcradar/modules/main/db \
+  --tmpfs /tmp:rw,mode=1777 \
   -p 127.0.0.1:8765:8765 \
+  -p 127.0.0.1:8764:8764 \
   srcradar:1.0.0
 
 # 3. enter the interactive shell of the container
@@ -165,19 +170,22 @@ sudo docker exec -it srcradar /bin/bash
 srcradar --list
 
 # 5. feed an exact single subdomain + register the business
-echo www.example.com > /scope/target.txt
+echo www.scanme.sh > /scope/target.txt
 srcradar manage add_business -n test -i /scope
 
 # 6. run the pipeline of pdtm of that business (dnsx + scanner.sh + import)
 srcradar daily run_one_business test
 
-# 7. start the dashboard (use --host 0.0.0.0 for an access from the same host, you can leave it out if only you reach it)
-srcradar daily dashboard --host 0.0.0.0
+# 7. check the services (the entrypoint of the image already started them)
+curl http://127.0.0.1:8765/health    # the dashboard
+curl http://127.0.0.1:8764/health    # the MCP daemon
 ```
 
 > **The surface of the exposed ports**: `-p 127.0.0.1:8765:8765` binds the loopback only, neither the public network nor the other machines of the intranet can reach it; to see the dashboard, `curl http://127.0.0.1:8765/` from the same host is enough, or go through a tunnel of the SSH from a remote host (`ssh -L 8765:127.0.0.1:8765 user@<srcradar-host>`).
 >
-> **The persistence of the database**: `srcradar-db` is a docker named volume, and after the container was removed with `docker rm` the next `docker run -v srcradar-db:/opt/srcradar/db` mounts the volume of the same name again, so the data of the businesses is not lost. To see the content of the database: `sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`.
+> **The persistence of the database**: `srcradar-db` is a docker named volume mounted on `/opt/srcradar/modules/main/db`, where the DB lives (next to the db module, because that is where the dashboard and the MCP daemon look for it). On the first start the volume is filled with the content of that directory of the image (the schema and the migration scripts), so `init-db` still finds its schema; the DB itself is in the volume afterwards and survives `docker rm`. To see the content of the database: `sudo docker exec srcradar python3 -c "import sqlite3; c=sqlite3.connect('/opt/srcradar/modules/main/db/recon.sqlite3'); print(c.execute('SELECT * FROM web_subdomains').fetchall())"`.
+>
+> **The dashboard and the MCP daemon are already running**: the entrypoint of the image starts the dashboard on `0.0.0.0:8765` and the MCP daemon on `0.0.0.0:8764` inside the container, and it registers the crontab of the daily job and the dashboard watchdog. Do not start them a second time: a second dashboard fails with "address already in use". The host side of both mappings is `127.0.0.1`, so only the host reaches them.
 >
 > **The one time consumption of target.txt**: after the success of `add_business`, `/scope/target.txt` is cleaned up on its own; to feed the scopes again, write `/scope/target.txt` again and run `add_business` again.
 
