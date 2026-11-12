@@ -15,11 +15,11 @@
 <br>
 
 <p align="center">
-  <img src="./assets/dashboard-overview.png" alt="the overview of the srcradar dashboard" width="900">
+  <img src="./assets/dashboard-overview-en.png" alt="the overview of the srcradar dashboard" width="900">
 </p>
 
 <p align="center">
-  <em>The overview of the dashboard (127.0.0.1:8765, the 4 core tabs: Task Status / Site Details / Port Services / Risk Level)</em>
+  <em>The overview of the dashboard (127.0.0.1:8765, the 7 core tabs: Task Status / Site Details / Port Services / Risk Level / Subsidiaries / Mini Programs / WeChat Accounts)</em>
 </p>
 
 <br>
